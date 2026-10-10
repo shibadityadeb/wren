@@ -123,4 +123,24 @@ final class StoreTests: XCTestCase {
         XCTAssertEqual(c.originalText, "Submit something Friday")
         XCTAssertEqual(c.status, .pending)
     }
+
+    func testReclassificationWithdrawsDeadlineReminderButNotUserReminder() throws {
+        let cal = calendar("Asia/Kolkata")
+        let now = at(cal, 2026, 10, 8, 15)
+        let policy = ReminderPolicy(dateOnlyReminderHour: 10, calendar: cal)
+        let store = try WrenStore(url: nil)
+        let rules = Interpretation(kind: .commitment, title: "x", priority: .normal, deadline: at(cal, 2026, 10, 9), deadlineHasTime: false, note: nil)
+        let idea = Interpretation(kind: .idea, title: "x", priority: .normal, deadline: nil, deadlineHasTime: false, note: nil)
+
+        let a = try store.capture("x friday", source: .hotkey, now: now)
+        try store.applyInterpretation(rules, to: a, model: nil, reminderPolicy: policy, state: .awaiting, now: now)
+        XCTAssertNotNil(a.nextReminderAt)
+        try store.applyInterpretation(idea, to: a, model: "m", reminderPolicy: policy, now: now)
+        XCTAssertNil(a.nextReminderAt, "model said idea, so the rules-derived reminder is withdrawn")
+
+        let b = try store.capture("y friday", source: .hotkey, now: now)
+        try store.scheduleReminder(b, at: at(cal, 2026, 10, 8, 18), now: now)
+        try store.applyInterpretation(idea, to: b, model: "m", reminderPolicy: policy, now: now)
+        XCTAssertEqual(b.nextReminderAt, at(cal, 2026, 10, 8, 18), "user-chosen reminder is kept")
+    }
 }

@@ -114,21 +114,29 @@ public final class WrenStore {
     // MARK: Interpretation
 
     /// Applies an interpretation. Never overwrites manual edits or closed items.
+    /// - Parameter state: `.processed` for model output; `.awaiting` when only the
+    ///   deterministic rules ran (so a later model pass may still refine it).
     public func applyInterpretation(_ i: Interpretation, to c: Commitment, model: String?,
-                                    reminderPolicy: ReminderPolicy, now: Date = .now) throws {
+                                    reminderPolicy: ReminderPolicy, state: ProcessingState = .processed,
+                                    now: Date = .now) throws {
         guard c.processing != .manual, c.status == .pending else { return }
         c.kind = i.kind
         c.title = i.title
         c.priority = i.priority
         c.deadline = i.deadline
         c.deadlineHasTime = i.deadlineHasTime
-        c.processing = .processed
+        c.processing = state
         c.processingNote = i.note
         c.modelName = model
         log(c, .interpreted, at: now, note: model.map { "via \($0)" } ?? "rules only")
+        if c.reminderFromDeadline {
+            c.nextReminderAt = nil
+            c.reminderFromDeadline = false
+        }
         if c.nextReminderAt == nil, let r = reminderPolicy.initialReminder(for: c, now: now) {
             c.nextReminderAt = r
-            log(c, .reminderScheduled, at: now, note: "from deadline")
+            c.reminderFromDeadline = true
+            log(c, .reminderScheduled, at: now, note: "from deadline, \(Self.stamp(r))")
         }
         try save()
     }
@@ -171,6 +179,7 @@ public final class WrenStore {
         log(c, .edited, at: now)
         if c.status == .pending, e.nextReminderAt != c.nextReminderAt {
             c.nextReminderAt = e.nextReminderAt
+            c.reminderFromDeadline = false
             if let r = e.nextReminderAt { log(c, .reminderScheduled, at: now, note: Self.stamp(r)) }
         }
         try save()
@@ -198,6 +207,7 @@ public final class WrenStore {
         try requirePending(c, "snooze")
         guard until > now else { throw StoreError.invalidTransition(from: c.status, action: "snooze into the past") }
         c.nextReminderAt = until
+        c.reminderFromDeadline = false
         c.snoozeCount += 1
         log(c, .snoozed, at: now, note: Self.stamp(until))
         try save()
@@ -206,6 +216,7 @@ public final class WrenStore {
     public func scheduleReminder(_ c: Commitment, at date: Date, now: Date = .now) throws {
         try requirePending(c, "schedule a reminder for")
         c.nextReminderAt = date
+        c.reminderFromDeadline = false
         log(c, .reminderScheduled, at: now, note: Self.stamp(date))
         try save()
     }
@@ -224,6 +235,7 @@ public final class WrenStore {
     public func markReminderSent(_ c: Commitment, now: Date = .now) throws {
         c.lastReminderAt = now
         c.nextReminderAt = nil
+        c.reminderFromDeadline = false
         log(c, .reminderSent, at: now)
         try save()
     }

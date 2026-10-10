@@ -1,0 +1,271 @@
+import SwiftUI
+import WrenCore
+
+/// Compact menu-bar popover: a quick list, an editor, and settings. Not a dashboard.
+struct PopoverView: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        Group {
+            switch model.route {
+            case .list: ListPane(model: model)
+            case let .detail(id):
+                if let c = model.item(id) { ItemDetailView(model: model, item: c) } else { ListPane(model: model) }
+            case .settings: SettingsView(model: model)
+            }
+        }
+        .frame(width: 380)
+        .frame(minHeight: 200, maxHeight: 560)
+    }
+}
+
+struct ListPane: View {
+    @Bindable var model: AppModel
+    @State private var draft = ""
+    @State private var showClosed = false
+
+    var commitments: [Commitment] { model.pending.filter { $0.kind == .commitment } }
+    var others: [Commitment] { model.pending.filter { $0.kind != .commitment } }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            Divider()
+            if let msg = model.storeError ?? model.banner {
+                Notice(text: msg, systemImage: "exclamationmark.triangle")
+            }
+            if model.notificationStatus == .denied {
+                Notice(text: "Notifications are off for Wren. Due items appear here instead.", systemImage: "bell.slash",
+                       action: ("Open Settings", { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!) }))
+            } else if model.notificationStatus == .notDetermined {
+                Notice(text: "Allow notifications so Wren can remind you.", systemImage: "bell",
+                       action: ("Allow…", { model.requestNotificationPermission() }))
+            }
+            if let err = model.hotKeyError {
+                Notice(text: err + " Use the field below or the menu bar.", systemImage: "keyboard")
+            }
+
+            HStack(spacing: 8) {
+                Image(systemName: "plus").foregroundStyle(.secondary)
+                TextField("Add something…", text: $draft)
+                    .textFieldStyle(.plain)
+                    .onSubmit { if model.capture(draft, source: .popover) { draft = "" } }
+            }
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            Divider()
+
+            if model.pending.isEmpty && model.closed.isEmpty {
+                EmptyState(shortcut: model.hotKeyEnabled ? model.hotKeyDisplay : nil)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        if !model.dueUndelivered.isEmpty && !model.notifications.canDeliver {
+                            SectionLabel("Due now")
+                            ForEach(model.dueUndelivered) { Row(model: model, item: $0) }
+                        }
+                        if !commitments.isEmpty {
+                            SectionLabel("Commitments")
+                            ForEach(commitments) { Row(model: model, item: $0) }
+                        }
+                        if !others.isEmpty {
+                            SectionLabel("Ideas, questions and unsorted")
+                            ForEach(others) { Row(model: model, item: $0) }
+                        }
+                        if !model.closed.isEmpty {
+                            Button { withAnimation(.easeOut(duration: 0.15)) { showClosed.toggle() } } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "chevron.right").rotationEffect(.degrees(showClosed ? 90 : 0))
+                                    Text("Done and dropped")
+                                }
+                                .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 4)
+                            if showClosed { ForEach(model.closed) { Row(model: model, item: $0) } }
+                        }
+                    }
+                    .padding(.bottom, 8)
+                }
+            }
+            Divider()
+            footer
+        }
+    }
+
+    var header: some View {
+        HStack(spacing: 8) {
+            WrenMarkShape(compact: true).frame(width: 16, height: 16)
+            Text("Wren").font(.headline)
+            Spacer()
+            ModelBadge(status: model.modelStatus)
+            Button { model.openCapturePanel() } label: { Image(systemName: "square.and.pencil") }
+                .buttonStyle(.borderless).help("Capture (\(model.hotKeyDisplay))")
+            Button { model.route = .settings } label: { Image(systemName: "gearshape") }
+                .buttonStyle(.borderless).help("Settings")
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+    }
+
+    var footer: some View {
+        HStack {
+            Text("\(model.pending.count) open").font(.caption).foregroundStyle(.secondary)
+            Spacer()
+            Button("Quit Wren") { NSApp.terminate(nil) }.buttonStyle(.borderless).font(.caption)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 8)
+    }
+}
+
+struct Row: View {
+    var model: AppModel
+    let item: Commitment
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Button {
+                item.status == .pending ? model.complete(item) : model.reopen(item)
+            } label: {
+                Image(systemName: item.status == .completed ? "checkmark.circle.fill" : item.status == .dropped ? "minus.circle" : "circle")
+                    .font(.system(size: 15))
+                    .foregroundStyle(item.status == .completed ? WrenTheme.accent : .secondary)
+            }
+            .buttonStyle(.plain)
+            .help(item.status == .pending ? "Mark done" : "Reopen")
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.title)
+                    .lineLimit(2)
+                    .strikethrough(item.status != .pending, color: .secondary)
+                    .foregroundStyle(item.status == .pending ? .primary : .secondary)
+                meta
+            }
+            Spacer(minLength: 4)
+            if item.status == .pending {
+                Menu {
+                    Button("Done") { model.complete(item) }
+                    Divider()
+                    Button("Remind me in 1 minute") { model.remind(item, at: .now.addingTimeInterval(60)) }
+                    Button("Snooze 1 hour") { model.snooze(item, until: .now.addingTimeInterval(3600)) }
+                    Button("Tonight at 8 PM") { model.snooze(item, until: Self.today(20)) }.disabled(Self.today(20) <= .now)
+                    Button("Tomorrow at 9 AM") { model.snooze(item, until: Self.tomorrow(9)) }
+                    Divider()
+                    Button("Edit…") { model.route = .detail(item.id) }
+                    Button("Drop") { model.drop(item) }
+                } label: { Image(systemName: "ellipsis") }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                .opacity(hovering ? 1 : 0.35)
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 7)
+        .background(hovering ? Color.primary.opacity(0.05) : .clear)
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .onTapGesture { model.route = .detail(item.id) }
+    }
+
+    @ViewBuilder var meta: some View {
+        let parts = metaParts
+        if !parts.isEmpty {
+            HStack(spacing: 6) {
+                ForEach(parts.indices, id: \.self) { i in
+                    Label(parts[i].0, systemImage: parts[i].1).labelStyle(.titleAndIcon)
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(isOverdue ? Color.orange : .secondary)
+        }
+    }
+
+    var isOverdue: Bool {
+        guard item.status == .pending, let d = item.deadline else { return false }
+        return item.deadlineHasTime ? d < .now : Calendar.current.startOfDay(for: .now) > d
+    }
+
+    var metaParts: [(String, String)] {
+        var p: [(String, String)] = []
+        if model.processing.contains(item.id) { p.append(("Reading…", "ellipsis")) }
+        if item.kind != .commitment && item.status == .pending { p.append((item.kind.label, "tray")) }
+        if let d = item.deadline { p.append((DueText.describe(d, hasTime: item.deadlineHasTime), "calendar")) }
+        if let r = item.nextReminderAt, item.status == .pending {
+            // Same day as the deadline: the day is already shown, so give only the time.
+            let sameDay = item.deadline.map { Calendar.current.isDate($0, inSameDayAs: r) } ?? false
+            p.append((sameDay ? r.formatted(date: .omitted, time: .shortened) : DueText.describe(r, hasTime: true), "bell"))
+        }
+        if item.processing == .failed { p.append(("Couldn't interpret", "exclamationmark.circle")) }
+        if let c = item.completedAt { p.append(("Done \(DueText.describe(c, hasTime: false))", "checkmark")) }
+        return p
+    }
+
+    static func today(_ h: Int) -> Date { Calendar.current.date(bySettingHour: h, minute: 0, second: 0, of: .now)! }
+    static func tomorrow(_ h: Int) -> Date {
+        Calendar.current.date(byAdding: .day, value: 1, to: today(h))!
+    }
+}
+
+struct SectionLabel: View {
+    let text: String
+    init(_ t: String) { text = t }
+    var body: some View {
+        Text(text).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 4)
+    }
+}
+
+struct Notice: View {
+    let text: String
+    let systemImage: String
+    var action: (String, () -> Void)? = nil
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: systemImage).foregroundStyle(.secondary)
+            Text(text).font(.callout).fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            if let action { Button(action.0, action: action.1).controlSize(.small) }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 8)
+        .background(Color.primary.opacity(0.04))
+    }
+}
+
+struct ModelBadge: View {
+    let status: ModelStatus
+    var body: some View {
+        HStack(spacing: 4) {
+            Circle().fill(color).frame(width: 6, height: 6)
+            Text(short).font(.caption2)
+        }
+        .foregroundStyle(.secondary)
+        .help(status.summary)
+    }
+    var short: String {
+        switch status {
+        case .ready: "Local AI"
+        case .checking: "…"
+        case .off: "AI off"
+        default: "No AI"
+        }
+    }
+    var color: Color {
+        switch status {
+        case .ready: WrenTheme.accent
+        case .checking: .secondary
+        case .off: .secondary
+        default: .orange
+        }
+    }
+}
+
+struct EmptyState: View {
+    let shortcut: String?
+    var body: some View {
+        VStack(spacing: 10) {
+            WrenMarkShape().frame(width: 44, height: 44).foregroundStyle(.tertiary)
+            Text("Nothing to remember yet").font(.headline)
+            Text(shortcut.map { "Press \($0) anywhere to tell Wren what you need to do." } ?? "Type above to tell Wren what you need to do.")
+                .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(32)
+    }
+}

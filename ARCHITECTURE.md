@@ -1,5 +1,11 @@
 # Wren — Architecture
 
+> **Implementation note (Milestone 1, 2026-10-10).** As built, this differs from the original plan in three places. Each is deliberate:
+> 1. **Build:** a Swift package plus `scripts/build-app.sh`, instead of xcodegen and an Xcode project. This adds no dependency and lets `swift test` run everything. Xcode can still open `Package.swift`.
+> 2. **Targets:** `WrenCore` (no UI), `WrenKit` (SwiftUI views and AppKit services), `Wren` (a three-line executable), and `wren-tools` (dev-only brand and snapshot tool).
+> 3. **Data:** a single `Commitment` model holds the verbatim `originalText`, a `kind` (commitment, idea, question, waiting, research, unsorted) and a `processing` state. This replaces a separate `Capture` entity. Only `kind == .commitment` gets automatic reminders. A separate `Capture` can be split out later if Phase 5 needs it.
+> 4. **UI:** the menu bar uses `NSStatusItem` + `NSPopover` rather than `MenuBarExtra`, so a notification tap can open the popover programmatically.
+
 ## 1. Shape of the app
 
 Wren is a **menu-bar utility** (`LSUIElement = YES`, no Dock icon) built with SwiftUI, using AppKit only for three things that SwiftUI cannot do: the global hotkey, the non-activating capture panel, and sleep/wake observation.
@@ -34,7 +40,8 @@ The split matters: everything with logic lives in `WrenCore` and is tested witho
 
 ```
 Wren/
-  Package.swift                 # WrenCore library + WrenCoreTests
+  Package.swift                 # WrenCore, WrenKit, Wren, wren-tools, WrenCoreTests
+  scripts/build-app.sh          # builds, assembles, icons, signs build/Wren.app
   Sources/WrenCore/
     Models/        Capture.swift, Commitment.swift, ActivityEvent.swift, DailyRun.swift, (Phase 5: Goal, WaitingItem, ResearchRequest)
     Store/         WrenStore.swift (ModelContainer setup, CRUD, queries)

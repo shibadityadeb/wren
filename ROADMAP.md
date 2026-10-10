@@ -6,6 +6,47 @@ Each phase ends with: a green build, tests passing (commands recorded), a git co
 Deliverables: PROJECT_SPEC.md, ARCHITECTURE.md, ROADMAP.md, TEST_PLAN.md, git repository initialised in `Wren/`.
 Acceptance: architecture documented, MVP scope unambiguous, every dependency justified, core vs. later clearly split.
 
+## Milestone 1 status (2026-10-10)
+
+The first implementation milestone covers Phase 1, Phase 2, the foundation of Phase 3, and the notification foundation of Phase 4.
+
+| Area | Built | Verified |
+|---|---|---|
+| Menu-bar agent with logo, popover, settings, quit | yes | App launches, adds one menu-bar item, no errors logged. Views inspected as offscreen renders in light and dark. The live popover has not been seen on screen, because this terminal lacks Screen Recording permission. |
+| Global shortcut ⌥ Space, configurable, can be disabled | yes | Registration confirmed in the log. Pressing it could not be automated, because sending keystrokes needs Accessibility permission. **Needs a manual check.** |
+| Capture overlay (Return, Esc, focus stays in the previous app) | yes | Opened via `wren://capture`: the floating panel appeared and the other app stayed frontmost. Typing into it is not automated. |
+| Fallback capture | yes | Popover field, pencil button, and `wren://capture` |
+| Persistent commitments, original text, history | yes | Unit tests, plus a debug-build run: 3 captures, then quit and relaunch, and all 3 were intact |
+| Create, edit, complete, snooze, drop, reopen, delete | yes | Unit tests cover the store transitions. The UI buttons were not clicked in an automated run. |
+| Local Ollama client, model picker, validation | yes | Stubbed tests pass. There is **no live test**, because no chat model is installed (only `nomic-embed-text`). |
+| Rules-only date reading without a model | yes | 19 phrases × 2 timezones; live run gave the correct Friday and 10:00 reminder |
+| Notification service, permission flow, actions | yes | A due reminder with permission still undecided stayed due and was not marked sent. **Delivery and the Done, Snooze, and Remind-at actions are unverified**, because granting permission needs a click on the macOS prompt. |
+| Duplicate prevention, closed items never remind | yes | Unit tests, including across a store reopen |
+
+### Manual checks for you
+
+1. Open `build/Wren.app`, click the bird, then click **Allow…** for notifications.
+2. Switch to any app and press ⌥ Space. Type `Stretch in 1 minute` and press Return. Focus should return to your app.
+3. Wait one minute. A banner should appear. Try **Done**, then repeat the capture and try **Remind me at…** with `in 2 minutes`.
+4. Quit from the menu, reopen, and confirm your items are still there.
+5. If ⌥ Space does nothing, Claude.app's quick-entry shortcut may be catching it first. Change Wren's shortcut in Settings.
+
+### Known limitations
+
+- Reminders only fire while Wren is running. Launch at login is not built yet; it is planned as an explicit opt-in.
+- Morning briefing and evening check-in are not built yet. That is Phase 4.
+- Without a chat model, captures with no date stay "unsorted". They are kept but get no reminder until you set one or a model classifies them.
+- The text-input notification action depends on macOS. If it is unavailable, use **Remind me in 1 hour**, or set the time from the menu.
+- Three test captures made during verification are in your store: the scholarship form, stretch in 1 minute, and the AI startup idea. Drop or delete them from the menu.
+
+### Next recommended milestone
+
+Finish Phase 3 and Phase 4:
+- install a chat model and run the live intent test;
+- add the 11:00 briefing and 19:00 check-in with `DailyRun` deduplication;
+- add sleep and wake reconciliation tests with a fake clock;
+- add the opt-in login item through `SMAppService`.
+
 ## Phase 1 — Native foundation
 - Install `xcodegen`; create `Package.swift` (WrenCore) and `App/project.yml` → `Wren.xcodeproj`.
 - Menu-bar app (`LSUIElement`), `MenuBarExtra` popover listing pending commitments grouped by due date.

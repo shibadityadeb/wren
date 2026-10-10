@@ -10,6 +10,11 @@ public struct Interpretation: Equatable, Sendable {
     public var deadlineHasTime: Bool
     /// Short explanation shown to the user when something was uncertain or ignored.
     public var note: String?
+
+    public init(kind: CaptureKind, title: String, priority: Priority, deadline: Date?, deadlineHasTime: Bool, note: String?) {
+        self.kind = kind; self.title = title; self.priority = priority
+        self.deadline = deadline; self.deadlineHasTime = deadlineHasTime; self.note = note
+    }
 }
 
 public enum IntentOutcome: Sendable {

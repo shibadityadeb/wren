@@ -65,6 +65,9 @@ public final class Commitment {
     /// False for "by Friday", true for "Friday at 5pm".
     public var deadlineHasTime: Bool
     public var nextReminderAt: Date?
+    /// True when nextReminderAt was derived from the deadline rather than chosen by the user.
+    /// Lets a later interpretation withdraw it without touching user-chosen reminders.
+    public var reminderFromDeadline: Bool = false
     public var lastReminderAt: Date?
     public var snoozeCount: Int
     public var completedAt: Date?
