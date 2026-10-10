@@ -26,6 +26,11 @@ public final class WrenStore {
     public var context: ModelContext { container.mainContext }
     public let storeURL: URL?
 
+    public static let models: [any PersistentModel.Type] = [
+        Commitment.self, ActivityEvent.self, DailyRun.self,
+        AuditRecord.self, PermissionGrantRecord.self, StandingRuleRecord.self, DenialRecord.self,
+    ]
+
     public static var defaultDirectory: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Wren", isDirectory: true)
@@ -33,7 +38,7 @@ public final class WrenStore {
 
     /// - Parameter url: nil for an in-memory store (tests and previews).
     public init(url: URL?) throws {
-        let schema = Schema([Commitment.self, ActivityEvent.self])
+        let schema = Schema(Self.models)
         let config: ModelConfiguration
         if let url {
             do {
@@ -56,7 +61,40 @@ public final class WrenStore {
     }
 
     public static func openDefault() throws -> WrenStore {
-        try WrenStore(url: defaultDirectory.appendingPathComponent("Wren.store"))
+        let url = defaultDirectory.appendingPathComponent("Wren.store")
+        try backupBeforeUpgrade(url, version: schemaVersion)
+        return try WrenStore(url: url)
+    }
+
+    /// Bumped whenever models are added or changed.
+    public static let schemaVersion = 2
+
+    /// Copies the store (and its WAL files) once per schema version before the first open,
+    /// so an upgrade can always be rolled back by hand.
+    public static func backupBeforeUpgrade(_ url: URL, version: Int) throws {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: url.path) else { return }
+        let dir = url.deletingLastPathComponent().appendingPathComponent("Backups", isDirectory: true)
+        let marker = dir.appendingPathComponent("schema-v\(version)")
+        guard !fm.fileExists(atPath: marker.path) else { return }
+        try fm.createDirectory(at: marker, withIntermediateDirectories: true)
+        for suffix in ["", "-wal", "-shm"] {
+            let src = URL(fileURLWithPath: url.path + suffix)
+            if fm.fileExists(atPath: src.path) {
+                try fm.copyItem(at: src, to: marker.appendingPathComponent(src.lastPathComponent))
+            }
+        }
+    }
+
+    /// Today's (or any day's) run record, created on first use.
+    public func dailyRun(for day: String) throws -> DailyRun {
+        var d = FetchDescriptor<DailyRun>(predicate: #Predicate { $0.day == day })
+        d.fetchLimit = 1
+        if let r = try context.fetch(d).first { return r }
+        let r = DailyRun(day: day)
+        context.insert(r)
+        try save()
+        return r
     }
 
     // MARK: Queries
@@ -209,6 +247,7 @@ public final class WrenStore {
         c.nextReminderAt = until
         c.reminderFromDeadline = false
         c.snoozeCount += 1
+        c.deferredAt = now
         log(c, .snoozed, at: now, note: Self.stamp(until))
         try save()
     }

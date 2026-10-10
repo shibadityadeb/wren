@@ -70,6 +70,8 @@ public final class Commitment {
     public var reminderFromDeadline: Bool = false
     public var lastReminderAt: Date?
     public var snoozeCount: Int
+    /// Last time the user explicitly put this off (snooze, "leave for tomorrow").
+    public var deferredAt: Date?
     public var completedAt: Date?
     public var droppedAt: Date?
     var statusRaw: String
@@ -137,4 +139,42 @@ public final class ActivityEvent {
         self.note = note
     }
     public var kind: EventKind { EventKind(rawValue: kindRaw) ?? .edited }
+}
+
+/// What happened to one day's briefing or check-in. Written before delivery so a
+/// restart can never send the same day's event twice (at-most-once).
+public enum DailyEventState: String, Codable, Sendable {
+    case pending
+    /// Handed to macOS notifications.
+    case sent
+    /// Nothing worth reporting, and empty summaries are off.
+    case skippedEmpty
+    /// Wren wasn't running (or the Mac was asleep) for the whole window.
+    case missed
+    /// Notifications unavailable; the summary is still viewable in the menu.
+    case undelivered
+    /// Check-in only: the user finished or dismissed it.
+    case completed, dismissed
+    /// Turned off in settings at the time it would have run.
+    case disabled
+}
+
+@Model
+public final class DailyRun {
+    @Attribute(.unique) public var day: String
+    var briefingRaw: String = DailyEventState.pending.rawValue
+    public var briefingAt: Date?
+    var checkInRaw: String = DailyEventState.pending.rawValue
+    public var checkInAt: Date?
+
+    public init(day: String) { self.day = day }
+
+    public var briefing: DailyEventState {
+        get { DailyEventState(rawValue: briefingRaw) ?? .pending }
+        set { briefingRaw = newValue.rawValue }
+    }
+    public var checkIn: DailyEventState {
+        get { DailyEventState(rawValue: checkInRaw) ?? .pending }
+        set { checkInRaw = newValue.rawValue }
+    }
 }
