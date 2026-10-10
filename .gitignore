@@ -11,3 +11,4 @@ xcuserdata/
 # Local secrets / state
 *.store
 *.store-*
+build/
