@@ -67,9 +67,11 @@ struct CaptureView: View {
                         }.frame(maxWidth: .infinity, alignment: .leading)
                     }.buttonStyle(.plain)
                 }
-            case let .answer(title, lines):
-                Text(title).font(.callout.weight(.medium))
-                ForEach(Array(lines.prefix(8).enumerated()), id: \.offset) { Text("· \($0.element)").font(.callout) }
+            case let .answer(a):
+                Text(a.title).font(.callout.weight(.medium))
+                ForEach(a.lines.prefix(8)) { Text("· \($0.text)").font(.callout) }
+                if a.lines.count > 8 { Text("and \(a.lines.count - 8) more").font(.caption).foregroundStyle(.secondary) }
+                Text(a.basis).font(.caption).foregroundStyle(.secondary)
             case let .notFound(msg):
                 Text(msg).font(.callout)
                 Button("Save “\(state.text.prefix(40))” as a new item") { saveAsNew(state.text) }.controlSize(.small)

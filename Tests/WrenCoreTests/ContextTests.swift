@@ -116,12 +116,14 @@ final class ContextResolverTests: XCTestCase {
         _ = try h.store.createGoal(title: "Quiet goal", targetDate: nil, now: at(cal, 2026, 9, 1))
         let busy = try h.store.createGoal(title: "Busy goal", targetDate: nil, now: at(cal, 2026, 9, 1))
         try h.store.setManualProgress(busy, 0.3, now: at(cal, 2026, 10, 7))
-        guard case let .answer(t, lines) = resolver.resolve("What am I waiting for?", items: try h.store.all(), goals: [], context: .init(), now: now) else { return XCTFail() }
-        XCTAssertEqual(t, "Waiting on (1)")
-        XCTAssertTrue(lines[0].contains("Priya"))
-        guard case let .answer(_, g) = resolver.resolve("Which goals have I made no progress on?", items: [], goals: try h.store.goals(), context: .init(), now: now) else { return XCTFail() }
-        XCTAssertEqual(g.count, 1)
-        XCTAssertTrue(g[0].hasPrefix("Quiet goal"))
+        guard case let .answer(a) = resolver.resolve("What am I waiting for?", items: try h.store.all(), goals: [], context: .init(), now: now) else { return XCTFail() }
+        XCTAssertEqual(a.title, "Waiting on (1)")
+        XCTAssertTrue(a.lines[0].text.contains("Priya"))
+        XCTAssertEqual(a.lines[0].recordID, w.id, "answers are grounded in record IDs")
+        guard case let .answer(g) = resolver.resolve("Which goals have I made no progress on?", items: [], goals: try h.store.goals(), context: .init(), now: now) else { return XCTFail() }
+        XCTAssertEqual(g.lines.count, 1)
+        XCTAssertTrue(g.lines[0].text.hasPrefix("Quiet goal"))
+        XCTAssertTrue(g.lines[0].isGoal)
     }
 
     func testClosedItemsAreNeverTargets() throws {

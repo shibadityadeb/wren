@@ -209,7 +209,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                             debugProposal = p
                             appLog.notice("debug command proposal: \(p.preview, privacy: .public) origin=\(p.request.origin.label, privacy: .public)")
                         case let .clarify(q, c, _): appLog.notice("debug command clarify: \(q, privacy: .public) candidates=\(c.count, privacy: .public)")
-                        case let .answer(t, l): appLog.notice("debug command answer: \(t, privacy: .public) lines=\(l.count, privacy: .public)")
+                        case let .answer(a): appLog.notice("debug command answer: \(a.title, privacy: .public) lines=\(a.lines.count, privacy: .public)")
                         case let .notFound(m), let .needsDate(m): appLog.notice("debug command: \(m, privacy: .public)")
                         case .notACommand: break
                         }

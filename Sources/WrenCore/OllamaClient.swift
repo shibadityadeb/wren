@@ -6,6 +6,9 @@ public enum OllamaError: Error, LocalizedError, Equatable {
     case http(Int)
     case badResponse(String)
     case noModelSelected
+    case pullFailed(String)
+    case timedOut
+    case invalidModelName(String)
 
     public var errorDescription: String? {
         switch self {
@@ -14,6 +17,9 @@ public enum OllamaError: Error, LocalizedError, Equatable {
         case let .http(code): "Ollama returned HTTP \(code)."
         case let .badResponse(r): "Unexpected response from Ollama: \(r)"
         case .noModelSelected: "No language model selected."
+        case let .pullFailed(m): "The model download failed: \(m)"
+        case .timedOut: "The local model timed out. It may still be loading; try again in a moment."
+        case let .invalidModelName(n): "“\(n)” isn't a valid Ollama model name."
         }
     }
 }
@@ -33,7 +39,7 @@ public struct OllamaClient: Sendable {
     public static let allowedHosts: Set<String> = ["127.0.0.1", "localhost", "::1", "[::1]"]
 
     public let baseURL: URL
-    let session: URLSession
+    public let session: URLSession
 
     public init(baseURL: URL = OllamaClient.defaultURL, session: URLSession = .shared) throws {
         guard let host = baseURL.host?.lowercased(), Self.allowedHosts.contains(host),
@@ -61,7 +67,7 @@ public struct OllamaClient: Sendable {
         var messages: [Message]
         var stream = false
         var format: JSONValue
-        var options = Options(temperature: 0, num_ctx: 2048)
+        var options = Options(temperature: 0, num_ctx: 4096)
         var keep_alive = "5m"
     }
 
@@ -78,6 +84,18 @@ public struct OllamaClient: Sendable {
         return try await send(req, as: Reply.self).message.content
     }
 
+    static func map(_ error: Error) -> OllamaError {
+        if let u = error as? URLError {
+            switch u.code {
+            case .timedOut: return .timedOut
+            case .cannotConnectToHost, .cannotFindHost, .networkConnectionLost, .notConnectedToInternet:
+                return .unreachable("nothing is answering on the local Ollama port")
+            default: return .unreachable("network error \(u.code.rawValue)")
+            }
+        }
+        return .unreachable(error.localizedDescription)
+    }
+
     private func get<T: Decodable>(_ path: String, as: T.Type, timeout: TimeInterval) async throws -> T {
         try await send(URLRequest(url: baseURL.appendingPathComponent(path), timeoutInterval: timeout), as: T.self)
     }
@@ -85,7 +103,7 @@ public struct OllamaClient: Sendable {
     private func send<T: Decodable>(_ req: URLRequest, as: T.Type) async throws -> T {
         let data: Data, resp: URLResponse
         do { (data, resp) = try await session.data(for: req) } catch {
-            throw OllamaError.unreachable(error.localizedDescription)
+            throw Self.map(error)
         }
         if let http = resp as? HTTPURLResponse, !(200..<300).contains(http.statusCode) { throw OllamaError.http(http.statusCode) }
         do { return try JSONDecoder().decode(T.self, from: data) } catch {
