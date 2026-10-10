@@ -24,13 +24,15 @@ final class BriefingContentTests: XCTestCase {
         _ = try h.add("Friday", deadline: at(cal, 2026, 10, 9))
         _ = try h.add("Sunday", deadline: at(cal, 2026, 10, 11))
         _ = try h.add("Next month", deadline: at(cal, 2026, 11, 20))
-        _ = try h.add("Recruiter reply", kind: .waiting, created: at(cal, 2026, 10, 1))
+        let rec = try h.add("Recruiter reply", kind: .waiting, created: at(cal, 2026, 10, 1))
+        rec.followUpAt = at(cal, 2026, 10, 8)
         _ = try h.add("Fresh waiting", kind: .waiting, created: at(cal, 2026, 10, 8, 8))
         _ = try h.add("Idea", kind: .idea, deadline: at(cal, 2026, 10, 6))
         let done = try h.add("Done already", deadline: at(cal, 2026, 10, 7)); try h.store.complete(done, now: now)
         let r = try h.add("Undated with reminder"); try h.store.scheduleReminder(r, at: at(cal, 2026, 10, 8, 15), now: now)
 
-        let b = Briefing.build(from: try h.store.all(), now: now, calendar: cal)
+        let insights = InsightEngine.compute(items: try h.store.all(), goals: [], now: now, calendar: cal)
+        let b = Briefing.build(from: try h.store.all(), now: now, calendar: cal, insights: insights)
         // Priority first, then earliest deadline.
         XCTAssertEqual(b.overdue.map(\.title), ["Overdue high", "Overdue this morning", "Overdue low"])
         XCTAssertEqual(Set(b.dueToday.map(\.title)), ["Due today", "Due tonight"])
@@ -38,7 +40,7 @@ final class BriefingContentTests: XCTestCase {
         XCTAssertEqual(b.waiting.map(\.title), ["Recruiter reply"])
         XCTAssertEqual(b.remindersToday.map(\.title), ["Undated with reminder"])
         XCTAssertEqual(b.focus.count, 3, "notification names a few things, not everything")
-        XCTAssertTrue(b.notificationBody.hasPrefix("3 overdue, 2 due today, 2 coming up, 1 waiting on others."))
+        XCTAssertTrue(b.notificationBody.hasPrefix("3 overdue, 2 due today, 2 coming up, 1 follow-up due."))
         XCTAssertTrue(b.notificationBody.contains("Start with “Overdue high”"))
         XCTAssertLessThan(b.notificationBody.count, 160)
     }

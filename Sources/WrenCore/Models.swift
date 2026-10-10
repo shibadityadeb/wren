@@ -3,13 +3,14 @@ import SwiftData
 
 /// Lifecycle of a commitment. Only `pending` items can produce reminders.
 public enum CommitmentStatus: String, Codable, CaseIterable, Sendable {
-    case pending, completed, dropped
+    /// `archived`: put away by the user (review, conversion to a goal). Reversible with reopen.
+    case pending, completed, dropped, archived
 }
 
 /// What kind of thing the user captured. Only `.commitment` gets reminders.
 /// `.unsorted` means nobody (model or user) has classified it yet.
 public enum CaptureKind: String, Codable, CaseIterable, Sendable {
-    case commitment, idea, question, waiting, research, unsorted
+    case commitment, idea, question, waiting, research, goal, unsorted
 
     public var label: String {
         switch self {
@@ -18,6 +19,7 @@ public enum CaptureKind: String, Codable, CaseIterable, Sendable {
         case .question: "Question"
         case .waiting: "Waiting on"
         case .research: "Research"
+        case .goal: "Goal idea"
         case .unsorted: "Unsorted"
         }
     }
@@ -48,6 +50,13 @@ public enum ProcessingState: String, Codable, Sendable {
 public enum EventKind: String, Codable, Sendable {
     case captured, interpreted, interpretationFailed, edited
     case reminderScheduled, reminderSent, snoozed, completed, dropped, reopened
+    // Milestone 3
+    /// The deadline was moved later. Counts as a postponement, like `snoozed`.
+    case deadlineMoved
+    case archived, linkedToGoal, unlinkedFromGoal, convertedToGoal, split
+    case waitingUpdated, followUpScheduled, followedUp
+    /// The user answered a "moved several times" observation (kept the date, etc.).
+    case postponementReviewed
 }
 
 /// One captured thing. Stores the verbatim text forever, plus the interpreted fields.
@@ -74,6 +83,19 @@ public final class Commitment {
     public var deferredAt: Date?
     public var completedAt: Date?
     public var droppedAt: Date?
+    public var archivedAt: Date?
+    // Goals (Milestone 3). Optional/defaulted so v2 records load unchanged.
+    public var goal: Goal?
+    public var isMilestone: Bool = false
+    // Waiting items (Milestone 3).
+    /// Person or organisation being waited on, when known.
+    public var waitingOn: String?
+    /// What response or event is expected.
+    public var expectedResponse: String?
+    public var waitingSince: Date?
+    public var followUpAt: Date?
+    /// When the user last acknowledged a due follow-up. A follow-up is due again only for a later followUpAt.
+    public var followUpAcknowledgedAt: Date?
     var statusRaw: String
     var kindRaw: String
     var priorityRaw: Int
@@ -121,6 +143,122 @@ public final class Commitment {
         set { processingRaw = newValue.rawValue }
     }
     public var sortedEvents: [ActivityEvent] { events.sorted { $0.at < $1.at } }
+
+    /// Snoozes plus deadline moves, from history. Postponement insight input.
+    public var postponementCount: Int { events.filter { $0.kind == .snoozed || $0.kind == .deadlineMoved }.count }
+
+    /// Latest recorded activity of any kind (falls back to creation).
+    public var lastActivityAt: Date { events.map(\.at).max() ?? createdAt }
+
+    /// When waiting started: explicit, else creation.
+    public var effectiveWaitingSince: Date { waitingSince ?? createdAt }
+}
+
+public enum GoalStatus: String, Codable, CaseIterable, Sendable {
+    case active, paused, completed, archived
+    public var label: String { rawValue.capitalized }
+}
+
+/// How a goal's progress is measured. The user chooses; Wren never assumes tasks are equal-sized.
+public enum ProgressMethod: String, Codable, CaseIterable, Sendable {
+    /// The user sets a percentage.
+    case manual
+    /// Completed linked tasks ÷ linked tasks (dropped and archived not counted).
+    case linkedTasks
+    /// Completed milestones ÷ milestones.
+    case milestones
+
+    public var label: String {
+        switch self {
+        case .manual: "Set by me"
+        case .linkedTasks: "Linked tasks done"
+        case .milestones: "Milestones done"
+        }
+    }
+}
+
+public enum GoalEventKind: String, Codable, Sendable {
+    case created, edited, statusChanged, progressChanged, methodChanged, targetDateChanged, taskLinked, taskUnlinked
+}
+
+@Model
+public final class Goal {
+    @Attribute(.unique) public var id: UUID
+    public var title: String
+    /// What the user originally wrote, if the goal came from a capture.
+    public var originalText: String
+    public var details: String?
+    public var targetDate: Date?
+    var statusRaw: String = GoalStatus.active.rawValue
+    var methodRaw: String = ProgressMethod.manual.rawValue
+    /// 0…1, used only with the manual method.
+    public var manualProgress: Double = 0
+    public var createdAt: Date
+    public var updatedAt: Date
+    /// Last time progress moved (manual change, or a linked task completed).
+    public var lastProgressAt: Date?
+    public var completedAt: Date?
+    @Relationship(deleteRule: .nullify, inverse: \Commitment.goal) public var tasks: [Commitment] = []
+    @Relationship(deleteRule: .cascade, inverse: \GoalEvent.goal) public var events: [GoalEvent] = []
+
+    public init(title: String, originalText: String, targetDate: Date?, now: Date) {
+        id = UUID(); self.title = title; self.originalText = originalText; self.targetDate = targetDate
+        createdAt = now; updatedAt = now
+    }
+
+    public var status: GoalStatus {
+        get { GoalStatus(rawValue: statusRaw) ?? .active }
+        set { statusRaw = newValue.rawValue }
+    }
+    public var method: ProgressMethod {
+        get { ProgressMethod(rawValue: methodRaw) ?? .manual }
+        set { methodRaw = newValue.rawValue }
+    }
+    public var sortedEvents: [GoalEvent] { events.sorted { $0.at < $1.at } }
+    public var milestones: [Commitment] { tasks.filter(\.isMilestone) }
+
+    /// Latest activity on the goal or any linked task.
+    public var lastActivityAt: Date {
+        ([updatedAt, lastProgressAt ?? createdAt] + tasks.map(\.lastActivityAt)).max() ?? createdAt
+    }
+}
+
+@Model
+public final class GoalEvent {
+    public var id: UUID
+    public var at: Date
+    var kindRaw: String
+    public var note: String?
+    public var goal: Goal?
+    public init(kind: GoalEventKind, at: Date, note: String? = nil) {
+        id = UUID(); self.at = at; kindRaw = kind.rawValue; self.note = note
+    }
+    public var kind: GoalEventKind { GoalEventKind(rawValue: kindRaw) ?? .edited }
+}
+
+public enum InsightState: String, Codable, Sendable { case open, dismissed, resolved }
+
+/// Remembers what Wren has already pointed out, so an unchanged situation isn't raised again.
+/// Keyed by kind + subject + fingerprint; the fingerprint changes when the situation does.
+@Model
+public final class InsightRecord {
+    @Attribute(.unique) public var key: String
+    public var kindRaw: String
+    public var subjectID: String
+    public var fingerprint: String
+    var stateRaw: String = InsightState.open.rawValue
+    public var firstSeenAt: Date
+    /// When it was included in a briefing or check-in notification.
+    public var surfacedAt: Date?
+    public var closedAt: Date?
+
+    public init(key: String, kind: String, subjectID: String, fingerprint: String, at: Date) {
+        self.key = key; kindRaw = kind; self.subjectID = subjectID; self.fingerprint = fingerprint; firstSeenAt = at
+    }
+    public var state: InsightState {
+        get { InsightState(rawValue: stateRaw) ?? .open }
+        set { stateRaw = newValue.rawValue }
+    }
 }
 
 /// Append-only history: why Wren did what it did to an item.

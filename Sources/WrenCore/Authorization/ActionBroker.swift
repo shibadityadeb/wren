@@ -71,6 +71,14 @@ public final class ActionBroker {
         context.insert(rec); try? context.save()
     }
 
+    /// The user cancelled a proposal they asked for. Audited, but no lasting denial, so
+    /// they can ask again differently ("no, Monday").
+    public func cancel(_ r: ActionRequest) {
+        let rec = AuditRecord(request: r, descriptor: descriptor(r.action), at: clock.now)
+        rec.status = .denied; rec.detail = "Cancelled by you"
+        context.insert(rec); try? context.save()
+    }
+
     @discardableResult
     public func submit(_ r: ActionRequest, confirmation: Confirmation? = nil, dryRun: Bool = false) async -> ActionResult {
         let d = descriptor(r.action)

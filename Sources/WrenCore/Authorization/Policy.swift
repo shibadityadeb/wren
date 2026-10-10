@@ -149,12 +149,15 @@ public enum Authorizer {
                 return .allow(.standingRule(rule))
             }
             return .needsConfirmation(confirmationPrompt(d, r))
-        case .untrustedContent:
+        case .untrustedContent, .conversational:
             return .needsConfirmation(confirmationPrompt(d, r))
         }
     }
 
     static func confirmationPrompt(_ d: ActionDescriptor, _ r: ActionRequest) -> String {
-        r.origin.isDirectUser ? "\(d.summary): “\(r.target.label)”" : "\(d.summary): “\(r.target.label)” (suggested by \(r.origin.label))"
+        switch r.origin {
+        case .user, .conversational: "\(d.summary): “\(r.target.label)”"
+        default: "\(d.summary): “\(r.target.label)” (suggested by \(r.origin.label))"
+        }
     }
 }

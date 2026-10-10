@@ -86,6 +86,7 @@ public enum BuiltInAction {
         ]
         for (d, body, check) in defs { broker.register(StoreHandler(descriptor: d, store: store, body: body, check: check)) }
         broker.register(DeliverReminderHandler(store: store, notifier: notifier, clock: clock))
+        registerContextual(on: broker, store: store, clock: clock)
     }
 }
 

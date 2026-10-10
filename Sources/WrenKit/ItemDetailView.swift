@@ -165,6 +165,16 @@ struct ItemDetailView: View {
         case .completed: "Done"
         case .dropped: "Dropped"
         case .reopened: "Reopened"
+        case .deadlineMoved: "Deadline moved later"
+        case .archived: "Archived"
+        case .linkedToGoal: "Linked to goal"
+        case .unlinkedFromGoal: "Unlinked from goal"
+        case .convertedToGoal: "Turned into a goal"
+        case .split: "Broken into smaller tasks"
+        case .waitingUpdated: "Waiting details updated"
+        case .followUpScheduled: "Follow-up set"
+        case .followedUp: "Followed up"
+        case .postponementReviewed: "Reviewed after several moves"
         }
     }
 }

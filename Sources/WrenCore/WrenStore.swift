@@ -27,7 +27,7 @@ public final class WrenStore {
     public let storeURL: URL?
 
     public static let models: [any PersistentModel.Type] = [
-        Commitment.self, ActivityEvent.self, DailyRun.self,
+        Commitment.self, ActivityEvent.self, DailyRun.self, Goal.self, GoalEvent.self, InsightRecord.self,
         AuditRecord.self, PermissionGrantRecord.self, StandingRuleRecord.self, DenialRecord.self,
     ]
 
@@ -67,7 +67,7 @@ public final class WrenStore {
     }
 
     /// Bumped whenever models are added or changed.
-    public static let schemaVersion = 2
+    public static let schemaVersion = 3
 
     /// Copies the store (and its WAL files) once per schema version before the first open,
     /// so an upgrade can always be rolled back by hand.
@@ -212,10 +212,12 @@ public final class WrenStore {
         c.details = e.details?.isEmpty == true ? nil : e.details
         c.kind = e.kind
         c.priority = e.priority
+        let moved = Self.isLater(e.deadline, than: c.deadline)
         c.deadline = e.deadline
         c.deadlineHasTime = e.deadlineHasTime
         c.processing = .manual
         log(c, .edited, at: now)
+        if moved, let d = e.deadline { log(c, .deadlineMoved, at: now, note: Self.stamp(d)) }
         if c.status == .pending, e.nextReminderAt != c.nextReminderAt {
             c.nextReminderAt = e.nextReminderAt
             c.reminderFromDeadline = false
@@ -230,6 +232,11 @@ public final class WrenStore {
         c.completedAt = now
         c.nextReminderAt = nil
         log(c, .completed, at: now)
+        if let g = c.goal {
+            g.lastProgressAt = now
+            g.updatedAt = now
+            logGoal(g, .progressChanged, at: now, note: "“\(c.title)” done")
+        }
         try save()
     }
 
@@ -266,6 +273,7 @@ public final class WrenStore {
         c.status = .pending
         c.completedAt = nil
         c.droppedAt = nil
+        c.archivedAt = nil
         log(c, .reopened, at: now)
         try save()
     }
@@ -287,17 +295,17 @@ public final class WrenStore {
 
     // MARK: Helpers
 
-    private func requirePending(_ c: Commitment, _ action: String) throws {
+    func requirePending(_ c: Commitment, _ action: String) throws {
         guard c.status == .pending else { throw StoreError.invalidTransition(from: c.status, action: action) }
     }
 
-    private func log(_ c: Commitment, _ kind: EventKind, at: Date, note: String? = nil) {
+    func log(_ c: Commitment, _ kind: EventKind, at: Date, note: String? = nil) {
         let e = ActivityEvent(kind: kind, at: at, note: note)
         context.insert(e)
         e.commitment = c
     }
 
-    private func save() throws {
+    func save() throws {
         do { try context.save() } catch {
             context.rollback()
             throw StoreError.saveFailed(error.localizedDescription)

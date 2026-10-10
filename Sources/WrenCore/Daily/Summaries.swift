@@ -62,10 +62,16 @@ public struct Briefing: Sendable, Equatable {
     public var overdue: [SummaryItem]
     public var dueToday: [SummaryItem]
     public var upcoming: [SummaryItem]
+    /// Waiting items whose follow-up date has arrived (and weren't already surfaced).
     public var waiting: [SummaryItem]
     public var remindersToday: [SummaryItem]
+    /// Observations that need a decision: repeated postponement, goals coming up, quiet items.
+    public var decisions: [Insight] = []
 
-    public var isEmpty: Bool { overdue.isEmpty && dueToday.isEmpty && upcoming.isEmpty && waiting.isEmpty && remindersToday.isEmpty }
+    public var isEmpty: Bool { overdue.isEmpty && dueToday.isEmpty && upcoming.isEmpty && waiting.isEmpty && remindersToday.isEmpty && decisions.isEmpty }
+
+    /// Every insight this briefing shows, for marking as surfaced.
+    public var surfacedInsights: [Insight] = []
 
     /// The few items worth doing first: overdue, then due today, by priority.
     public var focus: [SummaryItem] { Array((overdue + dueToday).prefix(3)) }
@@ -79,29 +85,36 @@ public struct Briefing: Sendable, Equatable {
         if !overdue.isEmpty { counts.append("\(overdue.count) overdue") }
         if !dueToday.isEmpty { counts.append("\(dueToday.count) due today") }
         if !upcoming.isEmpty { counts.append("\(upcoming.count) coming up") }
-        if !waiting.isEmpty { counts.append("\(waiting.count) waiting on others") }
+        if !waiting.isEmpty { counts.append("\(waiting.count) follow-up\(waiting.count == 1 ? "" : "s") due") }
+        if !decisions.isEmpty { counts.append("\(decisions.count) need\(decisions.count == 1 ? "s" : "") a decision") }
         if !remindersToday.isEmpty && counts.isEmpty { counts.append("\(remindersToday.count) reminder\(remindersToday.count == 1 ? "" : "s") today") }
         var s = counts.joined(separator: ", ") + "."
         if let first = focus.first ?? upcoming.first { s += " Start with “\(first.title)”." }
         return s
     }
 
-    /// Builds from persisted items only.
-    public static func build(from items: [Commitment], now: Date, calendar: Calendar, upcomingDays: Int = 3,
-                             waitingAfterDays: Int = 3, limit: Int = 5) -> Briefing {
+    /// Builds from persisted items and precomputed insights only.
+    /// `insights` should already exclude dismissed and previously surfaced ones.
+    public static func build(from items: [Commitment], now: Date, calendar: Calendar, insights: [Insight] = [],
+                             upcomingDays: Int = 3, limit: Int = 5, decisionLimit: Int = 3) -> Briefing {
         let v = DayView(now: now, calendar: calendar)
         let pending = items.filter { $0.status == .pending }
         func pick(_ f: (Commitment) -> Bool) -> [Commitment] { pending.filter(f).sorted(by: DayView.byUrgency) }
         let overdue = pick(v.isOverdue)
         let today = pick(v.isDueToday)
         let upcoming = pending.filter { v.isUpcoming($0, days: upcomingDays) }.sorted { ($0.deadline ?? now) < ($1.deadline ?? now) }
-        let waiting = pick { v.waitingNeedsFollowUp($0, afterDays: waitingAfterDays) }
+        let followUps = insights.filter { $0.kind == .followUpDue }
+        let followUpIDs = Set(followUps.compactMap(\.subjectUUID))
+        let waiting = pick { followUpIDs.contains($0.id) }
         let shown = Set((overdue + today + upcoming + waiting).map(\.id))
         let reminders = pending.filter { v.reminderToday($0) && !shown.contains($0.id) }
             .sorted { ($0.nextReminderAt ?? now) < ($1.nextReminderAt ?? now) }
         func s(_ a: [Commitment]) -> [SummaryItem] { a.prefix(limit).map(SummaryItem.init) }
-        return Briefing(day: calendar.dayKey(for: now), overdue: s(overdue), dueToday: s(today), upcoming: s(upcoming),
-                        waiting: s(waiting), remindersToday: s(reminders))
+        let decisions = Array(insights.filter { $0.kind != .followUpDue }.prefix(decisionLimit))
+        var b = Briefing(day: calendar.dayKey(for: now), overdue: s(overdue), dueToday: s(today), upcoming: s(upcoming),
+                         waiting: s(waiting), remindersToday: s(reminders), decisions: decisions)
+        b.surfacedInsights = followUps.filter { f in b.waiting.contains { $0.id == f.subjectUUID } } + decisions
+        return b
     }
 }
 
@@ -112,9 +125,11 @@ public struct CheckIn: Sendable, Equatable {
     public var dueSoon: [SummaryItem]     // next two days
     public var waiting: [SummaryItem]
     public var deferredToday: [SummaryItem]
+    /// Repeated-postponement and follow-up observations not yet raised today.
+    public var decisions: [Insight] = []
 
     /// Nothing to review. Completed-only days still count as worth a short note.
-    public var isEmpty: Bool { completedToday.isEmpty && open.isEmpty && dueSoon.isEmpty && waiting.isEmpty && deferredToday.isEmpty }
+    public var isEmpty: Bool { completedToday.isEmpty && open.isEmpty && dueSoon.isEmpty && waiting.isEmpty && deferredToday.isEmpty && decisions.isEmpty }
 
     public var title: String {
         if open.count == 1, let only = open.first { return "Did you finish “\(only.title)”?" }
@@ -130,6 +145,7 @@ public struct CheckIn: Sendable, Equatable {
         if !open.isEmpty { parts.append("\(open.count) still open") }
         if !dueSoon.isEmpty { parts.append("\(dueSoon.count) due soon") }
         if !waiting.isEmpty { parts.append("\(waiting.count) waiting on others") }
+        if !decisions.isEmpty { parts.append("\(decisions.count) need\(decisions.count == 1 ? "s" : "") a decision") }
         if parts.isEmpty && !deferredToday.isEmpty { parts.append("\(deferredToday.count) put off today") }
         return parts.joined(separator: ", ") + ". Tap to review."
     }
@@ -137,7 +153,7 @@ public struct CheckIn: Sendable, Equatable {
     /// The one item a single-item check-in notification asks about.
     public var singleItem: SummaryItem? { open.count == 1 ? open.first : nil }
 
-    public static func build(from items: [Commitment], now: Date, calendar: Calendar, limit: Int = 8) -> CheckIn {
+    public static func build(from items: [Commitment], now: Date, calendar: Calendar, insights: [Insight] = [], limit: Int = 8) -> CheckIn {
         let v = DayView(now: now, calendar: calendar)
         let inToday: (Date?) -> Bool = { d in d.map { $0 >= v.startOfToday && $0 < v.startOfTomorrow } ?? false }
         let completed = items.filter { $0.status == .completed && inToday($0.completedAt) }.sorted { ($0.completedAt ?? now) < ($1.completedAt ?? now) }
@@ -149,6 +165,7 @@ public struct CheckIn: Sendable, Equatable {
         let deferred = pending.filter { inToday($0.deferredAt) && !shown.contains($0.id) }
         func s(_ a: [Commitment]) -> [SummaryItem] { a.prefix(limit).map(SummaryItem.init) }
         return CheckIn(day: calendar.dayKey(for: now), completedToday: s(completed), open: s(open), dueSoon: s(soon),
-                       waiting: s(waiting), deferredToday: s(deferred))
+                       waiting: s(waiting), deferredToday: s(deferred),
+                       decisions: Array(insights.filter { $0.kind == .postponed || $0.kind == .followUpDue }.prefix(3)))
     }
 }

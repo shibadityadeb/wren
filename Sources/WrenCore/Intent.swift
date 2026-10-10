@@ -88,6 +88,7 @@ public struct IntentProcessor: Sendable {
         - question: a question they want answered.
         - waiting: they are waiting for someone else.
         - research: they ask the assistant to find or look something up.
+        - goal: a larger outcome they want to reach over time ("I want to publish an article before the end of the month").
         title: a short imperative title using only information in the note. Do not add details that are not in the note.
         priority: high only if the note signals urgency or real consequences, else normal.
         deadline_phrase: copy the exact words from the note that state when (e.g. "by friday", "tomorrow evening"). Use null if the note states no time. Never invent one.
@@ -162,7 +163,7 @@ public struct IntentProcessor: Sendable {
             kind = .idea
             notes.append("Sounded tentative, so saved as an idea.")
         }
-        if kind != .commitment, kind != .research { parsed = nil }
+        if kind != .commitment, kind != .research, kind != .goal { parsed = nil }
         if parsed?.isApproximate == true { notes.append("“\(parsed!.phrase)” is approximate; adjust if needed.") }
 
         return Interpretation(kind: kind, title: title, priority: priority, deadline: parsed?.date,

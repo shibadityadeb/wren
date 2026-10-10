@@ -11,11 +11,24 @@ public final class WrenEngine {
     public let clock: WrenClock
     public let notifier: WrenNotifier?
     public var settings: () -> DailySettings
+    public var insightSettings: () -> InsightSettings
     private var running = false
 
-    public init(store: WrenStore, broker: ActionBroker, clock: WrenClock, notifier: WrenNotifier?, settings: @escaping () -> DailySettings) {
+    public init(store: WrenStore, broker: ActionBroker, clock: WrenClock, notifier: WrenNotifier?, settings: @escaping () -> DailySettings,
+                insightSettings: @escaping () -> InsightSettings = { InsightSettings() }) {
         self.store = store; self.broker = broker; self.clock = clock; self.notifier = notifier; self.settings = settings
+        self.insightSettings = insightSettings
     }
+
+    /// Every current observation, minus ones the user dismissed or resolved. For the Review pane.
+    public func openInsights() -> [Insight] {
+        let items = (try? store.all()) ?? [], goals = (try? store.goals()) ?? []
+        return InsightEngine.compute(items: items, goals: goals, now: clock.now, calendar: clock.calendar, settings: insightSettings())
+            .filter { !store.isClosed($0) }
+    }
+
+    /// Open observations not yet raised in a briefing or check-in.
+    public func freshInsights() -> [Insight] { openInsights().filter { !store.wasSurfaced($0) } }
 
     public struct TickReport: Sendable, Equatable {
         public var remindersDelivered = 0
@@ -73,21 +86,22 @@ public final class WrenEngine {
         case .markDisabled: set(.disabled); return .disabled
         case .run:
             let items = (try? store.all()) ?? []
-            let empty: Bool
-            switch e {
-            case .briefing: empty = Briefing.build(from: items, now: now, calendar: cal).isEmpty
-            case .checkIn: empty = CheckIn.build(from: items, now: now, calendar: cal).isEmpty
-            }
+            let fresh = freshInsights()
+            let briefing = Briefing.build(from: items, now: now, calendar: cal, insights: fresh)
+            let checkIn = CheckIn.build(from: items, now: now, calendar: cal, insights: fresh)
+            let empty = e == .briefing ? briefing.isEmpty : checkIn.isEmpty
             if empty && !s.sendEmptySummaries { set(.skippedEmpty); return .skippedEmpty }
             // Record first (at-most-once), then deliver.
             set(.sent)
             guard canDeliver, let notifier else { set(.undelivered); return .undelivered }
             let ok: Bool
             switch e {
-            case .briefing: ok = await notifier.deliverBriefing(Briefing.build(from: items, now: now, calendar: cal))
-            case .checkIn: ok = await notifier.deliverCheckIn(CheckIn.build(from: items, now: now, calendar: cal))
+            case .briefing: ok = await notifier.deliverBriefing(briefing)
+            case .checkIn: ok = await notifier.deliverCheckIn(checkIn)
             }
             if !ok { set(.undelivered); return .undelivered }
+            // Each observation is raised once per unchanged situation.
+            try? store.markSurfaced(e == .briefing ? briefing.surfacedInsights : checkIn.decisions, now: now)
             return .sent
         }
     }

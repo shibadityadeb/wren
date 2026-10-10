@@ -102,6 +102,10 @@ public enum ActionOrigin: Codable, Sendable, Equatable {
     case model(String)
     /// Derived from content Wren read: an email, web page, document, or tool output.
     case untrustedContent(String)
+    /// Wren's reading of something the user typed ("move that to Sunday"). The target and
+    /// change were inferred, so the user must see and confirm them: this origin never runs
+    /// without a confirmation, even where a standing rule would allow the action.
+    case conversational(String)
 
     public var label: String {
         switch self {
@@ -109,6 +113,7 @@ public enum ActionOrigin: Codable, Sendable, Equatable {
         case let .system(s): "Wren scheduler (\(s))"
         case let .model(m): "model \(m)"
         case let .untrustedContent(s): "content from \(s)"
+        case let .conversational(s): "your request “\(s.prefix(60))”"
         }
     }
     var isDirectUser: Bool { if case .user = self { true } else { false } }

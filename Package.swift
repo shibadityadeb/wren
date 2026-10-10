@@ -20,6 +20,7 @@ let package = Package(
         // Dev-only: generates brand assets and renders UI snapshots for inspection.
         .executableTarget(name: "WrenTools", dependencies: ["WrenKit", "WrenCore"],
                           swiftSettings: [.swiftLanguageMode(.v5)]),
-        .testTarget(name: "WrenCoreTests", dependencies: ["WrenCore"]),
+        .testTarget(name: "WrenCoreTests", dependencies: ["WrenCore"],
+                    resources: [.copy("Fixtures")]),
     ]
 )
