@@ -211,3 +211,10 @@ Any bulk action, meaning more than one target, is reviewed regardless of class u
 - **Permission categories, defaults and confirmation requirements** are specified in ARCHITECTURE.md §18. In short: your own clicks on reversible things just happen; deleting always asks; anything external is not granted and, once granted, always asks before writing; content Wren reads can never cause a consequential action.
 - **Recovery after restart.** Reminders, briefing and check-in are evaluated from the database on every launch and wake. A daily event missed for its whole window is recorded as missed and never sent the next day.
 - **Standing rules** are a closed, typed set (ARCHITECTURE.md §18.4). Requests like "never send an email without showing me the draft" map to fixed rules; anything not in the set is not a rule.
+
+## 11. Milestone 3 decisions (2026-10-10)
+
+- Goals are separate from tasks. Progress defaults to "set by me"; counting linked tasks or milestones is opt-in and always explained.
+- Waiting items have who/what/since/follow-up date. Wren reminds you to follow up; it never sends anything.
+- Observations (follow-ups due, repeated postponement, goals coming up, quiet items) are neutral, deterministic, dismissible, and raised once per unchanged situation. Thresholds are in Settings › Review.
+- Commands like "move that to Sunday" are always previewed and need your confirmation, even for changes that would otherwise be automatic. Ambiguous references get a question, not a guess.

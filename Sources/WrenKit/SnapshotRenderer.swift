@@ -36,6 +36,27 @@ public enum SnapshotRenderer {
         _ = try add("Book dentist appointment today", kind: .commitment, title: "Book dentist appointment",
                     deadline: cal.startOfDay(for: now))
 
+        // Milestone 3 sample data.
+        let goal = try store.createGoal(title: "Publish multi-agent reasoning article", originalText: "I want to publish a technical article about multi-agent reasoning before the end of the month.",
+                                        targetDate: cal.date(byAdding: .day, value: 5, to: cal.startOfDay(for: now)), method: .milestones, now: now.addingTimeInterval(-86400 * 10))
+        for (t, done) in [("Outline the argument", true), ("First draft", false), ("Get feedback from Sam", false)] {
+            let m = try store.capture(t, source: .manual, now: now.addingTimeInterval(-86400 * 9))
+            m.kind = .commitment; m.processing = .manual
+            try store.link(m, to: goal, asMilestone: true, now: now.addingTimeInterval(-86400 * 9))
+            if done { try store.complete(m, now: now.addingTimeInterval(-86400 * 3)) }
+        }
+        let paused = try store.createGoal(title: "Run a half marathon", targetDate: nil, now: now.addingTimeInterval(-86400 * 40))
+        try store.setManualProgress(paused, 0.3, now: now.addingTimeInterval(-86400 * 30))
+        let w = try add("Waiting for the API review from the platform team", kind: .waiting, title: "API review from the platform team")
+        try store.updateWaiting(w, waitingOn: "Platform team", expected: "Approval of the v2 API", followUpAt: cal.startOfDay(for: now), now: now.addingTimeInterval(-86400 * 4))
+        let moved = try add("Write the quarterly report", kind: .commitment, title: "Write the quarterly report",
+                            deadline: cal.date(byAdding: .day, value: 2, to: cal.startOfDay(for: now)))
+        for k in 1...3 { try store.snooze(moved, until: now.addingTimeInterval(Double(k) * 3600), now: now.addingTimeInterval(Double(-k) * 3600)) }
+        let oldIdea = Commitment(originalText: "Idea: a CLI for notes", source: .hotkey, now: now.addingTimeInterval(-86400 * 45))
+        oldIdea.kind = .idea; oldIdea.title = "A CLI for notes"; oldIdea.processing = .manual
+        store.context.insert(oldIdea)
+        try store.context.save()
+
         let model = AppModel(store: store)
         model.modelStatus = .ready(["qwen2.5:3b", "llama3.2:3b"])
         model.selectedModel = "qwen2.5:3b"
@@ -51,8 +72,29 @@ public enum SnapshotRenderer {
             try render(PopoverView(model: model), size: CGSize(width: 380, height: 520), appearance: appearance, to: dir.appendingPathComponent("popover-briefing-\(tag).png"))
             model.route = .checkIn
             try render(PopoverView(model: model), size: CGSize(width: 380, height: 520), appearance: appearance, to: dir.appendingPathComponent("popover-checkin-\(tag).png"))
+            model.reload()
+            model.route = .goals
+            try render(PopoverView(model: model), size: CGSize(width: 380, height: 520), appearance: appearance, to: dir.appendingPathComponent("popover-goals-\(tag).png"))
+            model.route = .goal(goal.id)
+            try render(PopoverView(model: model), size: CGSize(width: 380, height: 560), appearance: appearance, to: dir.appendingPathComponent("popover-goal-\(tag).png"))
+            model.route = .review
+            try render(PopoverView(model: model), size: CGSize(width: 380, height: 700), appearance: appearance, to: dir.appendingPathComponent("popover-review-\(tag).png"))
+            model.route = .detail(w.id)
+            try render(PopoverView(model: model), size: CGSize(width: 380, height: 700), appearance: appearance, to: dir.appendingPathComponent("popover-waiting-\(tag).png"))
+            let cs = CaptureState()
+            cs.text = "Push the report to next week"
+            if case let .proposal(p) = model.resolver.resolve(cs.text, items: try store.all(), goals: [], context: .init(), now: now) { cs.reply = .proposal(p) }
+            try render(CaptureView(state: cs, submit: { _ in }, cancel: {}).padding(20)
+                .background(appearance == .aqua ? Color(white: 0.85) : Color(white: 0.15)),
+                       size: CGSize(width: 600, height: 230), appearance: appearance, to: dir.appendingPathComponent("capture-proposal-\(tag).png"))
+            let cs2 = CaptureState()
+            cs2.text = "Mark the API task as done"
+            cs2.reply = model.resolver.resolve(cs2.text, items: try store.all(), goals: [], context: .init(), now: now)
+            try render(CaptureView(state: cs2, submit: { _ in }, cancel: {}).padding(20)
+                .background(appearance == .aqua ? Color(white: 0.85) : Color(white: 0.15)),
+                       size: CGSize(width: 600, height: 260), appearance: appearance, to: dir.appendingPathComponent("capture-clarify-\(tag).png"))
             model.route = .settings
-            try render(PopoverView(model: model), size: CGSize(width: 380, height: 1500), appearance: appearance, to: dir.appendingPathComponent("popover-settings-\(tag).png"))
+            try render(PopoverView(model: model), size: CGSize(width: 380, height: 1700), appearance: appearance, to: dir.appendingPathComponent("popover-settings-\(tag).png"))
             let state = CaptureState()
             state.text = "Submit the scholarship form by Friday"
             try render(CaptureView(state: state, submit: { _ in }, cancel: {}).padding(20)

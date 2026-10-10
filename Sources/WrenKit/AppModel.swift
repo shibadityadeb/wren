@@ -23,7 +23,7 @@ enum ModelStatus: Equatable {
     var isReady: Bool { if case .ready = self { true } else { false } }
 }
 
-enum Route: Equatable { case list, detail(UUID), settings, briefing, checkIn, activity }
+enum Route: Equatable { case list, detail(UUID), settings, briefing, checkIn, activity, goals, goal(UUID), review }
 
 /// A request waiting for the user to approve or cancel, shown as a native alert.
 struct PendingConfirmation: Identifiable {
@@ -53,7 +53,14 @@ final class AppModel {
 
     var pending: [Commitment] = []
     var closed: [Commitment] = []
-    var route: Route = .list
+    var route: Route = .list {
+        didSet { if case let .detail(id) = route { noteRecent(id) } }
+    }
+    var goals: [Goal] = []
+    var insights: [Insight] = []
+    var insightSettings: InsightSettings
+    /// Recently touched items, most recent first (for "that", "it").
+    @ObservationIgnored var recentIDs: [UUID] = []
     var modelStatus: ModelStatus = .checking
     var selectedModel: String?
     var notificationStatus: UNAuthorizationStatus = .notDetermined
@@ -89,7 +96,8 @@ final class AppModel {
             BuiltInAction.registerLocal(on: b, store: s, notifier: notifications, clock: clock)
             broker = b
             let settingsRef = settings
-            engine = WrenEngine(store: s, broker: b, clock: clock, notifier: notifications, settings: { settingsRef.daily })
+            engine = WrenEngine(store: s, broker: b, clock: clock, notifier: notifications, settings: { settingsRef.daily },
+                                insightSettings: { settingsRef.insights })
         } else {
             policyStore = nil; broker = nil; engine = nil
             if s != nil { err = "Couldn't load permissions." }
@@ -99,6 +107,7 @@ final class AppModel {
         hotKeyEnabled = settings.hotKeyEnabled
         selectedModel = settings.modelName
         daily = settings.daily
+        insightSettings = settings.insights
         reload()
         notifications.onResponse = { [weak self] r in self?.handle(r) }
     }
@@ -136,6 +145,8 @@ final class AppModel {
             banner = "Couldn't read your items: \(error.localizedDescription)"
         }
         if let p = try? policyStore?.load() { policy = p }
+        goals = (try? store.goals()) ?? []
+        insights = engine?.openInsights() ?? []
         if let run = engine?.todayRun() { todayRun = (run.briefing, run.checkIn) }
     }
 
@@ -160,8 +171,9 @@ final class AppModel {
 
     var dueUndelivered: [Commitment] { pending.filter { ReminderPolicy.isDue($0, now: clock.now) } }
 
-    var briefing: Briefing { Briefing.build(from: pending + closed, now: clock.now, calendar: clock.calendar) }
-    var checkIn: CheckIn { CheckIn.build(from: pending + closed, now: clock.now, calendar: clock.calendar) }
+    /// On-demand views show every open observation (the notification only raised new ones).
+    var briefing: Briefing { Briefing.build(from: pending + closed, now: clock.now, calendar: clock.calendar, insights: insights) }
+    var checkIn: CheckIn { CheckIn.build(from: pending + closed, now: clock.now, calendar: clock.calendar, insights: insights) }
 
     // MARK: Actions (all through the broker)
 
@@ -198,10 +210,10 @@ final class AppModel {
         reload()
     }
 
-    private func request(_ a: ActionID, _ c: Commitment, _ channel: UserChannel, _ params: [String: JSONValue] = [:]) -> ActionRequest {
+    func request(_ a: ActionID, _ c: Commitment, _ channel: UserChannel, _ params: [String: JSONValue] = [:]) -> ActionRequest {
         ActionRequest(action: a, target: c.targetRef, parameters: params, origin: .user(channel), createdAt: clock.now)
     }
-    private func time(_ d: Date) -> JSONValue { .number(d.timeIntervalSince1970) }
+    func time(_ d: Date) -> JSONValue { .number(d.timeIntervalSince1970) }
 
     func complete(_ c: Commitment, via ch: UserChannel = .popover) { Task { await run(request(BuiltInAction.complete, c, ch)) } }
     func drop(_ c: Commitment, via ch: UserChannel = .popover) { Task { await run(request(BuiltInAction.drop, c, ch)) } }
@@ -246,6 +258,7 @@ final class AppModel {
         }
         do {
             let c = try store.capture(trimmed, source: source, now: clock.now)
+            noteRecent(c.id)
             reload()
             interpret(c)
             return true
@@ -342,7 +355,7 @@ final class AppModel {
         reload()
         func pendingItem(_ id: UUID) -> Commitment? { item(id).flatMap { $0.status == .pending ? $0 : nil } }
         switch r {
-        case let .done(id): if let c = pendingItem(id) { complete(c, via: .notificationAction) }
+        case let .done(id): noteRecent(id); if let c = pendingItem(id) { complete(c, via: .notificationAction) }
         case let .snoozeHour(id): if let c = pendingItem(id) { snooze(c, until: clock.now.addingTimeInterval(3600), via: .notificationAction) }
         case let .tomorrow(id): if let c = pendingItem(id) { leaveForTomorrow(c, via: .notificationAction) }
         case let .later(id, text):

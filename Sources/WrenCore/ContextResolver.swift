@@ -59,7 +59,7 @@ public struct ContextResolver: Sendable {
 
     // MARK: Parsing
 
-    func command(_ raw: String, now: Date) -> (PendingCommand, String)? {
+    public func command(_ raw: String, now: Date) -> (PendingCommand, String)? {
         let t = raw.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: ".!?"))
         let s = t.lowercased()
         let parser = DateParser(calendar: calendar)
@@ -127,7 +127,12 @@ public struct ContextResolver: Sendable {
     /// After the user picked a candidate from a clarification.
     public func proposal(for cmd: PendingCommand, item: Commitment, now: Date, note: String? = nil,
                          origin: ActionOrigin? = nil) -> ContextResolution {
-        .proposal(build(cmd, item, now: now, note: note, origin: origin ?? .conversational(cmd.text)))
+        // A "move" that lands on the same day changes nothing; say so instead of proposing a no-op.
+        if cmd.verb == .reschedule, let d = cmd.date, let current = item.deadline,
+           calendar.isDate(d.date, inSameDayAs: current), !d.hasTime || d.date == current {
+            return .needsDate("“\(item.title)” is already due \(DueText.describe(current, hasTime: item.deadlineHasTime, now: now, calendar: calendar)). Which date instead?")
+        }
+        return .proposal(build(cmd, item, now: now, note: note, origin: origin ?? .conversational(cmd.text)))
     }
 
     func target(_ refRaw: String, cmd: PendingCommand, pool: [Commitment], context: ConversationContext, now: Date) -> ContextResolution {
@@ -180,7 +185,7 @@ public struct ContextResolver: Sendable {
             .filter { $0.count >= 2 && !stop.contains($0) && !generic.contains($0) }
     }
 
-    func candidate(_ c: Commitment) -> Candidate {
+    public func candidate(_ c: Commitment) -> Candidate {
         var detail = c.kind.label
         if let d = c.deadline { detail += " · due \(DueText.describe(d, hasTime: c.deadlineHasTime, calendar: calendar))" }
         return Candidate(id: c.id, title: c.title, detail: detail)

@@ -15,6 +15,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var panel: CapturePanel!
     private let captureState = CaptureState()
     private var hotKeys: HotKeyService!
+    #if DEBUG
+    private var debugProposal: ContextProposal?
+    #endif
 
     func applicationDidFinishLaunching(_ note: Notification) {
         // One Wren at a time: a login launch plus a manual open must not run two schedulers.
@@ -39,7 +42,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
         panel = CapturePanel {
             CaptureView(state: captureState, submit: { [weak self] in self?.submitCapture($0) },
-                        cancel: { [weak self] in self?.cancelCapture() })
+                        cancel: { [weak self] in self?.cancelCapture() },
+                        confirm: { [weak self] in self?.confirmProposal($0) },
+                        choose: { [weak self] c, p in self?.chooseCandidate(c, p) },
+                        saveAsNew: { [weak self] in self?.saveAsNew($0) })
         }
         panel.onCancel = { [weak self] in self?.cancelCapture() }
         panel.onResign = { [weak self] in
@@ -78,20 +84,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     private func submitCapture(_ text: String) {
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        if model.capture(text, source: .hotkey) {
-            captureState.text = ""
-            model.settings.captureDraft = ""
-            panel.orderOut(nil)
-        } else {
-            captureState.status = "Couldn't save. Your text is still here."
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !captureState.busy else { return }
+        captureState.busy = true
+        Task {
+            let reply = await model.submitFromCapture(text)
+            captureState.busy = false
+            switch reply {
+            case .saved: closeCapture()
+            case let .resolution(r): captureState.reply = r
+            case let .failed(msg): captureState.status = msg
+            }
         }
     }
 
-    private func cancelCapture() {
+    private func confirmProposal(_ p: ContextProposal) {
+        Task {
+            let r = await model.confirmProposal(p)
+            if r?.status == .succeeded || r?.status == .unverified { closeCapture() }
+            else { captureState.reply = .notFound(r?.message ?? "That didn't work."); captureState.status = r?.message ?? "" }
+        }
+    }
+
+    private func chooseCandidate(_ c: Candidate, _ p: PendingCommand) { captureState.reply = model.choose(c, for: p) }
+
+    private func saveAsNew(_ text: String) {
+        if model.capture(text, source: .hotkey) { closeCapture() }
+    }
+
+    private func closeCapture() {
         captureState.text = ""
+        captureState.reply = nil
+        captureState.status = ""
         model.settings.captureDraft = ""
         panel.orderOut(nil)
+    }
+
+    private func cancelCapture() {
+        if case let .proposal(p)? = captureState.reply { model.cancelProposal(p) }
+        closeCapture()
     }
 
     // MARK: Popover
@@ -165,6 +195,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             let on = q.first(where: { $0.name == "on" })?.value == "1"
             model.setLaunchAtLogin(on)
             appLog.notice("debug login on=\(on, privacy: .public) status=\(self.model.loginStatus.label, privacy: .public)")
+        case "/command":
+            // Debug only: run a contextual command as if typed in the capture panel.
+            if let text = q.first(where: { $0.name == "text" })?.value {
+                Task {
+                    let reply = await model.submitFromCapture(text)
+                    switch reply {
+                    case .saved: appLog.notice("debug command saved as new capture")
+                    case let .failed(m): appLog.notice("debug command failed: \(m, privacy: .public)")
+                    case let .resolution(r):
+                        switch r {
+                        case let .proposal(p):
+                            debugProposal = p
+                            appLog.notice("debug command proposal: \(p.preview, privacy: .public) origin=\(p.request.origin.label, privacy: .public)")
+                        case let .clarify(q, c, _): appLog.notice("debug command clarify: \(q, privacy: .public) candidates=\(c.count, privacy: .public)")
+                        case let .answer(t, l): appLog.notice("debug command answer: \(t, privacy: .public) lines=\(l.count, privacy: .public)")
+                        case let .notFound(m), let .needsDate(m): appLog.notice("debug command: \(m, privacy: .public)")
+                        case .notACommand: break
+                        }
+                    }
+                }
+            }
+        case "/submit-unconfirmed":
+            // Debug only: submit the last proposal WITHOUT confirming, to show the broker refuses.
+            if let p = debugProposal {
+                Task {
+                    let r = await model.broker?.submit(p.request)
+                    appLog.notice("debug unconfirmed submit status=\(r?.status.rawValue ?? "-", privacy: .public)")
+                }
+            }
+        case "/confirm":
+            if let p = debugProposal {
+                Task {
+                    let r = await model.confirmProposal(p)
+                    appLog.notice("debug confirmed status=\(r?.status.rawValue ?? "-", privacy: .public) auth=\(r?.authorization?.label ?? "-", privacy: .public)")
+                }
+            }
+        case "/insights":
+            model.reload()
+            for i in model.insights { appLog.notice("debug insight \(i.kind.rawValue, privacy: .public): \(i.message, privacy: .public)") }
+            appLog.notice("debug goals=\(self.model.goals.count, privacy: .public) insights=\(self.model.insights.count, privacy: .public)")
         case "/delete-first":
             if let c = model.pending.last { model.delete(c) }
             appLog.notice("debug delete requested; confirmation pending=\(self.model.confirmation != nil, privacy: .public)")

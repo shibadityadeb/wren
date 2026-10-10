@@ -1,10 +1,14 @@
 import SwiftUI
+import WrenCore
 
 /// The primary interface: one line, Enter to save, Escape to close.
 struct CaptureView: View {
     @Bindable var state: CaptureState
     var submit: (String) -> Void
     var cancel: () -> Void
+    var confirm: (ContextProposal) -> Void = { _ in }
+    var choose: (Candidate, PendingCommand) -> Void = { _, _ in }
+    var saveAsNew: (String) -> Void = { _ in }
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -21,11 +25,16 @@ struct CaptureView: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 20))
                 .focused($focused)
-                .onSubmit { submit(state.text) }
+                .onSubmit {
+                    if case let .proposal(p)? = state.reply { confirm(p) } else { submit(state.text) }
+                }
+                .onChange(of: state.text) { if state.reply != nil && !state.busy { state.reply = nil } }
+            if let reply = state.reply { replyView(reply) }
             HStack(spacing: 14) {
-                hint("return", "Save")
+                if case .proposal? = state.reply { hint("return", "Confirm") } else { hint("return", "Save") }
                 hint("esc", "Close")
                 Spacer()
+                if state.busy { ProgressView().controlSize(.small) }
             }
         }
         .padding(.horizontal, 18)
@@ -36,6 +45,43 @@ struct CaptureView: View {
         .onAppear { focused = true }
         .onChange(of: state.presentations) { focused = true }
         .onExitCommand(perform: cancel)
+    }
+
+    @ViewBuilder private func replyView(_ r: ContextResolution) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            switch r {
+            case let .proposal(p):
+                Label(p.preview, systemImage: "arrow.turn.down.right").font(.callout.weight(.medium))
+                if let note = p.note { Text(note).font(.caption).foregroundStyle(.orange) }
+                HStack {
+                    Button("Confirm") { confirm(p) }.keyboardShortcut(.defaultAction)
+                    Button("Cancel", action: cancel)
+                }.controlSize(.small)
+            case let .clarify(q, candidates, pending):
+                Text(q).font(.callout.weight(.medium))
+                ForEach(candidates) { c in
+                    Button { choose(c, pending) } label: {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(c.title)
+                            Text(c.detail).font(.caption).foregroundStyle(.secondary)
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    }.buttonStyle(.plain)
+                }
+            case let .answer(title, lines):
+                Text(title).font(.callout.weight(.medium))
+                ForEach(Array(lines.prefix(8).enumerated()), id: \.offset) { Text("· \($0.element)").font(.callout) }
+            case let .notFound(msg):
+                Text(msg).font(.callout)
+                Button("Save “\(state.text.prefix(40))” as a new item") { saveAsNew(state.text) }.controlSize(.small)
+            case let .needsDate(msg):
+                Text(msg).font(.callout).foregroundStyle(.secondary)
+            case .notACommand:
+                EmptyView()
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private func hint(_ key: String, _ label: String) -> some View {
@@ -56,4 +102,7 @@ final class CaptureState {
     var status = ""
     /// Bumped every time the panel is shown, to refocus the field.
     var presentations = 0
+    /// Wren's answer to a command (preview, question, list), shown under the field.
+    var reply: ContextResolution?
+    var busy = false
 }

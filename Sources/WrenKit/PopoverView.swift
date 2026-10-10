@@ -15,6 +15,9 @@ struct PopoverView: View {
             case .briefing: BriefingView(model: model)
             case .checkIn: CheckInView(model: model)
             case .activity: ActivityView(model: model)
+            case .goals, .review: ListPane(model: model)
+            case let .goal(id):
+                if let g = model.goal(id) { GoalDetailView(model: model, goal: g) } else { ListPane(model: model) }
             }
         }
         .frame(width: 380)
@@ -38,6 +41,7 @@ struct ListPane: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            MainTabs(model: model)
             Divider()
             if let msg = model.storeError ?? model.banner {
                 Notice(text: msg, systemImage: "exclamationmark.triangle")
@@ -53,6 +57,19 @@ struct ListPane: View {
                 Notice(text: err + " Use the field below or the menu bar.", systemImage: "keyboard")
             }
 
+            if model.route == .goals {
+                GoalsPane(model: model)
+            } else if model.route == .review {
+                ReviewPane(model: model)
+            } else {
+                itemsBody
+            }
+            Divider()
+            footer
+        }
+    }
+
+    @ViewBuilder var itemsBody: some View {
             HStack(spacing: 8) {
                 Image(systemName: "plus").foregroundStyle(.secondary)
                 TextField("Add something…", text: $draft)
@@ -95,9 +112,6 @@ struct ListPane: View {
                     .padding(.bottom, 8)
                 }
             }
-            Divider()
-            footer
-        }
     }
 
     var header: some View {

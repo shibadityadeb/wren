@@ -6,6 +6,8 @@
 > 3. **Data:** a single `Commitment` model holds the verbatim `originalText`, a `kind` (commitment, idea, question, waiting, research, unsorted) and a `processing` state. This replaces a separate `Capture` entity. Only `kind == .commitment` gets automatic reminders. A separate `Capture` can be split out later if Phase 5 needs it.
 > 4. **UI:** the menu bar uses `NSStatusItem` + `NSPopover` rather than `MenuBarExtra`, so a notification tap can open the popover programmatically.
 
+> **Milestone 3 (2026-10-10).** Goals, waiting follow-ups, insights and contextual references are documented in §22–§25.
+>
 > **Milestone 2 (2026-10-10).** The permission system and daily engine are built in `WrenCore` and documented in §18–§20 below. Where §15 (planned broker) and §18 (as built) differ, §18 is authoritative.
 
 ## 1. Shape of the app
@@ -444,3 +446,52 @@ Check-in actions (Done, Snooze, Leave for tomorrow, Reschedule…) are user acti
 | Model access | `IntentProcessor(client:model:)` | `OllamaClient` | stub `URLProtocol`, nil client |
 | Authorization | `Authorizer` (pure), `ActionBroker` | SwiftData policy | same, temp store |
 | Login item | `LoginItemService` | `SMAppService` | `FakeLoginService` |
+
+
+## 22. Goals (Milestone 3)
+
+- `Goal` (SwiftData): title, original wording, notes, optional target date, status `active | paused | completed | archived`, progress method, manual progress, created/updated/last-progress timestamps, linked `tasks` (Commitments; nullify on delete), and `GoalEvent` history.
+- Status transitions: active ↔ paused, either → completed or archived, completed or archived → active. Anything else is rejected.
+- **Progress is explicit.** Default method is *manual* (the user sets a percentage). *Linked tasks*: completed ÷ (pending + completed); dropped and archived are excluded and the explanation says so. *Milestones*: same, over tasks flagged `isMilestone`. Every method returns a sentence explaining the number, including "each counts equally, whatever its size". With nothing to count, progress is "—", not 0%.
+- Target date and status change only through `goal.edit` / `goal.setStatus`; target date changes are logged as their own history event. Completing a linked task updates `lastProgressAt` and logs a goal event.
+- "Turn into a goal" archives the item (never deletes), links it to the new goal and keeps its history.
+
+## 23. Waiting items
+
+Commitment fields: `waitingOn`, `expectedResponse`, `waitingSince` (set on first update), `followUpAt`, `followUpAcknowledgedAt`, optional goal link. History: `waitingUpdated`, `followUpScheduled`, `followedUp`.
+
+A follow-up is **due** when `followUpAt <= now` and it hasn't been acknowledged since that date. Acknowledging (with an optional next date the user picks) records an attempt and silences it; it only returns on the new date. A due follow-up not acknowledged within the grace period (default 3 days) moves to the stale review. Wren never sends follow-up messages.
+
+## 24. Insights and review
+
+`InsightEngine.compute(items:goals:now:calendar:settings:)` is pure and deterministic.
+
+| Kind | Criteria (defaults, adjustable) | Fingerprint |
+|---|---|---|
+| followUpDue | waiting, follow-up date arrived, not acknowledged, within grace (3 d) | follow-up timestamp |
+| postponed | commitment snoozed or deadline moved later ≥ threshold (3) times | count ÷ threshold (bucket) |
+| goalApproaching | active goal, target within 7 days or past | bucket (soon/imminent/past) + target day |
+| stale | task: no activity 14 d **and** no future deadline or reminder **and** not overdue; idea: 30 d; waiting: 14 d without a follow-up date, or follow-up past grace; goal: no progress or linked-task activity 14 d | last-activity day |
+
+`InsightRecord` keys each observation by kind + subject + fingerprint. Dismissed or resolved observations stay closed for that fingerprint; a new fingerprint (situation changed) can surface again. `surfacedAt` records inclusion in a briefing or check-in, so the daily notifications raise each observation once; the Review tab and on-demand panes still show every open one. Review actions are ordinary broker actions; nothing is archived, deleted or rescheduled automatically.
+
+Briefing: due follow-ups fill "follow-ups due"; up to 3 other fresh insights become "needs a decision". Check-in: up to 3 fresh postponement or follow-up insights. The briefing is no longer empty when only insights exist.
+
+## 25. Contextual references
+
+`ContextResolver` (deterministic) recognises:
+
+| Pattern | Action |
+|---|---|
+| move / push / reschedule / postpone X to D | `item.reschedule` if X has a deadline, else `reminder.schedule` |
+| remind me about X D | `reminder.schedule` |
+| mark X as done, I finished X, X is done | `item.complete` |
+| drop X / archive X | `item.drop` / `item.archive` |
+| what am I waiting for | answer from waiting items |
+| which goals have I made no progress on | answer: active goals with no activity for 7+ days |
+
+Targets: pronouns use the open item, then the most recent captured/opened/notified item; with neither, Wren asks. Titles: exact (3), every word (2), some word (1). One exact or one full match resolves; several full matches ask (the open item breaks a tie); a single partial match resolves with a "closest match" warning; several partial matches ask. Closed items are never targets. A move that lands on the current date is reported, not proposed.
+
+Optional model fallback (`ModelTargetPicker`) runs only when nothing matches and a local model is ready: the model picks an index from a list Wren supplies; out-of-range or failed answers are ignored; the proposal has origin `.model` and is labelled.
+
+**Authorization.** Proposals carry origin `.conversational(text)` (or `.model`). The Authorizer always returns *needs confirmation* for `.conversational`, even when a standing rule would allow the action. The capture panel shows the preview; Confirm mints a confirmation bound to that exact action, target and parameters (5-minute lifetime, single use). Cancel is audited as "Cancelled by you" without a lasting denial, so the user can rephrase.

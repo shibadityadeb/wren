@@ -26,7 +26,6 @@ final class CapturePanel: NSPanel {
         hasShadow = true
         animationBehavior = .utilityWindow
         let host = NSHostingView(rootView: content())
-        host.sizingOptions = [.preferredContentSize]
         contentView = host
     }
 

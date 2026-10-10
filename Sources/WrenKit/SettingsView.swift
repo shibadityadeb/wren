@@ -35,6 +35,21 @@ struct SettingsView: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
 
+                    section("Review") {
+                        Stepper("Ask after \(model.insightSettings.postponeThreshold) postponements", value: Binding(
+                            get: { model.insightSettings.postponeThreshold }, set: { v in model.updateInsightSettings { $0.postponeThreshold = v } }), in: 2...10)
+                        Stepper("Tasks are quiet after \(model.insightSettings.staleTaskDays) days", value: Binding(
+                            get: { model.insightSettings.staleTaskDays }, set: { v in model.updateInsightSettings { $0.staleTaskDays = v } }), in: 3...90)
+                        Stepper("Ideas are quiet after \(model.insightSettings.staleIdeaDays) days", value: Binding(
+                            get: { model.insightSettings.staleIdeaDays }, set: { v in model.updateInsightSettings { $0.staleIdeaDays = v } }), in: 7...365, step: 7)
+                        Stepper("Goals are quiet after \(model.insightSettings.staleGoalDays) days", value: Binding(
+                            get: { model.insightSettings.staleGoalDays }, set: { v in model.updateInsightSettings { $0.staleGoalDays = v } }), in: 3...90)
+                        Stepper("Mention goals \(model.insightSettings.goalApproachDays) days before target", value: Binding(
+                            get: { model.insightSettings.goalApproachDays }, set: { v in model.updateInsightSettings { $0.goalApproachDays = v } }), in: 1...30)
+                        Text("Items with an upcoming deadline or reminder are never “quiet”. Review only suggests; it never archives or deletes.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+
                     section("Startup") {
                         Toggle("Open Wren when I log in", isOn: Binding(get: { model.settings.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
                         HStack {

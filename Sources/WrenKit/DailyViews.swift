@@ -74,6 +74,10 @@ struct BriefingView: View {
                         section("Coming up", b.upcoming)
                         section("Waiting on others", b.waiting)
                         section("Reminders today", b.remindersToday)
+                        if !b.decisions.isEmpty {
+                            SectionLabel("Needs a decision")
+                            ForEach(b.decisions) { InsightRow(model: model, insight: $0) }
+                        }
                     }.padding(.bottom, 8)
                 }
             }
@@ -124,6 +128,10 @@ struct CheckInView: View {
                         section("Due soon", c.dueSoon)
                         section("Waiting on others", c.waiting)
                         section("Put off today", c.deferredToday)
+                        if !c.decisions.isEmpty {
+                            SectionLabel("Needs a decision")
+                            ForEach(c.decisions) { InsightRow(model: model, insight: $0) }
+                        }
                     }.padding(.bottom, 8)
                 }
             }

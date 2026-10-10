@@ -35,6 +35,10 @@ The script compiles the Swift package, regenerates the icon from `assets/logo.pn
 | Edit, drop, reopen, delete | Click a row to open it. |
 | Test a notification | Use **…** › **Remind me in 1 minute**. |
 | Change the shortcut | Open **Settings** (gear) › **Change…**, then press the new combination. You can also turn the shortcut off there. |
+| Goals | **Goals** tab. Type a goal (a trailing date like "by end of month" becomes the target). Choose how progress is measured, link tasks or add milestones. |
+| Waiting on someone | Open a waiting item: who, what, follow-up date, "I followed up". |
+| Review | **Review** tab: follow-ups due, things moved several times, goals coming up, quiet items. Nothing changes until you choose. |
+| Change an existing item by typing | In the capture panel: "move that to Sunday", "push the API task to next week", "mark the research task as done", "remind me about it tomorrow", "drop that idea". Wren shows what it understood; Return confirms. "What am I waiting for?" and "Which goals have I made no progress on?" answer from your data. |
 | Today's briefing | Sun button in the menu, or the 11:00 notification. |
 | Evening check-in | Moon button in the menu, or the 19:00 notification. Done, Later › Snooze / Leave for tomorrow / Reschedule…, then Finish or Dismiss. |
 | Change briefing or check-in time, or turn them off | Settings › Daily rhythm |

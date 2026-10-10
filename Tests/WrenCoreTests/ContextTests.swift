@@ -102,6 +102,14 @@ final class ContextResolverTests: XCTestCase {
         }
     }
 
+    func testNoOpMoveIsReportedNotProposed() throws {
+        let h = try Harness(now: at(cal, 2026, 10, 10, 12), calendar: cal) // Saturday
+        _ = try h.add("Write the quarterly report", deadline: at(cal, 2026, 10, 12)) // Monday
+        guard case let .needsDate(msg) = resolver.resolve("Push the report to next week", items: try h.store.all(), goals: [], context: .init(), now: h.clock.now)
+        else { return XCTFail("a same-day move must not become a proposal") }
+        XCTAssertTrue(msg.contains("already due"))
+    }
+
     func testQueries() throws {
         let h = try Harness(now: now, calendar: cal)
         let w = try h.add("Recruiter reply", kind: .waiting); w.waitingOn = "Priya"; w.followUpAt = at(cal, 2026, 10, 10)
@@ -231,7 +239,7 @@ final class ContextAuthorizationTests: XCTestCase {
         let b = try XCTUnwrap(h.notifier.briefings.first)
         XCTAssertEqual(b.waiting.map(\.title), ["Contract from legal"])
         XCTAssertEqual(Set(b.decisions.map(\.kind)), [.postponed, .goalApproaching])
-        guard case .proposal = ContextResolver(calendar: cal).resolve("Push the report to Monday", items: try h.store.all(), goals: [], context: .init(), now: h.clock.now)
+        guard case .proposal = ContextResolver(calendar: cal).resolve("Push the report to Wednesday", items: try h.store.all(), goals: [], context: .init(), now: h.clock.now)
         else { return XCTFail() }
     }
 }

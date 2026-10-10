@@ -114,11 +114,12 @@ public enum InsightEngine {
             // Waiting items.
             if c.kind == .waiting {
                 let on = c.waitingOn.map { " on \($0)" } ?? ""
+                let with = c.waitingOn.map { " with \($0)" } ?? ""
                 if let f = c.followUpAt, f <= now, (c.followUpAcknowledgedAt ?? .distantPast) < f {
                     let late = ago(f)
                     if late < s.followUpGraceDays {
                         out.append(Insight(kind: .followUpDue, subject: .commitment, subjectID: id, title: c.title,
-                                           message: "It's time to follow up\(on).\(c.expectedResponse.map { " Expected: \($0)." } ?? "")",
+                                           message: "It's time to follow up\(with).\(c.expectedResponse.map { " Expected: \($0)." } ?? "")",
                                            reason: "Follow-up date \(DueText.describe(f, hasTime: false, now: now, calendar: cal)) has arrived.",
                                            fingerprint: "f\(Int(f.timeIntervalSince1970))"))
                     } else {

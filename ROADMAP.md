@@ -6,6 +6,49 @@ Each phase ends with: a green build, tests passing (commands recorded), a git co
 Deliverables: PROJECT_SPEC.md, ARCHITECTURE.md, ROADMAP.md, TEST_PLAN.md, git repository initialised in `Wren/`.
 Acceptance: architecture documented, MVP scope unambiguous, every dependency justified, core vs. later clearly split.
 
+## Milestone 3 status (2026-10-10): contextual personal execution
+
+### Checklist
+
+- [x] v2 store fixture from the previous release; migration test
+- [x] Schema v3: Goal, GoalEvent, InsightRecord; waiting fields, goal link, milestone flag, archived status, new history kinds; backup before upgrade
+- [x] Explainable goal progress (manual default, linked tasks, milestones)
+- [x] Waiting follow-ups with acknowledgement and history
+- [x] Deterministic insights (postponed, follow-up due, goal approaching, stale) with dismiss/resolve ledger
+- [x] 16 new broker actions; none auto-allowed by standing rules
+- [x] Contextual resolver + `.conversational` origin that always needs confirmation; optional model target picker
+- [x] Briefing/check-in include fresh insights once
+- [x] UI: Items/Goals/Review tabs, goal detail, waiting fields, split, convert, capture-panel preview/clarify/answer, Review thresholds
+- [x] 110 tests; real-store upgrade; real-app contextual run; docs; CI
+
+### Verified
+
+| What | How |
+|---|---|
+| Test suite | `swift test`: 110 tests, 1 skipped (live Ollama), 0 failures |
+| Safety tests can fail | Temporarily letting `.conversational` run without confirmation made 5 of 6 contextual-authorization tests fail; reverted |
+| Migration from a real v2 store | Fixture written by the Milestone 2 code: items, snooze history, policy revocation and DailyRun survive; new features work on migrated rows |
+| Upgrade of your store | Backup `schema-v3` written; 4 items, 16 history events, 3 audit records intact; new tables present |
+| Contextual command in the real app | "drop that" with no context → asked; "What am I waiting for?" → answered; "Mark the delivery test as done" → proposal; unconfirmed submit → awaitingConfirmation, item unchanged; confirmed → succeeded, audit shows confirmation |
+| UI | Goals, goal detail, Review, waiting fields, capture preview/clarify rendered offscreen in light and dark and inspected |
+
+### Not verified (needs you)
+
+- The new panes and capture replies as seen live, and the capture panel resizing when a reply appears.
+- Insights appearing in real 11:00/19:00 notifications.
+- The model target picker against a real model (no chat model installed; tested with stubbed responses).
+
+### Remaining gaps
+
+- No recurrence yet, so "recurring" exclusions in stale review don't apply.
+- Resolver English patterns are fixed; unusual phrasings become new captures (nothing is lost).
+- Goals can't be deleted (archive only), by design for now.
+- Splitting doesn't copy deadlines to the new steps.
+
+### Next recommended milestone
+
+Phase 8 hardening before external integrations: JSON export/backup and restore, file logging without content, pause notifications, a safe reset, and a signed install in /Applications with login launch verified across a real restart. Then email read-only (Phase 10) on top of the broker.
+
 ## Milestone 2 status (2026-10-10): trusted execution foundation
 
 ### Audit at start

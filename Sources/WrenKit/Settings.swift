@@ -40,6 +40,10 @@ final class WrenSettings {
         get { (d.data(forKey: "dailySettings")).flatMap { try? JSONDecoder().decode(DailySettings.self, from: $0) } ?? DailySettings() }
         set { d.set(try? JSONEncoder().encode(newValue.normalized()), forKey: "dailySettings") }
     }
+    var insights: InsightSettings {
+        get { (d.data(forKey: "insightSettings")).flatMap { try? JSONDecoder().decode(InsightSettings.self, from: $0) } ?? InsightSettings() }
+        set { d.set(try? JSONEncoder().encode(newValue.normalized()), forKey: "insightSettings") }
+    }
     /// The user's explicit choice. Default false: Wren never adds itself to login items unasked.
     var launchAtLogin: Bool {
         get { d.bool(forKey: "launchAtLogin") }

@@ -15,6 +15,11 @@ struct ItemDetailView: View {
     @State private var hasReminder = false
     @State private var reminder = Date()
     @State private var showHistory = false
+    @State private var waitingOn = ""
+    @State private var expected = ""
+    @State private var hasFollowUp = false
+    @State private var followUp = Date()
+    @State private var steps = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -68,6 +73,12 @@ struct ItemDetailView: View {
                         Text("This time has passed, so the reminder will be sent right away.").font(.caption).foregroundStyle(.orange)
                     }
 
+                    if kind == .waiting && item.status == .pending { waitingSection }
+                    if item.status == .pending { goalSection }
+                    if item.postponementCount > 0 {
+                        Text("Moved \(item.postponementCount) time\(item.postponementCount == 1 ? "" : "s").").font(.caption).foregroundStyle(.secondary)
+                    }
+
                     VStack(alignment: .leading, spacing: 4) {
                         Text("You wrote").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                         Text(item.originalText).font(.callout).textSelection(.enabled)
@@ -110,6 +121,7 @@ struct ItemDetailView: View {
                 if item.status == .pending {
                     Button("Done") { model.complete(item); model.route = .list }
                     Button("Drop") { model.drop(item); model.route = .list }
+                    Button("Archive") { model.archive(item); model.route = .list }
                 } else {
                     Button("Reopen") { model.reopen(item); load() }
                     Button("Delete", role: .destructive) { model.delete(item) }
@@ -123,6 +135,59 @@ struct ItemDetailView: View {
             .padding(.horizontal, 14).padding(.vertical, 10)
         }
         .onAppear(perform: load)
+    }
+
+    var waitingSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Waiting").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            TextField("On whom (person or organisation)", text: $waitingOn).textFieldStyle(.roundedBorder)
+            TextField("For what (reply, document, approval…)", text: $expected).textFieldStyle(.roundedBorder)
+            HStack {
+                Toggle("Follow up", isOn: $hasFollowUp).toggleStyle(.checkbox)
+                DatePicker("", selection: $followUp, displayedComponents: .date).labelsHidden().disabled(!hasFollowUp)
+                Spacer()
+                Button("Save") { model.updateWaiting(item, on: waitingOn, expected: expected, followUp: hasFollowUp ? Calendar.current.startOfDay(for: followUp) : nil) }
+            }
+            if let since = item.waitingSince {
+                Text("Waiting since \(DueText.describe(since, hasTime: false)).").font(.caption).foregroundStyle(.secondary)
+            }
+            let attempts = item.events.filter { $0.kind == .followedUp }.count
+            HStack {
+                Text(attempts == 0 ? "No follow-ups yet." : "Followed up \(attempts) time\(attempts == 1 ? "" : "s").").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("I followed up") { model.followedUp(item, next: nil) }
+            }
+            Text("Wren can remind you to follow up. It never sends messages for you.").font(.caption2).foregroundStyle(.tertiary)
+        }
+        .controlSize(.small)
+        .font(.callout)
+    }
+
+    var goalSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Goal").foregroundStyle(.secondary)
+                Menu(item.goal?.title ?? "None") {
+                    Button("None") { model.unlink(item) }.disabled(item.goal == nil)
+                    ForEach(model.goals.filter { $0.status == .active || $0.status == .paused }) { g in
+                        Button(g.title) { model.link(item, to: g, milestone: false) }
+                        Button("\(g.title) (as milestone)") { model.link(item, to: g, milestone: true) }
+                    }
+                }
+                .menuStyle(.borderlessButton).fixedSize()
+                if item.isMilestone { Text("milestone").font(.caption).foregroundStyle(.secondary) }
+                Spacer()
+                Button("Turn into goal") { model.convertToGoal(item) }.controlSize(.small)
+            }
+            HStack {
+                TextField("Break into steps (comma-separated)", text: $steps).textFieldStyle(.roundedBorder).controlSize(.small)
+                Button("Create") {
+                    let parts = steps.split(separator: ",").map(String.init)
+                    if !parts.isEmpty { model.split(item, into: parts); steps = "" }
+                }.controlSize(.small).disabled(steps.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .font(.callout)
     }
 
     var interpretationLabel: String {
@@ -144,6 +209,10 @@ struct ItemDetailView: View {
         deadlineHasTime = item.deadlineHasTime
         hasReminder = item.nextReminderAt != nil
         reminder = item.nextReminderAt ?? Date().addingTimeInterval(3600)
+        waitingOn = item.waitingOn ?? ""
+        expected = item.expectedResponse ?? ""
+        hasFollowUp = item.followUpAt != nil
+        followUp = item.followUpAt ?? Calendar.current.date(byAdding: .day, value: 3, to: .now)!
     }
 
     func save() {

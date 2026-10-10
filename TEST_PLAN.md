@@ -205,6 +205,25 @@ Network calls are stubbed with recorded Gmail API responses. One optional live t
 | Dry run | `testDryRunNeverExecutes` |
 | Works without Ollama | `DailyEngineTests.testWholePipelineWithoutModel` |
 
+## Milestone 3 tests (implemented)
+
+| Requirement | Test |
+|---|---|
+| Goal creation, editing, status, persistence | `GoalTests.testCreateEditStatusAndPersistence`, `testArchivedGoalCanOnlyResume` |
+| Goal progress methods and explanations | `testProgressMethodsAreExplicitAndExplained`, `testEmptyLinkedProgressIsNotZeroPercent`, `testAddMilestone` |
+| Goal–task relationships, conversion | `testProgressMethodsAreExplicitAndExplained` (link/unlink), `testConvertItemToGoalKeepsHistory` |
+| Model/scheduler can't change goals | `testModelCannotChangeGoals` |
+| Waiting follow-up scheduling and dedupe | `WaitingAndInsightTests.testFollowUpBecomesDueThenQuietAfterAcknowledgement`, `testFollowUpSurfacesOnceInDailySummaries`, `testFollowUpTurnsStaleAfterGrace` |
+| Postponement threshold, dismissal, resurfacing, tone | `testPostponementThresholdDismissalAndResurfacing`, `testKeepDateRecordsReviewAndCustomThreshold`, `testInsightForgeryRejected` |
+| Stale detection and exclusions | `testStaleCriteriaAndExclusions` |
+| Briefing integration | `testGoalApproachingAppearsInBriefingOnce`, `BriefingContentTests.testSectionsAndOrdering` |
+| Unique contextual resolution | `ContextResolverTests.testUniqueTargetResolvesToProposalOnly`, `testPronounUsesSelectionThenRecent`, `testExactAndPartialTitles`, `testSelectionBreaksATie` |
+| Ambiguous references ask | `testAmbiguousTitleAsks`, `testPronounWithoutContextAsks`, `testWeakSingleMatchIsFlagged`, `testNotFoundNeedsDateAndNotACommand`, `testNoOpMoveIsReportedNotProposed`, `testClosedItemsAreNeverTargets` |
+| Queries | `testQueries` |
+| Confirmation/authorization of proposals | `ContextAuthorizationTests.testConversationalProposalNeedsBoundConfirmation`, `testRulesDoNotLetConversationalProposalsRunUnseen`, `testCancelLeavesNoLastingDenial`, `testDocumentTextCannotAuthorizeContextChange`, `testModelPickerOnlyChoosesFromList` |
+| Migration and history preservation | `MigrationTests.testV2StoreOpensWithDataAndHistoryIntact` |
+| Without Ollama | `testMilestoneFeaturesWithoutOllama` |
+
 ## Commands recorded per phase
 
 ```
