@@ -15,3 +15,4 @@ build/
 
 # Synthetic test fixtures only (see Tests/WrenCoreTests/Fixtures). Never real user data.
 !Tests/WrenCoreTests/Fixtures/**/*.store
+dist/

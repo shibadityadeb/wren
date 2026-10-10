@@ -4,26 +4,16 @@ import UserNotifications
 import WrenCore
 import os
 
-enum ModelStatus: Equatable {
-    case checking
-    case off
-    case unreachable(String)
-    case noChatModel
-    case ready([String])
-
-    var summary: String {
-        switch self {
-        case .checking: "Checking local model…"
-        case .off: "Language model off"
-        case .unreachable: "Ollama not running"
-        case .noChatModel: "No chat model installed"
-        case .ready: "Local model ready"
-        }
-    }
-    var isReady: Bool { if case .ready = self { true } else { false } }
+/// A model download the user started from the Local AI pane.
+enum ModelDownload: Equatable {
+    case idle
+    case running(model: String, update: PullUpdate?)
+    case failed(model: String, reason: String)
+    case cancelled(model: String)
+    case finished(model: String)
 }
 
-enum Route: Equatable { case list, detail(UUID), settings, briefing, checkIn, activity, goals, goal(UUID), review }
+enum Route: Equatable { case list, detail(UUID), settings, briefing, checkIn, activity, goals, goal(UUID), review, aiSetup }
 
 /// A request waiting for the user to approve or cancel, shown as a native alert.
 struct PendingConfirmation: Identifiable {
@@ -61,7 +51,12 @@ final class AppModel {
     var insightSettings: InsightSettings
     /// Recently touched items, most recent first (for "that", "it").
     @ObservationIgnored var recentIDs: [UUID] = []
-    var modelStatus: ModelStatus = .checking
+    /// Truthful local-AI state. `.ready` only after a real request succeeded.
+    var ai: AIReadiness = .checking
+    var aiReport: DiagnosticReport?
+    var aiTesting = false
+    var download: ModelDownload = .idle
+    @ObservationIgnored var downloadTask: Task<Void, Never>?
     var selectedModel: String?
     var notificationStatus: UNAuthorizationStatus = .notDetermined
     var hotKeyError: String?
@@ -121,7 +116,7 @@ final class AppModel {
         loginStatus = loginItems.reconcileOnLaunch(userWantsEnabled: settings.launchAtLogin)
         Task {
             notificationStatus = await notifications.refreshStatus()
-            await refreshModels()
+            await refreshAI()
             processAwaiting()
             await tick()
         }
@@ -288,7 +283,7 @@ final class AppModel {
     func interpret(_ c: Commitment) {
         guard c.processing != .manual, c.status == .pending, let broker else { return }
         let id = c.id, text = c.originalText, created = c.createdAt, target = c.targetRef
-        let model = settings.useModel ? selectedModel : nil
+        let model = settings.useModel ? ai.usableModel : nil
         let processor = IntentProcessor(client: try? OllamaClient(), model: model, calendar: clock.calendar)
         let autoRemind = policy.rules.contains(.autoRemindDeadlines)
         let hour = reminderHour
@@ -304,15 +299,18 @@ final class AppModel {
             if item(id)?.nextReminderAt != nil { ensureNotificationPermission() }
             reload()
 
-            if model != nil, modelStatus.isReady {
+            if model != nil {
+                let started = Date()
                 switch await processor.interpret(text, now: created) {
                 case let .interpreted(i, name):
+                    noteModelSuccess(since: started)
                     _ = await broker.submit(ActionRequest(
                         action: BuiltInAction.applyInterpretation, target: target,
                         parameters: i.parameters(model: name, state: .processed, dateOnlyReminderHour: hour, scheduleReminders: autoRemind),
                         origin: .model(name ?? "local model"), createdAt: clock.now))
                     if item(id)?.nextReminderAt != nil { ensureNotificationPermission() }
                 case let .unavailable(reason):
+                    noteModelFailure(reason)
                     if let c = item(id) { c.processingNote = "Read with simple rules. \(reason)"; try? store?.context.save() }
                 case let .invalid(reason):
                     if let c = item(id) { try? store?.markInterpretationFailed(c, reason: reason, now: clock.now) }
@@ -325,14 +323,14 @@ final class AppModel {
     }
 
     func processAwaiting() {
-        for c in pending where c.processing == .awaiting && c.modelName == nil && modelStatus.isReady && settings.useModel {
+        for c in pending where c.processing == .awaiting && c.modelName == nil && ai.usableModel != nil && settings.useModel {
             interpret(c)
         }
     }
 
     func retryInterpretation(_ c: Commitment) {
         guard c.processing != .manual else { return }
-        Task { await refreshModels(); interpret(c) }
+        Task { await refreshAI(); interpret(c) }
     }
 
     // MARK: Check-in
@@ -405,31 +403,100 @@ final class AppModel {
     var denials: [DenialRecord] { (try? policyStore?.denials()) ?? [] }
     var audit: [AuditRecord] { broker?.recentAudit(limit: 100) ?? [] }
 
-    // MARK: Local model
+    // MARK: Local AI
 
-    func refreshModels() async {
-        guard settings.useModel else { modelStatus = .off; return }
-        modelStatus = .checking
-        do {
-            let client = try OllamaClient()
-            let chat = try await client.models().filter(\.canChat).map(\.name)
-            if chat.isEmpty { modelStatus = .noChatModel; return }
-            modelStatus = .ready(chat)
-            if selectedModel == nil || !chat.contains(selectedModel!) {
-                selectedModel = chat.first
-                settings.modelName = selectedModel
-            }
-        } catch {
-            modelStatus = .unreachable((error as? LocalizedError)?.errorDescription ?? "\(error)")
+    var aiDiagnostics: AIDiagnostics? { (try? OllamaClient()).map { AIDiagnostics(client: $0) } }
+
+    /// Cheap status check (no model loaded). Keeps a verified "ready" for the same model.
+    func refreshAI() async {
+        guard let d = aiDiagnostics else { ai = .notRunning; return }
+        let previous = ai
+        let next = await d.readiness(enabled: settings.useModel, selected: selectedModel)
+        if case let .ready(m, _, at, ms) = previous, case let .configured(m2, models) = next, m == m2 {
+            ai = .ready(model: m, models: models, verifiedAt: at, latencyMs: ms)
+        } else {
+            ai = next
+        }
+        // Select the only model automatically; with several, the user chooses.
+        if case let .selectModel(models) = ai, models.count == 1, selectedModel == nil {
+            selectedModel = models[0]; settings.modelName = models[0]
+            ai = await d.readiness(enabled: settings.useModel, selected: selectedModel)
         }
     }
 
-    func selectModel(_ name: String) { selectedModel = name; settings.modelName = name; processAwaiting() }
+    /// The "Test local AI" button: real request, real parse, result shown step by step.
+    func testAI() async {
+        guard let d = aiDiagnostics else { return }
+        aiTesting = true
+        let report = await d.fullTest(enabled: settings.useModel, selected: selectedModel)
+        aiReport = report
+        ai = report.readiness
+        aiTesting = false
+        if ai.isReady { processAwaiting() }
+        log.notice("AI test: \(self.ai.title, privacy: .public)")
+    }
+
+    func noteModelSuccess(since: Date) {
+        if case let .configured(m, models) = ai {
+            ai = .ready(model: m, models: models, verifiedAt: Date(), latencyMs: Int(Date().timeIntervalSince(since) * 1000))
+        }
+    }
+
+    func noteModelFailure(_ reason: String) {
+        if let m = ai.usableModel { ai = .unavailable(model: m, models: ai.installedModels, reason: reason) }
+    }
+
+    func selectModel(_ name: String) {
+        selectedModel = name; settings.modelName = name
+        Task { await refreshAI(); await testAI() }
+    }
 
     func setUseModel(_ on: Bool) {
         settings.useModel = on
-        Task { await refreshModels(); processAwaiting() }
+        Task { await refreshAI(); processAwaiting() }
     }
+
+    /// Asks macOS to open the Ollama app the user installed. Nothing is executed by Wren itself.
+    func startOllama() {
+        guard let url = FileSystemOllamaProbe().appURL() else { return }
+        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { _, _ in
+            Task { @MainActor in
+                for _ in 0..<15 {
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    await self.refreshAI()
+                    if self.ai != .notRunning { break }
+                }
+            }
+        }
+    }
+
+    /// Only ever started by the user pressing Download, for the exact model shown.
+    func startDownload(_ name: String) {
+        guard OllamaClient.isValidModelName(name), let client = try? OllamaClient() else {
+            download = .failed(model: name, reason: "“\(name)” isn't a valid model name."); return
+        }
+        if case .running = download { return }
+        download = .running(model: name, update: nil)
+        log.notice("model download started: \(name, privacy: .public)")
+        downloadTask = Task {
+            do {
+                _ = try await client.pullToCompletion(model: name) { u in
+                    await MainActor.run { self.download = .running(model: name, update: u) }
+                }
+                download = .finished(model: name)
+                selectedModel = name; settings.modelName = name
+                await refreshAI()
+                await testAI()  // verify it actually answers
+            } catch is CancellationError {
+                download = .cancelled(model: name)
+            } catch {
+                download = .failed(model: name, reason: (error as? LocalizedError)?.errorDescription ?? "\(error)")
+            }
+            log.notice("model download ended: \(String(describing: self.download), privacy: .public)")
+        }
+    }
+
+    func cancelDownload() { downloadTask?.cancel() }
 
     // MARK: Shortcut
 

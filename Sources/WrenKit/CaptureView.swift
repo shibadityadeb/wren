@@ -9,6 +9,7 @@ struct CaptureView: View {
     var confirm: (ContextProposal) -> Void = { _ in }
     var choose: (Candidate, PendingCommand) -> Void = { _, _ in }
     var saveAsNew: (String) -> Void = { _ in }
+    var openAISetup: () -> Void = {}
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -20,6 +21,10 @@ struct CaptureView: View {
                 Text("Wren").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 Spacer()
                 Text(state.status).font(.caption).foregroundStyle(.tertiary)
+                if !state.aiAvailable {
+                    Button("Local AI not set up") { openAISetup() }.buttonStyle(.link).font(.caption)
+                        .help("Wren still saves everything. Set up local AI for better understanding.")
+                }
             }
             TextField("What do you need to do?", text: $state.text)
                 .textFieldStyle(.plain)
@@ -106,5 +111,6 @@ final class CaptureState {
     var presentations = 0
     /// Wren's answer to a command (preview, question, list), shown under the field.
     var reply: ContextResolution?
+    var aiAvailable = true
     var busy = false
 }

@@ -58,7 +58,7 @@ public enum SnapshotRenderer {
         try store.context.save()
 
         let model = AppModel(store: store)
-        model.modelStatus = .ready(["qwen2.5:3b", "llama3.2:3b"])
+        model.ai = .ready(model: "qwen2.5:3b", models: ["qwen2.5:3b", "llama3.2:3b"], verifiedAt: now, latencyMs: 840)
         model.selectedModel = "qwen2.5:3b"
         model.notificationStatus = .authorized
 
@@ -103,7 +103,7 @@ public enum SnapshotRenderer {
         }
         // Empty state.
         let empty = AppModel(store: try WrenStore(url: nil))
-        empty.modelStatus = .noChatModel
+        empty.ai = .noChatModel
         try render(PopoverView(model: empty), size: CGSize(width: 380, height: 400), appearance: .aqua, to: dir.appendingPathComponent("popover-empty-light.png"))
     }
 

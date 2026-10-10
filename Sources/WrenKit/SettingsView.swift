@@ -124,27 +124,13 @@ struct SettingsView: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
 
-                    section("Local language model") {
-                        Toggle("Use Ollama to understand captures", isOn: Binding(get: { model.settings.useModel }, set: { model.setUseModel($0) }))
-                        switch model.modelStatus {
-                        case let .ready(names):
-                            Picker("Model", selection: Binding(get: { model.selectedModel ?? "" }, set: { model.selectModel($0) })) {
-                                ForEach(names, id: \.self) { Text($0).tag($0) }
-                            }
-                        case .noChatModel:
-                            setup("Ollama is running but has no chat model. On 8 GB of RAM a 3B model works well:", "ollama pull qwen2.5:3b")
-                        case .unreachable:
-                            setup("Ollama isn't reachable at 127.0.0.1:11434. Start it, then refresh:", "ollama serve")
-                        case .checking: ProgressView().controlSize(.small)
-                        case .off: EmptyView()
-                        }
+                    section("Local AI") {
                         HStack {
-                            Text(model.modelStatus.summary).font(.caption).foregroundStyle(.secondary)
+                            Text(model.ai.title).font(.callout)
                             Spacer()
-                            Button("Refresh") { Task { await model.refreshModels(); model.processAwaiting() } }.controlSize(.small)
+                            Button("Set up and test…") { model.route = .aiSetup }
                         }
-                        Text("Wren only talks to Ollama on this Mac. Captures are always saved first, and dates are read with built-in rules even without a model. Wren never downloads models.")
-                            .font(.caption).foregroundStyle(.secondary)
+                        Text("Runs on this Mac through Ollama. Optional: everything works without it.").font(.caption).foregroundStyle(.secondary)
                     }
 
                     section("Notifications") {

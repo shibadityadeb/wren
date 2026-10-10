@@ -38,26 +38,28 @@ extension AppModel {
         let result = resolver.resolve(trimmed, items: all, goals: goals, context: conversation, now: clock.now)
         switch result {
         case .notACommand:
+            // Ask the local model only when the text looks like a command or question.
+            if ContextResolver.mightBeCommandOrQuestion(trimmed), let r = await modelInterpretation(trimmed, all: all) { return .resolution(r) }
             return capture(trimmed, source: .hotkey) ? .saved : .failed("Couldn't save. Your text is still here.")
         case let .notFound(msg):
-            if let picked = await modelFallback(trimmed, all: all) { return .resolution(picked) }
+            if let r = await modelInterpretation(trimmed, all: all) { return .resolution(r) }
             return .resolution(.notFound(msg))
         default:
             return .resolution(result)
         }
     }
 
-    /// Only when no title matched and a local model is ready. The model picks from a list; the result is a
-    /// `.model` proposal, which still has to be confirmed.
-    private func modelFallback(_ text: String, all: [Commitment]) async -> ContextResolution? {
-        guard settings.useModel, modelStatus.isReady, let name = selectedModel, let client = try? OllamaClient(),
-              let (cmd, ref) = resolver.command(text, now: clock.now) else { return nil }
-        let pool = all.filter { $0.status == .pending }.sorted { $0.lastActivityAt > $1.lastActivityAt }.prefix(15)
-        let cands = pool.map(resolver.candidate)
-        guard let pick = await ModelTargetPicker(client: client, model: name).pick(reference: ref, among: Array(cands)),
-              let c = pool.first(where: { $0.id == pick.id }) else { return nil }
-        return resolver.proposal(for: cmd, item: c, now: clock.now,
-                                 note: "Suggested by the local model for “\(ref)”. Check it's the right one.", origin: .model(name))
+    /// Model-assisted understanding. Any failure falls back to the non-AI path; nothing is lost.
+    private func modelInterpretation(_ text: String, all: [Commitment]) async -> ContextResolution? {
+        guard settings.useModel, let name = ai.usableModel, let client = try? OllamaClient() else { return nil }
+        let interpreter = ModelCommandInterpreter(client: client, model: name, resolver: resolver)
+        let started = Date()
+        switch await interpreter.interpret(text, items: all, goals: goals, context: conversation, now: clock.now) {
+        case let .resolution(r): noteModelSuccess(since: started); return r
+        case .newItem: noteModelSuccess(since: started); return nil
+        case let .unavailable(reason): noteModelFailure(reason); return nil
+        case .invalid: return nil
+        }
     }
 
     func choose(_ candidate: Candidate, for pending: PendingCommand) -> ContextResolution {

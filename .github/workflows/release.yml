@@ -1,0 +1,131 @@
+name: Release
+
+# Tag vX.Y.Z (stable) or vX.Y.Z-preview.N / -beta.N / -rc.N (prerelease) to publish.
+# Manual dispatch builds a release candidate as a workflow artifact and never publishes.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Tests (${{ matrix.arch }})
+    strategy:
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x86_64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: if [ -d /Applications/Xcode_16.4.app ]; then sudo xcode-select -s /Applications/Xcode_16.4.app; fi
+      - run: swift test
+
+  build:
+    name: Build, sign, notarize, package
+    needs: test
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      HAS_CERT: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 != '' && secrets.MACOS_CERTIFICATE_PASSWORD != '' }}
+      HAS_NOTARY: ${{ secrets.NOTARY_KEY_P8_BASE64 != '' && secrets.NOTARY_KEY_ID != '' && secrets.NOTARY_ISSUER_ID != '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - run: if [ -d /Applications/Xcode_16.4.app ]; then sudo xcode-select -s /Applications/Xcode_16.4.app; fi
+      - name: Check tag matches VERSION
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          V="$(tr -d ' \n' < VERSION)"; TAG="${GITHUB_REF_NAME#v}"
+          [[ "$TAG" == "$V" || "$TAG" == "$V"-* ]] || { echo "Tag $GITHUB_REF_NAME does not match VERSION $V"; exit 1; }
+      - name: Import Developer ID certificate
+        if: env.HAS_CERT == 'true'
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: scripts/ci-import-certificate.sh
+      - name: Build universal app and DMG
+        run: scripts/package-dmg.sh --skip-tests
+      - name: Notarize and staple
+        if: env.HAS_CERT == 'true' && env.HAS_NOTARY == 'true'
+        env:
+          NOTARY_KEY_P8_BASE64: ${{ secrets.NOTARY_KEY_P8_BASE64 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          scripts/notarize.sh dist/Wren-macOS-universal.dmg
+          scripts/verify-dmg.sh dist/Wren-macOS-universal.dmg --require-notarized
+      - name: Record trust level
+        run: |
+          if ls dist/Wren-macOS-universal.dmg >/dev/null 2>&1; then SIGNED=1; else SIGNED=0; fi
+          if [[ $SIGNED == 1 ]] && xcrun stapler validate dist/Wren-macOS-universal.dmg >/dev/null 2>&1; then NOTARIZED=1; else NOTARIZED=0; fi
+          printf 'SIGNED=%s\nNOTARIZED=%s\n' "$SIGNED" "$NOTARIZED" | tee dist/trust.env
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Wren-release-${{ github.ref_name }}
+          path: |
+            dist/*.dmg
+            dist/*.sha256
+            dist/trust.env
+          if-no-files-found: error
+
+  verify-intel:
+    name: Verify DMG on Intel
+    needs: build
+    runs-on: macos-15-intel
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: Wren-release-${{ github.ref_name }}
+          path: dist
+      - run: for d in dist/*.dmg; do scripts/verify-dmg.sh "$d"; done
+
+  publish:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, verify-intel]
+    runs-on: macos-15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: Wren-release-${{ github.ref_name }}
+          path: dist
+      - name: Decide channel
+        id: channel
+        run: |
+          source dist/trust.env
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then PRE=1; else PRE=0; fi
+          if [[ $PRE == 0 && $NOTARIZED != 1 ]]; then
+            echo "::error::Stable tag $GITHUB_REF_NAME but the build is not signed and notarized. Not publishing. Configure the signing secrets (README › Releases) or tag a -preview build."
+            exit 1
+          fi
+          echo "prerelease=$PRE" >> "$GITHUB_OUTPUT"
+          echo "signed=$SIGNED" >> "$GITHUB_OUTPUT"
+          echo "notarized=$NOTARIZED" >> "$GITHUB_OUTPUT"
+      - name: Write release notes
+        run: scripts/release-notes.sh "$GITHUB_REF_NAME" dist ${{ steps.channel.outputs.signed }} ${{ steps.channel.outputs.notarized }} > dist/NOTES.md
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          FLAGS=()
+          [[ "${{ steps.channel.outputs.prerelease }}" == 1 ]] && FLAGS+=(--prerelease)
+          TITLE="Wren ${GITHUB_REF_NAME#v}"
+          [[ "${{ steps.channel.outputs.notarized }}" != 1 ]] && TITLE="$TITLE (unsigned preview)"
+          gh release create "$GITHUB_REF_NAME" dist/*.dmg dist/*.sha256 --title "$TITLE" --notes-file dist/NOTES.md "${FLAGS[@]}"

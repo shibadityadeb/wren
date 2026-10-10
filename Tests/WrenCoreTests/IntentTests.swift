@@ -21,6 +21,16 @@ final class IntentTests: XCTestCase {
         XCTAssertFalse(i.deadlineHasTime)
     }
 
+    func testDatePhraseIsDroppedFromTitleAndNoNoiseForNonTasks() throws {
+        let i = try proc.validate(modelOutput: json("commitment", "Submit API review by Friday", "by Friday"),
+                                  input: "Wren test: submit the API review by Friday", now: now)
+        XCTAssertEqual(i.title, "Submit API review")
+        XCTAssertNotNil(i.deadline)
+        let w = try proc.validate(modelOutput: json("waiting", "Waiting for Priya", "waiting"),
+                                  input: "waiting for Priya to send the contract", now: now)
+        XCTAssertNil(w.note, "no confusing date note on a waiting item")
+    }
+
     // P3-04
     func testIdeaGetsNoDeadline() throws {
         let i = try proc.validate(modelOutput: json("idea", "Build an AI startup", nil),

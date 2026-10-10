@@ -45,7 +45,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                         cancel: { [weak self] in self?.cancelCapture() },
                         confirm: { [weak self] in self?.confirmProposal($0) },
                         choose: { [weak self] c, p in self?.chooseCandidate(c, p) },
-                        saveAsNew: { [weak self] in self?.saveAsNew($0) })
+                        saveAsNew: { [weak self] in self?.saveAsNew($0) },
+                        openAISetup: { [weak self] in self?.openAISetup() })
         }
         panel.onCancel = { [weak self] in self?.cancelCapture() }
         panel.onResign = { [weak self] in
@@ -78,7 +79,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     func showCapture() {
         if panel.isVisible { panel.makeKey(); return }
         captureState.text = model.settings.captureDraft
-        captureState.status = model.modelStatus.isReady ? "" : "Saved locally even without a model"
+        captureState.status = ""
+        captureState.aiAvailable = model.ai.usableModel != nil
         captureState.presentations += 1
         panel.present()
     }
@@ -103,6 +105,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             if r?.status == .succeeded || r?.status == .unverified { closeCapture() }
             else { captureState.reply = .notFound(r?.message ?? "That didn't work."); captureState.status = r?.message ?? "" }
         }
+    }
+
+    private func openAISetup() {
+        closeCapture()
+        model.route = .aiSetup
+        openPopover()
     }
 
     private func chooseCandidate(_ c: Candidate, _ p: PendingCommand) { captureState.reply = model.choose(c, for: p) }
@@ -133,7 +141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     func openPopover() {
         guard let button = statusItem.button else { return }
         model.reload()
-        Task { await model.refreshModels(); model.notificationStatus = await model.notifications.refreshStatus() }
+        Task { await model.refreshAI(); model.notificationStatus = await model.notifications.refreshStatus() }
         NSApp.activate(ignoringOtherApps: true)
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         popover.contentViewController?.view.window?.makeKey()
@@ -173,7 +181,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             for c in model.pending + model.closed {
                 appLog.notice("debug item kind=\(c.kind.rawValue, privacy: .public) status=\(c.status.rawValue, privacy: .public) processing=\(c.processing.rawValue, privacy: .public) deadline=\(c.deadline?.description ?? "nil", privacy: .public) next=\(c.nextReminderAt?.description ?? "nil", privacy: .public) last=\(c.lastReminderAt?.description ?? "nil", privacy: .public)")
             }
-            appLog.notice("debug notifications=\(self.model.notificationStatus.rawValue, privacy: .public) model=\(self.model.modelStatus.summary, privacy: .public) briefing=\(self.model.todayRun.briefing.rawValue, privacy: .public) checkIn=\(self.model.todayRun.checkIn.rawValue, privacy: .public) login=\(self.model.loginStatus.label, privacy: .public)")
+            appLog.notice("debug notifications=\(self.model.notificationStatus.rawValue, privacy: .public) ai=\(self.model.ai.title, privacy: .public) briefing=\(self.model.todayRun.briefing.rawValue, privacy: .public) checkIn=\(self.model.todayRun.checkIn.rawValue, privacy: .public) login=\(self.model.loginStatus.label, privacy: .public)")
             let rules = self.model.policy.rules.map(\.rawValue).sorted().joined(separator: ",")
             let grants = self.model.policy.grants.map(\.rawValue).sorted().joined(separator: ",")
             appLog.notice("debug policy rules=\(rules, privacy: .public) grants=\(grants, privacy: .public)")
@@ -231,6 +239,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                     appLog.notice("debug confirmed status=\(r?.status.rawValue ?? "-", privacy: .public) auth=\(r?.authorization?.label ?? "-", privacy: .public)")
                 }
             }
+        case "/ai-test":
+            Task {
+                await model.refreshAI()
+                await model.testAI()
+                for st in model.aiReport?.steps ?? [] { appLog.notice("debug ai step \(st.name, privacy: .public): \(st.outcome.rawValue, privacy: .public) \(st.detail, privacy: .public)") }
+                appLog.notice("debug ai state: \(self.model.ai.title, privacy: .public)")
+            }
+        case "/ai-download":
+            // Debug only: the same code path as the Download button.
+            let name = q.first(where: { $0.name == "model" })?.value ?? "qwen2.5:3b"
+            model.startDownload(name)
+        case "/ai-download-cancel":
+            model.cancelDownload()
+        case "/ai-state":
+            appLog.notice("debug ai state: \(self.model.ai.title, privacy: .public) download=\(String(describing: self.model.download), privacy: .public)")
         case "/insights":
             model.reload()
             for i in model.insights { appLog.notice("debug insight \(i.kind.rawValue, privacy: .public): \(i.message, privacy: .public)") }
@@ -246,6 +269,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
 /// Entry point used by the `Wren` executable.
 public enum WrenMain {
+    /// Starts the core (store, policy, broker, engine, resolver, insights) in memory and checks
+    /// the result. Prints one line and returns success. No UI, no user data, no network.
+    @MainActor public static func smokeTest() -> Bool {
+        #if arch(arm64)
+        let arch = "arm64"
+        #elseif arch(x86_64)
+        let arch = "x86_64"
+        #else
+        let arch = "unknown"
+        #endif
+        do {
+            let clock = SystemClock()
+            let store = try WrenStore(url: nil)
+            let policy = try SwiftDataPolicyStore(context: store.context, clock: clock)
+            let broker = ActionBroker(context: store.context, policyStore: policy, clock: clock)
+            BuiltInAction.registerLocal(on: broker, store: store, notifier: nil, clock: clock)
+            let c = try store.capture("Smoke test tomorrow at 9am", source: .manual)
+            let rules = IntentProcessor(client: nil, model: nil).rulesOnly(c.originalText, now: clock.now)
+            guard rules.deadline != nil, rules.kind == .commitment else { print("smoke-test FAILED: date rules"); return false }
+            guard case .proposal = ContextResolver().resolve("mark the smoke test as done", items: try store.all(), goals: [], context: .init(), now: clock.now)
+            else { print("smoke-test FAILED: resolver"); return false }
+            _ = InsightEngine.compute(items: try store.all(), goals: [], now: clock.now, calendar: clock.calendar)
+            _ = WrenMark.menuBarImage()
+            let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+            print("smoke-test ok arch=\(arch) version=\(version) actions=\(broker.allDescriptors.count)")
+            return true
+        } catch {
+            print("smoke-test FAILED: \(error)")
+            return false
+        }
+    }
+
     @MainActor private static var delegate: AppDelegate?
 
     @MainActor public static func run() {

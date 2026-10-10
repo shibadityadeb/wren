@@ -90,7 +90,7 @@ struct ItemDetailView: View {
                             if item.processing != .manual && item.status == .pending {
                                 Button("Read again") { model.retryInterpretation(item) }
                                     .buttonStyle(.link).font(.caption)
-                                    .disabled(!model.modelStatus.isReady || model.processing.contains(item.id))
+                                    .disabled(model.ai.usableModel == nil || model.processing.contains(item.id))
                             }
                         }
                     }

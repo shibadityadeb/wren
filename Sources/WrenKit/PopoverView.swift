@@ -16,6 +16,7 @@ struct PopoverView: View {
             case .checkIn: CheckInView(model: model)
             case .activity: ActivityView(model: model)
             case .goals, .review: ListPane(model: model)
+            case .aiSetup: AISetupView(model: model)
             case let .goal(id):
                 if let g = model.goal(id) { GoalDetailView(model: model, goal: g) } else { ListPane(model: model) }
             }
@@ -119,7 +120,7 @@ struct ListPane: View {
             WrenMarkShape(compact: true).frame(width: 16, height: 16)
             Text("Wren").font(.headline)
             Spacer()
-            ModelBadge(status: model.modelStatus)
+            AIBadge(model: model)
             Button { model.route = .briefing } label: { Image(systemName: "sun.max") }
                 .buttonStyle(.borderless).help("Today's briefing")
             Button { model.route = .checkIn } label: { Image(systemName: "moon") }
@@ -251,34 +252,6 @@ struct Notice: View {
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
         .background(Color.primary.opacity(0.04))
-    }
-}
-
-struct ModelBadge: View {
-    let status: ModelStatus
-    var body: some View {
-        HStack(spacing: 4) {
-            Circle().fill(color).frame(width: 6, height: 6)
-            Text(short).font(.caption2)
-        }
-        .foregroundStyle(.secondary)
-        .help(status.summary)
-    }
-    var short: String {
-        switch status {
-        case .ready: "Local AI"
-        case .checking: "…"
-        case .off: "AI off"
-        default: "No AI"
-        }
-    }
-    var color: Color {
-        switch status {
-        case .ready: WrenTheme.accent
-        case .checking: .secondary
-        case .off: .secondary
-        default: .orange
-        }
     }
 }
 

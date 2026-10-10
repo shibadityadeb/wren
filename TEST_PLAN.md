@@ -224,6 +224,27 @@ Network calls are stubbed with recorded Gmail API responses. One optional live t
 | Migration and history preservation | `MigrationTests.testV2StoreOpensWithDataAndHistoryIntact` |
 | Without Ollama | `testMilestoneFeaturesWithoutOllama` |
 
+## Milestone 4 tests (implemented)
+
+| Requirement | Test |
+|---|---|
+| Every readiness state | `AIReadinessTests`: disabled, not installed vs not running, embedding-only → no chat model, select model (none/missing), configured ≠ ready, ready only after parsed answer, unavailable on timeout / HTTP 500 / unparseable answer |
+| Only loopback contacted | `testReadyOnlyAfterSuccessfulParsedAnswer` (hosts), `OllamaTests.testRejectsNonLocalHosts` |
+| Model discovery | `testRunningWithOnlyEmbeddingModelIsNoChatModel`, `OllamaTests.testModelsFiltersEmbeddingOnly` |
+| Download progress | `ModelPullTests.testAggregatorAddsLayersAndFinishes` |
+| Pull failures | `testAggregatorSurfacesErrors`, `testStreamSuccessFailureAndTruncation` (error line, truncated stream, invalid name, service gone) |
+| Cancellation | `testCancellation` |
+| Model name safety | `testModelNameValidation` |
+| Model-assisted commands | `ModelCommandTests.testPoliteVariationResolvesToConversationalProposal`, `testPronounFromContextWithLongPhrasing`, `testDayBeforeDeadline`, `testEndToEndThroughStubbedModel` |
+| Model can't pick or invent targets | `testInventedIdIsIgnoredAndDisagreementAsks`, `testModelOnlyPickIsAskedNotAssumed`, `testAmbiguousAsks` |
+| Model can't invent dates | `testDatePhraseMustBeInTheText` |
+| Invalid output | `testNewItemAndInvalidOutput` |
+| Grounded answers | `testQuestionsAreAnsweredFromStoredData`, `ContextResolverTests.testQueries`, `DeterministicPhrasingTests.testMoreQuestions` |
+| Confirmation enforcement | `testModelAssistedChangesAlwaysNeedConfirmation` plus all Milestone 2–3 authorization tests |
+| Without a model | `DeterministicPhrasingTests.testNaturalVariationsWithoutAModel`, `testMilestoneFeaturesWithoutOllama` |
+| Live model (opt-in) | `LiveModelTests.testLiveDiagnosticsCaptureAndCommand`, `OllamaTests.testLiveOllama` with `WREN_LIVE_OLLAMA` |
+| Packaging | `scripts/verify-dmg.sh` in CI on arm64 and Intel; `--smoke-test` per slice |
+
 ## Commands recorded per phase
 
 ```

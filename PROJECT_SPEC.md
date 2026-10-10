@@ -218,3 +218,13 @@ Any bulk action, meaning more than one target, is reviewed regardless of class u
 - Waiting items have who/what/since/follow-up date. Wren reminds you to follow up; it never sends anything.
 - Observations (follow-ups due, repeated postponement, goals coming up, quiet items) are neutral, deterministic, dismissible, and raised once per unchanged situation. Thresholds are in Settings › Review.
 - Commands like "move that to Sunday" are always previewed and need your confirmation, even for changes that would otherwise be automatic. Ambiguous references get a question, not a guess.
+
+## 12. Milestone 4 decisions (2026-10-11)
+
+- **Local AI is optional and local.** Wren talks only to Ollama on 127.0.0.1. Ollama is a separate install; the DMG does not include a model runtime or weights.
+- **Fresh install:** Wren works immediately without AI. The AI label in the menu says what's missing and opens a setup pane with the one next step.
+- **Model downloads need an explicit click** on a named model with its approximate size shown. Never on launch or in the background.
+- **"Ready" means proven:** only after a real request was answered and parsed.
+- **With a model:** better titles and classification, clarifying questions, more command phrasings, routed questions. **Without:** capture, dates, reminders, goals, review, fixed command phrasings and the same questions (answered deterministically).
+- **External AI services** (e.g. ChatGPT) are not used by this milestone and would be a separate, explicitly approved integration.
+- **Distribution:** universal DMG, macOS 14+, Apple Silicon and Intel. Unsigned builds are clearly labelled previews; stable releases require Developer ID signing and notarization.

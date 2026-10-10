@@ -171,8 +171,8 @@ public struct AIDiagnostics: Sendable {
         let start = clock()
         let raw: String
         do {
-            raw = try await client.chatJSON(model: model, system: "You are a health check. Reply with JSON only.",
-                                            user: "Reply with {\"ok\": true, \"word\": \"wren\"}.", schema: Self.testSchema, timeout: 90)
+            raw = try await client.chatJSON(model: model, system: "Copy the JSON object you are given, exactly. Reply with JSON only.",
+                                            user: #"{"ok": true, "word": "wren"}"#, schema: Self.testSchema, timeout: 90)
         } catch {
             let reason = (error as? LocalizedError)?.errorDescription ?? "\(error)"
             steps.append(.init(name: "Test request", outcome: .failed, detail: reason))
@@ -180,12 +180,16 @@ public struct AIDiagnostics: Sendable {
         }
         let ms = Int(clock().timeIntervalSince(start) * 1000)
         steps.append(.init(name: "Test request", outcome: .passed, detail: "Answered in \(ms) ms."))
+        // What matters is that the model returns parseable, schema-shaped output (that is how Wren
+        // uses it). The values themselves are reported, not required.
         guard let data = raw.data(using: .utf8), case let .object(o)? = try? JSONDecoder().decode(JSONValue.self, from: data),
-              case .bool(true)? = o["ok"] else {
+              case let .bool(ok)? = o["ok"], case let .string(word)? = o["word"] else {
             steps.append(.init(name: "Answer format", outcome: .failed, detail: "The answer wasn't the expected JSON: \(raw.prefix(80))"))
             return DiagnosticReport(steps: steps, readiness: .unavailable(model: model, models: chat, reason: "The model answered, but not in a usable format."))
         }
-        steps.append(.init(name: "Answer format", outcome: .passed, detail: "Valid structured JSON."))
+        let exact = ok && word.lowercased() == "wren"
+        steps.append(.init(name: "Answer format", outcome: .passed,
+                           detail: exact ? "Valid structured JSON." : "Valid structured JSON (content differed: ok=\(ok), word=“\(word.prefix(20))”)."))
         return DiagnosticReport(steps: steps, readiness: .ready(model: model, models: chat, verifiedAt: clock(), latencyMs: ms))
     }
 

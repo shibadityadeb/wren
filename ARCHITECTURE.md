@@ -6,6 +6,8 @@
 > 3. **Data:** a single `Commitment` model holds the verbatim `originalText`, a `kind` (commitment, idea, question, waiting, research, unsorted) and a `processing` state. This replaces a separate `Capture` entity. Only `kind == .commitment` gets automatic reminders. A separate `Capture` can be split out later if Phase 5 needs it.
 > 4. **UI:** the menu bar uses `NSStatusItem` + `NSPopover` rather than `MenuBarExtra`, so a notification tap can open the popover programmatically.
 
+> **Milestone 4 (2026-10-11).** Local AI readiness, model download, model-assisted commands and distribution are documented in §26–§29. The build no longer uses only `scripts/build-app.sh` for local runs: releases go through `scripts/package-dmg.sh`.
+>
 > **Milestone 3 (2026-10-10).** Goals, waiting follow-ups, insights and contextual references are documented in §22–§25.
 >
 > **Milestone 2 (2026-10-10).** The permission system and daily engine are built in `WrenCore` and documented in §18–§20 below. Where §15 (planned broker) and §18 (as built) differ, §18 is authoritative.
@@ -495,3 +497,52 @@ Targets: pronouns use the open item, then the most recent captured/opened/notifi
 Optional model fallback (`ModelTargetPicker`) runs only when nothing matches and a local model is ready: the model picks an index from a list Wren supplies; out-of-range or failed answers are ignored; the proposal has origin `.model` and is labelled.
 
 **Authorization.** Proposals carry origin `.conversational(text)` (or `.model`). The Authorizer always returns *needs confirmation* for `.conversational`, even when a standing rule would allow the action. The capture panel shows the preview; Confirm mints a confirmation bound to that exact action, target and parameters (5-minute lifetime, single use). Cancel is audited as "Cancelled by you" without a lasting denial, so the user can rephrase.
+
+
+## 26. Local AI readiness (Milestone 4)
+
+Files: `Sources/WrenCore/AI/`.
+
+Root cause found in the audit: Ollama was installed and running, but its only model was `nomic-embed-text` (embedding-only). Wren correctly filtered it out, found no chat model, selected nothing and showed "No AI", with no way inside the app to fix it. The old status also treated "not installed" and "not running" alike, and reported ready as soon as a model was listed, without testing it.
+
+`AIReadiness`: `disabled · checking · notInstalled · notRunning · noChatModel · selectModel · configured(model) · ready(model, verifiedAt, latency) · unavailable(model, reason)`.
+
+| Check | How |
+|---|---|
+| Installed? | File existence of `/Applications/Ollama.app`, `~/Applications/Ollama.app`, `/usr/local/bin/ollama`, `/opt/homebrew/bin/ollama`. Nothing is executed. |
+| Running? | `GET /api/version` on 127.0.0.1:11434 |
+| Chat models | `GET /api/tags`, keeping models whose `capabilities` include `completion` |
+| Selected | stored choice is installed; a single chat model is selected automatically |
+| Ready | `POST /api/chat` with a harmless JSON schema request; answer must parse with `ok: true` |
+
+`ready` is set only by a parsed answer: the Test button, or the first successful real capture/command (promotes `configured`). Any failed request demotes to `unavailable` with the reason. Timeouts and refused connections map to readable errors. "Start Ollama" asks macOS to open the installed Ollama app (`NSWorkspace.openApplication`); Wren runs no commands.
+
+## 27. Model download
+
+`OllamaClient.pull(model:)` streams `POST /api/pull` (`stream: true`) as NDJSON. `PullAggregator` sums per-layer `completed/total` by digest, raises Ollama `error` lines, and treats a stream that ends without `success` as failed. `pullToCompletion` turns consumer cancellation (which silently ends an async stream) into `CancellationError`. Model names must match Ollama's name grammar, so no arbitrary text reaches the request. Only the loopback client can be constructed. The UI shows the recommended model and its approximate size, checks free disk space (needs size + 2 GB), shows progress with cancel, offers Retry/Resume, and after success refreshes models and runs the readiness test. There is no download on launch or in the background.
+
+## 28. Model-assisted understanding
+
+Deterministic first, model second:
+
+1. `ContextResolver.resolve` (no model): commands with polite prefixes ("could you…"), multi-sentence input (last command sentence wins), "the previous task", "the day before it's due", and eight grounded queries (`waiting, recentPromises, quietItems, postponed, goalsNoProgress, overdue, dueSoon, doneRecently`).
+2. If that finds nothing and the text looks like a command or question (`mightBeCommandOrQuestion`), and a model is configured or ready, `ModelCommandInterpreter` asks the model to route it: `intent · operation · target_reference · target_id · date_phrase · days_before_deadline · question`. Plain captures skip the model and save immediately.
+
+Validation: `target_reference` and `date_phrase` must appear verbatim in the user's text; dates are parsed by `DateParser`, never taken from the model; `target_id` must be one of at most 30 listed short IDs. The **target is found by the deterministic resolver** from the quoted words. If the model's pick disagrees, or is the only support for a target, Wren asks ("Did you mean this one?"). Questions are answered by `ContextResolver.answer` from stored records; each `AnswerLine` carries the record ID, and `basis` says what was counted. Anything invalid falls back to saving the text as a capture.
+
+Proposals from either path use origin `.conversational(text)`, which the Authorizer never runs without a confirmation bound to action, target and parameters (5 min, single use). This also closes a Milestone 3 gap: the old model fallback produced `.model` proposals, which a standing rule could have auto-allowed for reminders.
+
+Capture interpretation (`IntentProcessor`) additionally accepts an optional `clarification_question`, shown as a note; it never changes the item. Prompts are bounded (≤ 500 characters of input, ≤ 30 candidates of ≤ 80 characters, `num_ctx` 4096) and never leave the Mac.
+
+## 29. Distribution
+
+| Piece | Detail |
+|---|---|
+| Architectures | Universal (arm64 + x86_64). SwiftPM's multi-arch mode rejects the package's per-target Swift 5 language setting, so each triple is built separately (`--triple arm64-apple-macosx14.0`, `x86_64-apple-macosx14.0`) and merged with `lipo`. No third-party code; one executable. |
+| Minimum OS | macOS 14.0 (unchanged; SwiftData) |
+| `--smoke-test` | Starts the core in memory (store, policy, broker, date rules, resolver, insights, menu-bar image), prints `arch=…`, exits. No UI, no user data. Run per slice in CI. |
+| `scripts/build-app.sh` | `[debug|release] [--universal]`; version from `VERSION`, build number from commit count; ad-hoc or Developer ID signing via `WREN_SIGN_IDENTITY` (hardened runtime, secure timestamp, no entitlements) |
+| `scripts/package-dmg.sh` | tests → universal build → stage (Wren.app, /Applications link, `Install Wren.txt`) → UDZO DMG → SHA-256 → verify |
+| `scripts/verify-dmg.sh` | checksum, `hdiutil verify`, contents, bundle id/version/LSUIElement/min OS, both slices present, no nested executables, no fixtures/secrets/debug strings, signature, notarization when required, `--smoke-test` on every slice this Mac can run |
+| CI (`ci.yml`) | tests natively on `macos-15` (arm64) and `macos-15-intel`; universal unsigned preview DMG uploaded as an artifact; re-verified on Intel |
+| Release (`release.yml`) | tag `v*`: tag must match `VERSION`; tests on both architectures; optional certificate import (temporary keychain) → sign → package → `notarytool submit --wait` → staple → verify; verify on Intel; publish. Stable tags require notarization; unsigned builds publish only under prerelease tags. Manual dispatch builds an artifact only. Actions pinned to commit SHAs; `contents: write` only in the publish job. |

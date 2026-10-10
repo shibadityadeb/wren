@@ -1,29 +1,59 @@
 #!/bin/zsh
-# Builds Wren.app from the Swift package: compiles, assembles the bundle,
-# generates the icon from assets/logo.png, and ad-hoc signs it.
-# Usage: scripts/build-app.sh [debug|release]   (default: release)
+# Builds Wren.app.
+#
+#   scripts/build-app.sh [debug|release] [--universal]
+#
+# --universal  builds arm64 and x86_64 separately and merges them with lipo (SwiftPM's
+#              multi-arch mode rejects this package's per-target language settings).
+#
+# Signing: ad-hoc by default. Set WREN_SIGN_IDENTITY to a "Developer ID Application: …"
+# identity in the keychain to sign for distribution (hardened runtime + secure timestamp).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-CONFIG="${1:-release}"
-APP="build/Wren.app"
 
-echo "→ swift build -c $CONFIG"
-swift build -c "$CONFIG" --product Wren
-swift build -c "$CONFIG" --product wren-tools
-BIN="$(swift build -c "$CONFIG" --show-bin-path)"
+CONFIG="release"; UNIVERSAL=0
+for a in "$@"; do
+  case "$a" in
+    debug|release) CONFIG="$a" ;;
+    --universal) UNIVERSAL=1 ;;
+    *) echo "unknown option $a"; exit 2 ;;
+  esac
+done
+VERSION="$(tr -d ' \n' < VERSION)"
+BUILD_NUMBER="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
+APP="build/Wren.app"
+mkdir -p build
+
+if [[ $UNIVERSAL == 1 ]]; then
+  BINS=()
+  for T in arm64-apple-macosx14.0 x86_64-apple-macosx14.0; do
+    echo "→ swift build -c $CONFIG --triple $T"
+    swift build -c "$CONFIG" --triple "$T" --product Wren
+    swift build -c "$CONFIG" --triple "$T" --product wren-tools
+    BINS+=("$(swift build -c "$CONFIG" --triple "$T" --show-bin-path)")
+  done
+  mkdir -p build/universal
+  lipo -create "${BINS[1]}/Wren" "${BINS[2]}/Wren" -output build/universal/Wren
+  WREN_BIN="build/universal/Wren"
+  TOOLS="${BINS[1]}/wren-tools"   # host-arch tool for asset generation (arm64 on Apple Silicon)
+  [[ "$(uname -m)" == "x86_64" ]] && TOOLS="${BINS[2]}/wren-tools"
+else
+  echo "→ swift build -c $CONFIG"
+  swift build -c "$CONFIG" --product Wren
+  swift build -c "$CONFIG" --product wren-tools
+  BIN="$(swift build -c "$CONFIG" --show-bin-path)"
+  WREN_BIN="$BIN/Wren"; TOOLS="$BIN/wren-tools"
+fi
 
 echo "→ brand assets from assets/logo.png"
-"$BIN/wren-tools" assets assets/logo.png Brand >/dev/null
-mkdir -p build
+"$TOOLS" assets assets/logo.png Brand >/dev/null
 iconutil -c icns Brand/Wren.iconset -o build/Wren.icns
 
-echo "→ assembling $APP"
+echo "→ assembling $APP ($VERSION, build $BUILD_NUMBER)"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN/Wren" "$APP/Contents/MacOS/Wren"
+cp "$WREN_BIN" "$APP/Contents/MacOS/Wren"
 cp build/Wren.icns "$APP/Contents/Resources/Wren.icns"
-VERSION="0.1.0"
-BUILD_NUMBER="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -50,7 +80,13 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-echo "→ ad-hoc signing (hardened runtime)"
-codesign --force --sign - --options runtime --timestamp=none "$APP"
-codesign --verify --strict "$APP"
-echo "✓ built $APP"
+IDENTITY="${WREN_SIGN_IDENTITY:--}"
+if [[ "$IDENTITY" == "-" ]]; then
+  echo "→ ad-hoc signing (not for public distribution)"
+  codesign --force --sign - --options runtime --timestamp=none "$APP"
+else
+  echo "→ signing with Developer ID (hardened runtime, secure timestamp)"
+  codesign --force --sign "$IDENTITY" --options runtime --timestamp "$APP"
+fi
+codesign --verify --strict --verbose=1 "$APP"
+echo "✓ built $APP ($(lipo -archs "$APP/Contents/MacOS/Wren"))"

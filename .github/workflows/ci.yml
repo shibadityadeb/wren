@@ -6,55 +6,71 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  test-and-build:
-    name: Test and build Wren.app
-    runs-on: macos-15
-    timeout-minutes: 30
+  test:
+    name: Tests (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x86_64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
-
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Select Xcode 16.4 if available
         run: |
-          if [ -d /Applications/Xcode_16.4.app ]; then
-            sudo xcode-select -s /Applications/Xcode_16.4.app
-          fi
-          xcodebuild -version
-          swift --version
-
-      - name: Cache SwiftPM build
-        uses: actions/cache@v4
-        with:
-          path: .build
-          key: spm-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-${{ hashFiles('Sources/**/*.swift') }}
-          restore-keys: spm-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-
-
-      - name: Unit tests
+          if [ -d /Applications/Xcode_16.4.app ]; then sudo xcode-select -s /Applications/Xcode_16.4.app; fi
+          xcodebuild -version; swift --version; uname -m
+      - name: Full test suite (native ${{ matrix.arch }})
         run: swift test
-
-      - name: Build app bundle
-        run: scripts/build-app.sh release
-
-      - name: Verify bundle
+      - name: Native release build and smoke test
         run: |
-          codesign --verify --strict --verbose=2 build/Wren.app
-          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" build/Wren.app/Contents/Info.plist
-          /usr/libexec/PlistBuddy -c "Print :LSUIElement" build/Wren.app/Contents/Info.plist
-          test -f build/Wren.app/Contents/Resources/Wren.icns
-          # Release builds must not contain the debug-only capture hook.
-          if strings build/Wren.app/Contents/MacOS/Wren | grep -q "debug capture saved"; then
-            echo "Release binary contains debug hook"; exit 1
-          fi
+          swift build -c release --product Wren
+          .build/release/Wren --smoke-test | tee /dev/stderr | grep -q "arch=${{ matrix.arch }}"
 
-      - name: Package
-        run: ditto -c -k --keepParent build/Wren.app build/Wren.zip
-
-      - uses: actions/upload-artifact@v4
+  package:
+    name: Universal DMG (unsigned preview)
+    needs: test
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          name: Wren-${{ github.sha }}
-          path: build/Wren.zip
+          fetch-depth: 0   # build number = commit count
+      - name: Select Xcode 16.4 if available
+        run: if [ -d /Applications/Xcode_16.4.app ]; then sudo xcode-select -s /Applications/Xcode_16.4.app; fi
+      - name: Build, package and verify
+        run: scripts/package-dmg.sh --skip-tests
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Wren-preview-${{ github.sha }}
+          path: |
+            dist/*.dmg
+            dist/*.sha256
           retention-days: 14
+          if-no-files-found: error
+
+  verify-intel:
+    name: Verify DMG on Intel
+    needs: package
+    runs-on: macos-15-intel
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: Wren-preview-${{ github.sha }}
+          path: dist
+      - name: Verify (runs the x86_64 slice natively)
+        run: scripts/verify-dmg.sh dist/Wren-macOS-universal-unsigned.dmg

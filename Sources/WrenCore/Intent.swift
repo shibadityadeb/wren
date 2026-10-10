@@ -152,7 +152,8 @@ public struct IntentProcessor: Sendable {
         if case let .string(phrase)? = obj["deadline_phrase"], !phrase.trimmingCharacters(in: .whitespaces).isEmpty {
             if input.lowercased().contains(phrase.lowercased()) {
                 parsed = parser.parse(phrase, now: now)
-                if parsed == nil { notes.append("Couldn't pin down “\(phrase)” as a date.") }
+                // Only worth mentioning for things that should have a date.
+                if parsed == nil, kind == .commitment || kind == .research { notes.append("Couldn't pin down “\(phrase)” as a date.") }
             } else {
                 notes.append("Ignored a date the model suggested that isn't in your text.")
             }
@@ -171,7 +172,14 @@ public struct IntentProcessor: Sendable {
             notes.append("Wren asks: \(q.trimmingCharacters(in: .whitespacesAndNewlines).prefix(160))")
         }
 
-        return Interpretation(kind: kind, title: title, priority: priority, deadline: parsed?.date,
+        // The date is stored separately, so drop it from the end of the title ("Submit review by Friday" → "Submit review").
+        var cleanTitle = title
+        if let p = parsed {
+            let pattern = "\\s*(?:by|on|before|due|at|until)?\\s*" + NSRegularExpression.escapedPattern(for: p.phrase) + "\\.?$"
+            let stripped = cleanTitle.replacingOccurrences(of: pattern, with: "", options: [.regularExpression, .caseInsensitive])
+            if stripped.count >= 3 { cleanTitle = stripped }
+        }
+        return Interpretation(kind: kind, title: cleanTitle, priority: priority, deadline: parsed?.date,
                               deadlineHasTime: parsed?.hasTime ?? false, note: notes.isEmpty ? nil : notes.joined(separator: " "))
     }
 }

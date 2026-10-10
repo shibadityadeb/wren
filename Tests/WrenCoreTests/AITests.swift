@@ -101,6 +101,15 @@ final class AIReadinessTests: XCTestCase {
         RouteStub.routes["/api/chat"] = (500, Data("model runner crashed".utf8))
         guard case .unavailable = await try diag().fullTest(enabled: true, selected: "qwen2.5:3b").readiness else { return XCTFail() }
 
+        // Schema-valid but different content still counts as a working model (format is what's checked).
+        RouteStub.routes["/api/chat"] = RouteStub.chat(#"{"ok":false,"word":""}"#)
+        let shaped = await try diag().fullTest(enabled: true, selected: "qwen2.5:3b")
+        guard case .ready = shaped.readiness else { return XCTFail("\(shaped.readiness)") }
+        XCTAssertTrue(shaped.steps.last!.detail.contains("content differed"))
+
+        RouteStub.routes["/api/chat"] = RouteStub.chat(#"{"ok":"yes"}"#)
+        guard case .unavailable = await try diag().fullTest(enabled: true, selected: "qwen2.5:3b").readiness else { return XCTFail("wrong types must fail") }
+
         RouteStub.routes["/api/chat"] = RouteStub.chat("Sure! The answer is yes.")
         let bad = await try diag().fullTest(enabled: true, selected: "qwen2.5:3b")
         guard case .unavailable = bad.readiness else { return XCTFail() }
@@ -266,6 +275,16 @@ final class ModelCommandTests: XCTestCase {
         XCTAssertEqual(c.map(\.id), [app.id])
     }
 
+    func testParaphrasedReferenceUsesOnlyTheUsersWords() throws {
+        let (h, m, api, _, _) = try setup()
+        let p = try XCTUnwrap(proposal(try run(m, h, "Let's do the API one later, shift it out to next Wednesday please",
+                                               #"{"intent":"change_item","operation":"reschedule","target_reference":"API review task","target_id":null,"date_phrase":"next Wednesday","days_before_deadline":null,"question":null}"#)))
+        XCTAssertEqual(p.request.target.id, api.id.uuidString)
+        // A paraphrase with no word from the user's text is not trusted.
+        let o = try run(m, h, "shift that one to next Wednesday", #"{"intent":"change_item","operation":"reschedule","target_reference":"scholarship","target_id":null,"date_phrase":"next Wednesday","days_before_deadline":null,"question":null}"#)
+        guard case .resolution(.clarify) = o else { return XCTFail("\(o)") }
+    }
+
     func testAmbiguousAsks() throws {
         let (h, m, _, _, _) = try setup()
         let o = try run(m, h, "mark the review done", #"{"intent":"change_item","operation":"complete","target_reference":"the review","target_id":null,"date_phrase":null,"days_before_deadline":null,"question":null}"#)
@@ -356,6 +375,7 @@ final class DeterministicPhrasingTests: XCTestCase {
         XCTAssertEqual(target("Mark the research review complete"), research.id.uuidString)
         XCTAssertEqual(target("Remind me about the application the day before it's due"), app.id.uuidString)
         XCTAssertEqual(target("Please move the previous task to Monday", .init(recent: [app.id])), app.id.uuidString)
+        XCTAssertEqual(target("Hmm, the research thing, just drop it", .init(recent: [research.id])), research.id.uuidString)
     }
 
     func testMoreQuestions() throws {

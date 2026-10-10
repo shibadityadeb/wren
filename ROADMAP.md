@@ -6,6 +6,43 @@ Each phase ends with: a green build, tests passing (commands recorded), a git co
 Deliverables: PROJECT_SPEC.md, ARCHITECTURE.md, ROADMAP.md, TEST_PLAN.md, git repository initialised in `Wren/`.
 Acceptance: architecture documented, MVP scope unambiguous, every dependency justified, core vs. later clearly split.
 
+## Milestone 4 status (2026-10-11): working local AI and a downloadable Mac app
+
+### Root cause of "no AI"
+
+Ollama 0.40.2 was installed and running, but its only model was `nomic-embed-text`, an embedding model. Wren correctly ignored it, found no chat model, selected nothing and showed "No AI", with no way to fix it from the app. The old status also merged "not installed" with "not running" and called a model ready without testing it.
+
+### Verified
+
+| What | How |
+|---|---|
+| Test suite | 140 tests, 2 skipped (opt-in live), 0 failures |
+| Truthful state on this Mac | Before: Wren reported "Download a model" (1 embedding-only model not usable) |
+| Download through Wren | `qwen2.5:3b` pulled via Wren's own download path: real progress (1.93 GB), then Wren's automatic test → "Ready: qwen2.5:3b" |
+| Test local AI | 5 steps passed: service 0.40.2, models, selection, answered in 425 ms, valid JSON |
+| Live tests (opt-in) | `LiveModelTests` and `testLiveOllama` passed 4 runs in a row against qwen2.5:3b |
+| Live capture in the app | 4 captures classified correctly (2 commitments with right deadlines, 1 waiting, 1 idea without a date) |
+| Live commands in the app | Model path: "Let's do the API one later, shift it out to next Wednesday please" → proposal; unconfirmed → awaitingConfirmation; confirmed → deadline moved 16 → 14 Oct, audit shows confirmation. "Anything I'm still expecting from other people?" → answered from stored data. Ambiguous "just drop it" with no context → asked |
+| Universal build | arm64 + x86_64 via per-triple builds and `lipo`; both slices pass `--smoke-test` (x86_64 under Rosetta locally; natively on Intel in CI) |
+| DMG | `scripts/package-dmg.sh`: tests → build → DMG → `scripts/verify-dmg.sh` all checks passed |
+| Install and upgrade | Fresh install from the DMG into /Applications, then reinstall over it: 8 items, 38 events, 19 audit records unchanged; no new login-item entries; one instance |
+
+### Not verified
+
+- Developer ID signing and notarization: no Apple credentials are configured, so the release pipeline can only produce unsigned previews. The signing and notarization steps are written but have never run.
+- Gatekeeper on a downloaded (quarantined) copy: unsigned builds are rejected on first open by design; the "Open Anyway" path is documented, not automated.
+- The new setup pane as seen live (logic verified through the debug hooks and tests).
+
+### Remaining gaps
+
+- Ollama is a separate install; Wren can't install it.
+- Small models still misread some phrasings; Wren asks instead of guessing, which can mean an extra click.
+- English only.
+
+### Next recommended milestone
+
+Configure Apple signing secrets and cut a signed, notarized 0.4.0; then Phase 8 hardening (export/backup/restore, content-free file logs, pause, safe reset).
+
 ## Milestone 3 status (2026-10-10): contextual personal execution
 
 ### Checklist

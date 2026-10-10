@@ -99,13 +99,17 @@ public struct ContextResolver: Sendable {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
         for sentence in sentences.reversed() {
             if let r = singleCommand(sentence, fullText: raw, now: now) { return r }
+            // "Hmm, the cello thing, just drop it": try the last clause on its own.
+            if let lastClause = sentence.split(separator: ",").last.map({ $0.trimmingCharacters(in: .whitespaces) }),
+               lastClause != sentence, let r = singleCommand(lastClause, fullText: raw, now: now) { return r }
         }
         return nil
     }
 
     static func stripPoliteness(_ s: String) -> String {
         var t = s
-        t = t.replacingOccurrences(of: #"^(?:ok(?:ay)?,?\s+|so,?\s+|actually,?\s+|hey,?\s+)"#, with: "", options: .regularExpression)
+        t = t.replacingOccurrences(of: #"^(?:ok(?:ay)?,?\s+|so,?\s+|actually,?\s+|hey,?\s+|hmm+,?\s+|well,?\s+)"#, with: "", options: .regularExpression)
+        t = t.replacingOccurrences(of: #"^(?:just|let'?s|lets)\s+"#, with: "", options: .regularExpression)
         t = t.replacingOccurrences(of: #"^(?:could|can|would|will) you(?: please)?\s+"#, with: "", options: .regularExpression)
         t = t.replacingOccurrences(of: #"^(?:please|kindly)\s+"#, with: "", options: .regularExpression)
         t = t.replacingOccurrences(of: #",?\s+please$"#, with: "", options: .regularExpression)
