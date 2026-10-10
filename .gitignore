@@ -1,0 +1,13 @@
+# Xcode / SwiftPM
+.build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcworkspace/xcuserdata/
+.swiftpm/
+*.dSYM
+# macOS
+.DS_Store
+# Local secrets / state
+*.store
+*.store-*
