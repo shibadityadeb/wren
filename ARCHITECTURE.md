@@ -184,11 +184,9 @@ Score each pending, non-snoozed commitment: overdue (+100), deadline today (+60)
 - `RelativeDateParser` (pure Swift, `Calendar.current`) independently resolves the evidence span ("tomorrow evening", "Friday", "tonight at 8", "this weekend"). If it resolves and disagrees with the model's ISO date by more than the granularity (day vs. hour), the parser wins and the commitment is flagged `deadlineIsUncertain`. If neither resolves, the capture goes to `needsClarification`.
 - Timeouts: 20 s for chat, 2 s for availability. Malformed JSON, missing fields, unknown enums, deadlines more than 2 years out, or an empty title → `Capture.failed` with the raw output retained.
 
-## 10. Bounded actions (Phase 7 sketch, not built before then)
+## 10. Bounded actions (Phase 7), superseded by the Action Broker (Phase 9)
 
-`ActionEngine` dispatches on a closed `enum ActionKind { answerLocally, searchLocalFiles(scope), webResearch(query) }`. Each is a separate type conforming to `Action` with `func run() async throws -> ActionResult`. The LLM can only pick a kind and fill its typed parameters, which are validated like intents. There is no string-to-shell path anywhere in the codebase, and a test asserts that `Process` is not referenced in `WrenCore`.
-
-Web research uses `URLSession` against public pages and a no-key search endpoint (DuckDuckGo HTML results), honours `robots.txt` and HTTP status, and records `url + retrievedAt` for every claim. If retrieval fails, the request is `blocked` with the reason.
+Phase 7 ships `answerLocally`, `searchLocalFiles`, and `webResearch` as separate typed actions with no string-to-shell path. To avoid a rewrite in Phase 9, every state change from Phase 4 onward goes through one seam: `WrenStore.apply(_ request: ActionRequest)`. In Phases 4 to 8 that seam is a plain function. Phase 9 turns it into the broker below, and commitment actions become the built-in `wren.tasks` tool.
 
 ## 11. Voice (Phase 6 sketch)
 
@@ -209,6 +207,10 @@ Either way audio is captured with `AVAudioEngine` to a temp file that is deleted
 | Microphone | `AVAudioEngine` | yes | 6 |
 | Speech (if option 1) | `SFSpeechRecognizer` | yes | 6 |
 | Local file search | `FileManager` with user-picked folders via `NSOpenPanel` (security-scoped bookmarks) | folder picker | 7 |
+| OAuth tokens, API keys | Keychain Services (`SecItem*`) | none; items scoped to Wren | 9 |
+| Gmail | Gmail REST API over `URLSession`, OAuth in the browser | Google consent screen | 10 |
+| Calendar (later) | EventKit | yes | TBD |
+| Named Shortcuts (later) | `/usr/bin/shortcuts run <name>` from one App-target adapter, allowlisted names only | Automation prompts per Shortcut | TBD |
 
 App Sandbox: **off** (not App Store). Hardened runtime: on. Signing: ad-hoc for local builds; Developer ID if the user has a certificate.
 
@@ -218,6 +220,8 @@ App Sandbox: **off** (not App Store). Hardened runtime: on. Signing: ad-hoc for 
 |---|---|---|---|
 | `xcodegen` (Homebrew) | dev-only | generates `Wren.xcodeproj` from a readable `project.yml` so the project file is reviewable and never hand-edited. Not shipped. Alternative is hand-writing a pbxproj. | 1 |
 | `whisper.cpp` SwiftPM package | runtime | only if option 2 is chosen in Phase 6 | 6 |
+
+| none for Gmail or OAuth | — | the Gmail REST API and OAuth with PKCE are small enough for `URLSession` and CryptoKit; GoogleSignIn and the Google API client were rejected as heavy for 8 GB and unnecessary | 10 |
 
 No other third-party code. Specifically rejected: `KeyboardShortcuts` (we need about 100 lines of Carbon), GRDB/Realm (SwiftData is native and sufficient), any HTTP client (URLSession), any scheduling library (the engine is a pure function).
 
@@ -231,3 +235,107 @@ No other third-party code. Specifically rejected: `KeyboardShortcuts` (we need a
 | Notification permission denied | Reminders shown as badges in the popover; status explains how to enable |
 | Hotkey registration fails | Popover capture field is the fallback; settings explains |
 | App crashed / not running | No notifications. Phase 8 status shows last-run time honestly |
+| Tool missing grant or disconnected | Request rejected with guidance; audited |
+| Tool result uncertain or timed out | Status `unverified`, notification says so, no retry of non-idempotent actions |
+| OAuth token expired or revoked | Integration marked disconnected; reads pause; nothing else affected |
+| Keychain unavailable | Integrations disabled; core features unaffected |
+
+## 15. Tool Registry and Action Broker (Phase 9)
+
+### 15.1 Types
+
+```swift
+enum EffectClass { case read, reversible, sensitive, destructive }
+
+struct CapabilityDescriptor {
+  let id: String                 // "gmail.archive"
+  let tool: String               // "gmail"
+  let effect: EffectClass
+  let undo: String?              // capability that reverses it, e.g. "gmail.unarchive"
+  let requiredGrants: [Grant]    // OAuth scopes, macOS permissions, user-granted folders
+  let parameters: ParameterSchema
+  let verification: String       // human description, e.g. "re-fetch labels; INBOX absent"
+  let maxTargetsWithoutReview: Int  // 1 by default
+}
+
+protocol Tool: Sendable {
+  var descriptor: ToolDescriptor { get }      // id, name, capabilities, auth method
+  func status() async -> ToolStatus            // connected, grants held, last error
+  func execute(_ call: ValidatedCall) async throws -> ToolOutput
+  func verify(_ call: ValidatedCall, _ output: ToolOutput) async -> Verification
+}
+
+enum Authorization {
+  case directInstruction(captureID: UUID)
+  case standingRule(ruleID: UUID)
+  case approval(approvalID: UUID)
+}
+
+struct ActionRequest {                 // persisted as ActionRecord
+  let id: UUID
+  let tool: String, capability: String
+  let parameters: JSONValue            // raw, validated by the broker
+  let targets: [TargetRef]             // resolved, each with a match reason
+  let authorization: Authorization?    // nil = proposal only
+  let origin: Origin                   // .user, .rule, .model(contextProvenance: [Provenance])
+  let dryRun: Bool
+}
+```
+
+Each record carries an execution status (`planned, awaitingReview, awaitingConfirmation, rejected, running, succeeded, failed, unverified`) and a verification status (`verified, mismatch, notVerifiable, pending`).
+
+### 15.2 Broker pipeline
+
+Every request, from any source, goes through the same ordered checks. The first failing check stops the request and is audited.
+
+1. **Lookup.** Tool and capability exist in the registry.
+2. **Validate.** Parameters match the schema. Targets are resolved and non-empty. An ambiguous target stops here with a clarification.
+3. **Grants.** The tool is connected and holds every required grant. Missing grant means rejected with "connect X" guidance, never a silent scope upgrade.
+4. **Authorization.** Checked against the rules in 15.3.
+5. **Policy.** Effect class, target count, standing rules, and settings produce one of `allow`, `review`, `confirm`, `deny`.
+6. **Dry run.** If requested, or global dry-run mode is on, return the plan and stop.
+7. **Execute.** Through the tool, with a timeout.
+8. **Verify.** The tool's verification runs. Status becomes `succeeded` only with evidence. A timeout or ambiguous answer becomes `unverified`, never success.
+9. **Audit.** One `AuditEntry` per request, updated at each step.
+
+Priority, confidence, or a "recommended" flag from a model are not inputs to steps 4 or 5. The policy function's signature does not accept them.
+
+### 15.3 How authorization is established
+
+- **Direct instruction.** Only Wren's own input channels create a `Capture` with source `text`, `voice`, or `notificationReply`. The broker accepts `directInstruction` only if that capture exists with one of those sources, is less than 10 minutes old, and was not already consumed by another request. The intent validator must also find the action verb in the raw text as an evidence span, the same rule used for deadlines. If the model resolved several targets, or resolved one with low confidence, the request is downgraded to a proposal needing approval.
+- **Standing rule.** User-created in settings. Each rule names one capability, a predicate over metadata such as sender domain or label, an optional daily cap, and an expiry. Rules can cover read, reversible, and sensitive actions. They can never cover destructive actions.
+- **Approval.** The review screen shows exact targets and effect. Approving stores a hash of capability, canonical parameters, and target IDs with a 10-minute expiry. The broker re-hashes at execution, so any difference invalidates it.
+- **Model-originated requests** have no authorization field the model can fill. The JSON schema for model tool calls omits it, and the decoder drops it if present. They become proposals.
+- **Content provenance.** When a proposal was influenced by untrusted content such as an email body, the proposal records that provenance and the review screen says so. Untrusted content never creates a `Capture` with a user source, so it cannot mint a direct instruction.
+
+### 15.4 Policy table (defaults, editable in settings except where noted)
+
+| Effect | Direct instruction, single target | Bulk or sensitive | Standing rule | Proposal |
+|---|---|---|---|---|
+| read | allow | allow | allow | allow if granted |
+| reversible | allow | review | allow within scope | review |
+| sensitive | review | review | allow within scope | review |
+| destructive | confirm, not editable | confirm, not editable | not permitted | confirm, not editable |
+
+### 15.5 Permissions view
+
+The popover gets a Connections screen listing each tool, its grants, its standing rules, and its last ten actions. Revoking a tool removes its Keychain items, invalidates its rules, and for OAuth calls the provider's revoke endpoint.
+
+### 15.6 Testing approach
+
+`MockTool` implementations with configurable effect classes, failures, and verification results. Required tests include an email body containing "delete all messages" producing no executable request, a model tool call with a forged `authorization` field being rejected, and replayed or altered approvals failing. See TEST_PLAN.md Phase 9.
+
+## 16. Email (Phase 10)
+
+- `EmailProvider` protocol: `listChanges(since:)`, `fetchMetadata(ids:)`, `fetchBody(id:)`, `search(query:)`, plus write capabilities registered as broker tools. Gmail is the only implementation until another is built and tested.
+- **Gmail auth.** OAuth 2.0 for installed apps with PKCE and a loopback redirect on `127.0.0.1:<random port>`, opened in the default browser through `ASWebAuthenticationSession` or `NSWorkspace`. Tokens go to Keychain under service `com.shibadityadeb.wren.oauth.gmail`.
+- **Developer console setup, done once by you.** Create a Google Cloud project, enable the Gmail API, configure the consent screen, and create an OAuth client of type "Desktop app". If the account is on Google Workspace, user type "Internal" avoids review and token expiry, subject to your admin. With user type "External" in Testing status, Google expires refresh tokens after 7 days, so you would reconnect weekly. The README will document both. This is OAuth configuration, not an AI API key.
+- **Scopes.** `gmail.readonly` at connect. `gmail.modify` when you enable archive, trash, or read state. `gmail.settings.basic` when you enable block or filters. Permanent delete needs full `https://mail.google.com/` access, so it stays off unless you enable it explicitly.
+- **Sync.** `users.history.list` from the stored `historyId` every 10 minutes while awake, and on wake. Initial sync covers the last 14 days only.
+- **Index.** `EmailMessage` SwiftData model with metadata only, see PROJECT_SPEC §9.7. Bodies cached only under the retention setting.
+- **Classifier.** Deterministic signals first: your important-senders list, Gmail category labels, `List-Unsubscribe` header, known billing and security sender patterns, calendar invites. The local model then labels the remainder with a category and a one-line reason, validated like intents. Corrections you make are stored as sender or domain overrides that win over both. Email text is wrapped as quoted data in the prompt, and the model output schema has no tool-call field.
+- **Briefing.** Details pending the rest of the Phase 10 prompt.
+
+## 17. External AI delegation (phase to be specified)
+
+Default is the handoff flow in PROJECT_SPEC §9.4. The optional API path is a broker tool `openai.delegate` with effect `sensitive`, because content leaves the Mac. It always shows a review screen containing the exact outbound text. The key lives in Keychain. The returned `model` and reasoning fields are compared with what was requested. Scripted control of the ChatGPT site or app is not planned.

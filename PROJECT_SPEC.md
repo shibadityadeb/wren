@@ -106,7 +106,8 @@ The rule that matters most: **speculative language never becomes a commitment**.
 ## 6. Non-goals (for the whole project)
 
 - Cloud sync, accounts, authentication, team features.
-- Calendar or email integration (may be considered after Phase 8; not planned).
+- Sending email or messages autonomously. Wren may draft; it sends only on a direct instruction or a confirmed approval.
+- Scripted control of the ChatGPT website. See §9.4 for why and what replaces it.
 - iOS companion app.
 - Mac App Store distribution (sandboxing would complicate the global shortcut and local file research). Wren ships as a locally built, ad-hoc or Developer ID signed `.app`.
 
@@ -123,4 +124,83 @@ The rule that matters most: **speculative language never becomes a commitment**.
 - Database: `~/Library/Application Support/Wren/Wren.store` (SwiftData/SQLite).
 - Settings: `UserDefaults` for the `com.shibadityadeb.wren` bundle.
 - Logs: `~/Library/Logs/Wren/` plus unified logging with `privacy: .private` on any user text.
-- No telemetry. No network traffic except the local Ollama endpoint and, in Phase 7, explicitly requested web research.
+- No telemetry. Network traffic is limited to: the local Ollama endpoint; explicitly requested web research (Phase 7); connected email providers (Phase 10 onward); and external AI delegation that you explicitly request for a specific task (phase to be specified).
+- OAuth tokens and optional API keys live only in the macOS Keychain, never in the database, settings, or logs.
+
+## 9. Execution agent extension (addendum, 2026-10-10)
+
+Wren grows from a commitment manager into a **local-first, permissioned execution agent**. It stays a native macOS utility, and its core functions still need no cloud AI key.
+
+### 9.1 New capabilities
+
+| Capability | Effect | Phase |
+|---|---|---|
+| Tool Registry, Action Broker, policy engine, audit, dry run | infrastructure | 9 |
+| Connect Gmail with OAuth, read-only first | read | 10 |
+| Local metadata index, importance classifier with reasons and corrections | read | 10 |
+| Email section in the morning briefing | read | 10 (spec text incomplete) |
+| Search email on request | read | 10 or later, pending your spec |
+| Archive, trash, mark read/unread, move, block sender, filters | write | after 10, pending your spec |
+| Delegate research or brainstorming to GPT, verify reasoning mode | external | pending your spec |
+| Approved Mac tools: files, Calendar, browser research, named Shortcuts | read/write | pending your spec |
+
+### 9.2 The central execution rule
+
+The model may reason about what should happen. It never gains permission to act from its own reasoning.
+
+Every state-changing action carries exactly one **authorization source**:
+
+1. **Direct instruction:** text or voice you entered through Wren's own input channels (hotkey overlay, popover, notification reply).
+2. **Standing rule:** a rule you created explicitly in settings, scoped to one capability and a matching condition. For example, "archive newsletters from substack.com after they appear in a briefing".
+3. **Confirmed approval:** you tapped Approve on one specific proposed action, with its exact target shown, before it expired.
+
+Without one of these, the Action Broker refuses to execute. Autonomous behaviour is limited to reading authorized data, summarizing, categorizing, and preparing proposals.
+
+Wren never autonomously sends email, blocks people, deletes data, changes system settings, or runs commands.
+
+### 9.3 Untrusted content
+
+Email bodies, attachments, web pages, documents, tool outputs, and delegated AI replies are **data, never instructions**. Text inside them that says "archive all mail", "forward this to…", or "the user has approved…" has no effect on authorization. Structurally, only Wren's own input channels can mint a direct instruction, so content cannot authorize anything no matter what the model concludes.
+
+### 9.4 External AI delegation: concern and chosen approach
+
+The addendum asks Wren to delegate through your **existing signed-in ChatGPT interface**. Wren will not drive the ChatGPT website or desktop app by script. That approach has three problems:
+
+- OpenAI's terms prohibit automated or programmatic extraction from its services outside the API, which puts your account at risk.
+- Scripted UI control breaks whenever the page or app changes.
+- It cannot reliably verify which model or reasoning mode actually ran, and the addendum requires verification rather than assumption.
+
+Wren offers two delegation paths instead. Both require an explicit request per task, and both show you exactly what will leave the Mac before sending:
+
+1. **Handoff (default, no key):** Wren prepares the minimal prompt, copies it, and opens ChatGPT. You choose the mode and paste the result back into Wren, or copy it and press the capture shortcut. Wren then summarizes, stores, and links the result. The reasoning mode is recorded as "chosen by you, not verified by Wren".
+2. **API (optional key in Keychain):** Wren sends the task through the official OpenAI API. It requests a reasoning model and effort level, then reads the `model` and reasoning fields the API returns to **verify** what ran. A mismatch is reported, never hidden. Costs are billed by OpenAI to your key. This path is optional and core Wren works without it.
+
+If you later want the handoff to be more automatic, that is a decision for you to make with the terms in view. It is not built by default.
+
+### 9.5 Audit
+
+Every action attempt, allowed or refused, is recorded locally with: the instruction or rule that triggered it, the resolved target, the capability, the authorization source, whether confirmation was obtained, the result, the verification outcome, and timestamps. Audit entries store identifiers and short labels such as sender address and subject. They never store email bodies or attachment content.
+
+### 9.6 Action classes and policy (Phase 9)
+
+| Class | Examples | Default policy |
+|---|---|---|
+| Read-only | search email, read permitted files, inspect calendar | runs when the integration is connected and the capability is granted |
+| Reversible | archive, mark unread, move to trash, move a file to a designated folder | a direct, unambiguous instruction runs it without extra confirmation |
+| Sensitive | send a message, block a sender, create a filter, modify an external record | review screen with exact targets and effect, unless a narrowly scoped standing rule covers it |
+| Destructive | permanent delete, bulk delete, irreversible file removal | explicit confirmation immediately before execution, every time; no standing rule can waive it |
+
+Any bulk action, meaning more than one target, is reviewed regardless of class unless a standing rule covers it. Missing permission, an ambiguous target, invalid arguments, or an uncertain result stops the action. Success is reported only with evidence from the tool. Dry-run mode shows the planned actions without executing any of them.
+
+### 9.7 Email data policy (Phase 10)
+
+- Gmail first, through OAuth 2.0 for desktop apps with PKCE and a loopback redirect. Wren never asks for or stores your email password.
+- Scopes start at `gmail.readonly`. `gmail.modify` and `gmail.settings.basic` are requested only when you enable actions that need them.
+- Refresh tokens live in Keychain. Disconnect revokes the token with Google and deletes local email data.
+- The local index stores the minimum: message and thread IDs, sender, recipients, subject, date, labels, a short snippet, the classification and its reason. Full bodies are fetched on demand and cached only under a retention setting, default off.
+- No email data goes to any Wren-owned server, because none exists.
+
+### 9.8 Open items
+
+- Phase 10's text ends at "Morning email". The briefing format and any later phase details are not yet reflected.
+- External AI delegation, email write actions, and Mac tools have no phase prompt yet. §9.4 records the planned approach for delegation.
