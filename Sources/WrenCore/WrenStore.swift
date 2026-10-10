@@ -154,8 +154,9 @@ public final class WrenStore {
     /// Applies an interpretation. Never overwrites manual edits or closed items.
     /// - Parameter state: `.processed` for model output; `.awaiting` when only the
     ///   deterministic rules ran (so a later model pass may still refine it).
+    /// - Parameter reminderPolicy: nil when the user has turned off automatic deadline reminders.
     public func applyInterpretation(_ i: Interpretation, to c: Commitment, model: String?,
-                                    reminderPolicy: ReminderPolicy, state: ProcessingState = .processed,
+                                    reminderPolicy: ReminderPolicy?, state: ProcessingState = .processed,
                                     now: Date = .now) throws {
         guard c.processing != .manual, c.status == .pending else { return }
         c.kind = i.kind
@@ -171,7 +172,7 @@ public final class WrenStore {
             c.nextReminderAt = nil
             c.reminderFromDeadline = false
         }
-        if c.nextReminderAt == nil, let r = reminderPolicy.initialReminder(for: c, now: now) {
+        if c.nextReminderAt == nil, let r = reminderPolicy?.initialReminder(for: c, now: now) {
             c.nextReminderAt = r
             c.reminderFromDeadline = true
             log(c, .reminderScheduled, at: now, note: "from deadline, \(Self.stamp(r))")

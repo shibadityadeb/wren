@@ -1,20 +1,24 @@
 import AppKit
 import UserNotifications
+import WrenCore
 import os
 
 /// Native notifications. Delivery is best effort: Focus modes, Do Not Disturb and
 /// System Settings can suppress banners, and Wren never claims otherwise.
 @MainActor
-final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
-    static let category = "WREN_REMINDER"
-    enum Action: String { case done = "WREN_DONE", snoozeHour = "WREN_SNOOZE_1H", later = "WREN_LATER" }
-
-    enum Response {
-        case done(UUID), snoozeHour(UUID), later(UUID, String), open(UUID)
+final class NotificationService: NSObject, UNUserNotificationCenterDelegate, WrenNotifier {
+    enum Category: String { case reminder = "WREN_REMINDER", briefing = "WREN_BRIEFING", checkIn = "WREN_CHECKIN", checkInItem = "WREN_CHECKIN_ITEM" }
+    enum Action: String {
+        case done = "WREN_DONE", snoozeHour = "WREN_SNOOZE_1H", later = "WREN_LATER", tomorrow = "WREN_TOMORROW"
+        case openBriefing = "WREN_OPEN_BRIEFING", review = "WREN_REVIEW", dismissCheckIn = "WREN_DISMISS_CHECKIN"
     }
 
-    /// Resolved lazily: UNUserNotificationCenter requires a real app bundle, and
-    /// offscreen rendering tools construct this service without one.
+    enum Response {
+        case done(UUID), snoozeHour(UUID), later(UUID, String), tomorrow(UUID), open(UUID)
+        case openBriefing, reviewCheckIn, dismissCheckIn
+    }
+
+    /// Resolved lazily: UNUserNotificationCenter requires a real app bundle.
     private var center: UNUserNotificationCenter { UNUserNotificationCenter.current() }
     private let log = Logger(subsystem: "com.shibadityadeb.wren", category: "notifications")
     var onResponse: ((Response) -> Void)?
@@ -27,8 +31,16 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
         let hour = UNNotificationAction(identifier: Action.snoozeHour.rawValue, title: "Remind me in 1 hour")
         let later = UNTextInputNotificationAction(identifier: Action.later.rawValue, title: "Remind me at…",
                                                   textInputButtonTitle: "Remind", textInputPlaceholder: "9pm, tomorrow 10am, in 2 hours")
-        center.setNotificationCategories([UNNotificationCategory(identifier: Self.category, actions: [done, hour, later],
-                                                                 intentIdentifiers: [], options: [])])
+        let tomorrow = UNNotificationAction(identifier: Action.tomorrow.rawValue, title: "Leave for tomorrow")
+        let open = UNNotificationAction(identifier: Action.openBriefing.rawValue, title: "Open briefing", options: [.foreground])
+        let review = UNNotificationAction(identifier: Action.review.rawValue, title: "Review", options: [.foreground])
+        let dismiss = UNNotificationAction(identifier: Action.dismissCheckIn.rawValue, title: "Dismiss for today")
+        center.setNotificationCategories([
+            UNNotificationCategory(identifier: Category.reminder.rawValue, actions: [done, hour, later], intentIdentifiers: []),
+            UNNotificationCategory(identifier: Category.briefing.rawValue, actions: [open], intentIdentifiers: []),
+            UNNotificationCategory(identifier: Category.checkIn.rawValue, actions: [review, dismiss], intentIdentifiers: []),
+            UNNotificationCategory(identifier: Category.checkInItem.rawValue, actions: [done, tomorrow, later, dismiss], intentIdentifiers: []),
+        ])
     }
 
     @discardableResult
@@ -37,7 +49,6 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
         return status
     }
 
-    /// Shows the macOS permission prompt (only the first time; afterwards macOS answers silently).
     func requestPermission() async -> Bool {
         do {
             let granted = try await center.requestAuthorization(options: [.alert, .sound])
@@ -50,37 +61,66 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
-    var canDeliver: Bool { status == .authorized || status == .provisional }
+    var canDeliverNow: Bool { status == .authorized || status == .provisional }
 
-    /// Hands a reminder to macOS. Returns true only if macOS accepted the request.
-    func deliverReminder(id: UUID, title: String, body: String, late: Bool) async -> Bool {
+    // MARK: WrenNotifier
+
+    func canDeliver() async -> Bool { await refreshStatus(); return canDeliverNow }
+
+    func deliverReminder(_ p: ReminderPayload) async -> Bool {
         let content = UNMutableNotificationContent()
-        content.title = title
-        content.body = body
+        content.title = p.title
+        content.body = p.body
         content.sound = .default
-        content.categoryIdentifier = Self.category
-        content.userInfo = ["commitmentID": id.uuidString]
+        content.categoryIdentifier = Category.reminder.rawValue
+        content.userInfo = ["commitmentID": p.id.uuidString]
         content.threadIdentifier = "reminders"
-        if late { content.subtitle = "Missed while your Mac was asleep or Wren wasn't running" }
-        let request = UNNotificationRequest(identifier: "reminder-\(id.uuidString)", content: content, trigger: nil)
-        do {
-            try await center.add(request)
-            return true
-        } catch {
-            log.error("add failed: \(error.localizedDescription, privacy: .public)")
-            return false
+        if p.late { content.subtitle = "Missed while your Mac was asleep or Wren wasn't running" }
+        return await add("reminder-\(p.id.uuidString)", content)
+    }
+
+    func deliverBriefing(_ b: Briefing) async -> Bool {
+        let content = UNMutableNotificationContent()
+        content.title = b.title
+        content.body = b.notificationBody
+        content.sound = .default
+        content.categoryIdentifier = Category.briefing.rawValue
+        content.userInfo = ["kind": "briefing", "day": b.day]
+        content.threadIdentifier = "daily"
+        return await add("briefing-\(b.day)", content)
+    }
+
+    func deliverCheckIn(_ c: CheckIn) async -> Bool {
+        let content = UNMutableNotificationContent()
+        content.title = c.title
+        content.body = c.notificationBody
+        content.sound = .default
+        content.threadIdentifier = "daily"
+        if let item = c.singleItem {
+            content.categoryIdentifier = Category.checkInItem.rawValue
+            content.userInfo = ["kind": "checkIn", "day": c.day, "commitmentID": item.id.uuidString]
+        } else {
+            content.categoryIdentifier = Category.checkIn.rawValue
+            content.userInfo = ["kind": "checkIn", "day": c.day]
         }
+        return await add("checkin-\(c.day)", content)
+    }
+
+    func withdrawReminder(id: UUID) {
+        center.removeDeliveredNotifications(withIdentifiers: ["reminder-\(id.uuidString)"])
     }
 
     func deliverInfo(_ title: String, _ body: String) async {
         let content = UNMutableNotificationContent()
         content.title = title; content.body = body
-        try? await center.add(UNNotificationRequest(identifier: "info-\(UUID().uuidString)", content: content, trigger: nil))
+        _ = await add("info-\(UUID().uuidString)", content)
     }
 
-    /// Removes a delivered reminder from Notification Center once the item is closed or rescheduled.
-    func withdraw(id: UUID) {
-        center.removeDeliveredNotifications(withIdentifiers: ["reminder-\(id.uuidString)"])
+    private func add(_ id: String, _ content: UNMutableNotificationContent) async -> Bool {
+        do { try await center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil)); return true } catch {
+            log.error("add failed: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
     }
 
     // MARK: Delegate
@@ -90,18 +130,27 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        guard let raw = response.notification.request.content.userInfo["commitmentID"] as? String, let id = UUID(uuidString: raw) else { return }
+        let info = response.notification.request.content.userInfo
+        let id = (info["commitmentID"] as? String).flatMap(UUID.init(uuidString:))
+        let kind = info["kind"] as? String
         let actionID = response.actionIdentifier
         let text = (response as? UNTextInputNotificationResponse)?.userText
         await MainActor.run {
-            let r: Response
-            switch actionID {
-            case Action.done.rawValue: r = .done(id)
-            case Action.snoozeHour.rawValue: r = .snoozeHour(id)
-            case Action.later.rawValue: r = .later(id, text ?? "")
-            default: r = .open(id)
+            let r: Response?
+            switch (actionID, id) {
+            case (Action.done.rawValue, let id?): r = .done(id)
+            case (Action.snoozeHour.rawValue, let id?): r = .snoozeHour(id)
+            case (Action.later.rawValue, let id?): r = .later(id, text ?? "")
+            case (Action.tomorrow.rawValue, let id?): r = .tomorrow(id)
+            case (Action.openBriefing.rawValue, _): r = .openBriefing
+            case (Action.review.rawValue, _): r = .reviewCheckIn
+            case (Action.dismissCheckIn.rawValue, _): r = .dismissCheckIn
+            case (UNNotificationDefaultActionIdentifier, _) where kind == "briefing": r = .openBriefing
+            case (UNNotificationDefaultActionIdentifier, _) where kind == "checkIn": r = .reviewCheckIn
+            case (UNNotificationDefaultActionIdentifier, let id?): r = .open(id)
+            default: r = nil
             }
-            onResponse?(r)
+            if let r { onResponse?(r) }
         }
     }
 }

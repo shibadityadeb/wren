@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import WrenCore
 import os
+import UserNotifications
 
 private let appLog = Logger(subsystem: "com.shibadityadeb.wren", category: "app")
 
@@ -16,6 +17,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var hotKeys: HotKeyService!
 
     func applicationDidFinishLaunching(_ note: Notification) {
+        // One Wren at a time: a login launch plus a manual open must not run two schedulers.
+        if let id = Bundle.main.bundleIdentifier,
+           NSRunningApplication.runningApplications(withBundleIdentifier: id).contains(where: { $0.processIdentifier != getpid() }) {
+            appLog.notice("another Wren instance is running; exiting")
+            NSApp.terminate(nil)
+            return
+        }
         model = AppModel()
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -135,7 +143,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             for c in model.pending + model.closed {
                 appLog.notice("debug item kind=\(c.kind.rawValue, privacy: .public) status=\(c.status.rawValue, privacy: .public) processing=\(c.processing.rawValue, privacy: .public) deadline=\(c.deadline?.description ?? "nil", privacy: .public) next=\(c.nextReminderAt?.description ?? "nil", privacy: .public) last=\(c.lastReminderAt?.description ?? "nil", privacy: .public)")
             }
-            appLog.notice("debug notifications=\(self.model.notificationStatus.rawValue, privacy: .public) model=\(self.model.modelStatus.summary, privacy: .public)")
+            appLog.notice("debug notifications=\(self.model.notificationStatus.rawValue, privacy: .public) model=\(self.model.modelStatus.summary, privacy: .public) briefing=\(self.model.todayRun.briefing.rawValue, privacy: .public) checkIn=\(self.model.todayRun.checkIn.rawValue, privacy: .public) login=\(self.model.loginStatus.label, privacy: .public)")
+            let rules = self.model.policy.rules.map(\.rawValue).sorted().joined(separator: ",")
+            let grants = self.model.policy.grants.map(\.rawValue).sorted().joined(separator: ",")
+            appLog.notice("debug policy rules=\(rules, privacy: .public) grants=\(grants, privacy: .public)")
+            for a in self.model.audit.prefix(8) {
+                appLog.notice("debug audit \(a.action, privacy: .public) \(a.status.rawValue, privacy: .public) by=\(a.origin, privacy: .public) auth=\(a.authorization ?? "-", privacy: .public)")
+            }
+        case "/delivered":
+            Task {
+                let delivered = await UNUserNotificationCenter.current().deliveredNotifications()
+                let ids = delivered.map(\.request.identifier).joined(separator: ",")
+                appLog.notice("debug delivered count=\(delivered.count, privacy: .public) ids=\(ids, privacy: .public)")
+            }
+        case "/checkin":
+            // Force-evaluate today's check-in with the time moved to now (debug only).
+            let minutes = Calendar.current.component(.hour, from: .now) * 60 + Calendar.current.component(.minute, from: .now)
+            if minutes >= 15 * 60 && minutes < 23 * 60 { model.updateDaily { $0.checkInMinutes = minutes } }
+            model.scheduleTick()
+        case "/login":
+            let on = q.first(where: { $0.name == "on" })?.value == "1"
+            model.setLaunchAtLogin(on)
+            appLog.notice("debug login on=\(on, privacy: .public) status=\(self.model.loginStatus.label, privacy: .public)")
+        case "/delete-first":
+            if let c = model.pending.last { model.delete(c) }
+            appLog.notice("debug delete requested; confirmation pending=\(self.model.confirmation != nil, privacy: .public)")
         default: break
         }
     }

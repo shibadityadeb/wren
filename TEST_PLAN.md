@@ -181,6 +181,30 @@ Network calls are stubbed with recorded Gmail API responses. One optional live t
 | P10-12 | Briefing email section | pending the rest of the Phase 10 prompt |
 | Manual | Connect a real Gmail account, wait one sync, inspect the essentials list | reasons are sensible; no password requested at any point |
 
+## Milestone 2 tests (implemented)
+
+| Requirement | Test |
+|---|---|
+| Briefing for empty, overdue, upcoming sets | `BriefingContentTests.testEmpty`, `testSectionsAndOrdering`, `testLimitsKeepNotificationShort` |
+| Check-in content | `BriefingContentTests.testCheckInContent` |
+| Daily briefing dedupe, across restart | `DailyEngineTests.testBriefingOnceAndNoDuplicateAfterRestart` |
+| Check-in dedupe and completion | `DailyEngineTests.testCheckInDedupAndCompletion` |
+| Missed event recovery | `DailyEngineTests.testMissedBriefingRecoveryIsPredictable` |
+| Empty summaries, disable, custom times | `testEmptyBriefingSkippedUnlessEnabled`, `testDisabledAndCustomTimes` |
+| Check-in never edits items | `testCheckInNeverChangesItems` |
+| Notifications unavailable | `testNotificationsUnavailable` |
+| DST transitions | `DSTTests` (spring forward and fall back, nonexistent time, next wake) |
+| Launch at login policy | `LoginItemTests` (default off, idempotent, re-register after upgrade, approval, failure) |
+| Unauthorized action rejection | `AuthorizationTests.testUnknownActionDenied`, `testExternalActionsNeedGrantsAndRevocationSticks`, `testSystemOriginCannotDoAnythingWithoutARule` |
+| Permission revocation | `testExternalActionsNeedGrantsAndRevocationSticks`, `testStandingRulesAreTypedAndProtectiveOnesCantBeRevoked`, `testPolicyPersistsAcrossRestart` |
+| Malicious instructions in content | `testInjectedEmailInstructionCannotDeleteOrSend` |
+| Model output cannot grant permissions | `testModelProposalCannotCarryAuthorization`, `testModelCannotBypassPolicyForReversibleActionWithoutRule` |
+| Destructive confirmation | `testDeleteRequiresConfirmationBoundToExactRequest`, `testConfirmationExpires` |
+| Denials survive rephrasing | `testDeclineSticksAcrossRephrasedRetries` |
+| Audit for success, failure, denial | `testDirectUserReversibleActionRunsAndIsAudited`, `testAuditCoversFailureAndHoldsNoContent`, `testUnknownActionDenied` |
+| Dry run | `testDryRunNeverExecutes` |
+| Works without Ollama | `DailyEngineTests.testWholePipelineWithoutModel` |
+
 ## Commands recorded per phase
 
 ```

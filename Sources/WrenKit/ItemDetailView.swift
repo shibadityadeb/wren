@@ -151,7 +151,6 @@ struct ItemDetailView: View {
         model.save(item, .init(title: title, details: details, kind: kind, priority: priority,
                                deadline: d, deadlineHasTime: hasDeadline && deadlineHasTime,
                                nextReminderAt: item.status == .pending && hasReminder ? reminder : nil))
-        if model.banner == nil { model.route = .list }
     }
 
     static func describe(_ k: EventKind) -> String {

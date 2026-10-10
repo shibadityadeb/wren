@@ -1,5 +1,6 @@
 import Foundation
 import Carbon.HIToolbox
+import WrenCore
 
 /// A global shortcut as Carbon understands it, plus a display string.
 public struct HotKeySpec: Codable, Equatable {
@@ -34,6 +35,15 @@ final class WrenSettings {
     var dateOnlyReminderHour: Int {
         get { d.object(forKey: "dateOnlyReminderHour") as? Int ?? 10 }
         set { d.set(min(max(newValue, 6), 21), forKey: "dateOnlyReminderHour") }
+    }
+    var daily: DailySettings {
+        get { (d.data(forKey: "dailySettings")).flatMap { try? JSONDecoder().decode(DailySettings.self, from: $0) } ?? DailySettings() }
+        set { d.set(try? JSONEncoder().encode(newValue.normalized()), forKey: "dailySettings") }
+    }
+    /// The user's explicit choice. Default false: Wren never adds itself to login items unasked.
+    var launchAtLogin: Bool {
+        get { d.bool(forKey: "launchAtLogin") }
+        set { d.set(newValue, forKey: "launchAtLogin") }
     }
     /// Unsent text in the capture overlay, kept if the overlay is dismissed by clicking away.
     var captureDraft: String {

@@ -31,6 +31,10 @@ public enum SnapshotRenderer {
         _ = try add("I am waiting for the recruiter to reply", kind: .waiting, title: "Recruiter reply")
         let done = try add("Renew passport photos", kind: .commitment, title: "Renew passport photos")
         try store.complete(done)
+        _ = try add("Pay the electricity bill", kind: .commitment, title: "Pay the electricity bill",
+                    deadline: cal.date(byAdding: .day, value: -1, to: cal.startOfDay(for: now)))
+        _ = try add("Book dentist appointment today", kind: .commitment, title: "Book dentist appointment",
+                    deadline: cal.startOfDay(for: now))
 
         let model = AppModel(store: store)
         model.modelStatus = .ready(["qwen2.5:3b", "llama3.2:3b"])
@@ -43,8 +47,12 @@ public enum SnapshotRenderer {
             try render(PopoverView(model: model), size: CGSize(width: 380, height: 520), appearance: appearance, to: dir.appendingPathComponent("popover-list-\(tag).png"))
             model.route = .detail(form.id)
             try render(PopoverView(model: model), size: CGSize(width: 380, height: 520), appearance: appearance, to: dir.appendingPathComponent("popover-detail-\(tag).png"))
+            model.route = .briefing
+            try render(PopoverView(model: model), size: CGSize(width: 380, height: 520), appearance: appearance, to: dir.appendingPathComponent("popover-briefing-\(tag).png"))
+            model.route = .checkIn
+            try render(PopoverView(model: model), size: CGSize(width: 380, height: 520), appearance: appearance, to: dir.appendingPathComponent("popover-checkin-\(tag).png"))
             model.route = .settings
-            try render(PopoverView(model: model), size: CGSize(width: 380, height: 560), appearance: appearance, to: dir.appendingPathComponent("popover-settings-\(tag).png"))
+            try render(PopoverView(model: model), size: CGSize(width: 380, height: 1500), appearance: appearance, to: dir.appendingPathComponent("popover-settings-\(tag).png"))
             let state = CaptureState()
             state.text = "Submit the scholarship form by Friday"
             try render(CaptureView(state: state, submit: { _ in }, cancel: {}).padding(20)

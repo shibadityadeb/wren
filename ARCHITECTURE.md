@@ -6,6 +6,8 @@
 > 3. **Data:** a single `Commitment` model holds the verbatim `originalText`, a `kind` (commitment, idea, question, waiting, research, unsorted) and a `processing` state. This replaces a separate `Capture` entity. Only `kind == .commitment` gets automatic reminders. A separate `Capture` can be split out later if Phase 5 needs it.
 > 4. **UI:** the menu bar uses `NSStatusItem` + `NSPopover` rather than `MenuBarExtra`, so a notification tap can open the popover programmatically.
 
+> **Milestone 2 (2026-10-10).** The permission system and daily engine are built in `WrenCore` and documented in §18–§20 below. Where §15 (planned broker) and §18 (as built) differ, §18 is authoritative.
+
 ## 1. Shape of the app
 
 Wren is a **menu-bar utility** (`LSUIElement = YES`, no Dock icon) built with SwiftUI, using AppKit only for three things that SwiftUI cannot do: the global hotkey, the non-activating capture panel, and sleep/wake observation.
@@ -346,3 +348,99 @@ The popover gets a Connections screen listing each tool, its grants, its standin
 ## 17. External AI delegation (phase to be specified)
 
 Default is the handoff flow in PROJECT_SPEC §9.4. The optional API path is a broker tool `openai.delegate` with effect `sensitive`, because content leaves the Mac. It always shows a review screen containing the exact outbound text. The key lives in Keychain. The returned `model` and reasoning fields are compared with what was requested. Scripted control of the ChatGPT site or app is not planned.
+
+
+## 18. Permission system (as built, Milestone 2)
+
+Files: `Sources/WrenCore/Authorization/`.
+
+### 18.1 The five steps, kept separate
+
+| Step | Who | Code |
+|---|---|---|
+| Proposal | user UI, scheduler, model, or content-derived suggestion | `ActionRequest` (origin set by Wren code; `ProposalParser` for model JSON) |
+| Authorization | pure function, no I/O | `Authorizer.decide` |
+| Execution | registered trusted handler | `ActionHandler.execute` via `ActionBroker.submit` |
+| Verification | the same handler re-reads real state | `ActionHandler.verify` |
+| Audit | broker, one record per attempt | `AuditRecord` (SwiftData) |
+
+`ActionRequest` has **no authorization field**. Authorization is computed from origin, grants, standing rules, denials and an optional one-time `Confirmation`. `ProposalParser` reads only `action`, `target`, `parameters`. It ignores `origin`, `authorization`, `confirmed`, `priority`, `confidence`, and forces the origin to `.model` or `.untrustedContent`.
+
+### 18.2 Categories and confirmation floors
+
+| Category | Examples | Floor | Can a rule relax it? |
+|---|---|---|---|
+| localReversible | complete, reopen, drop, snooze, set reminder, edit, apply interpretation, deliver reminder | none | n/a |
+| localDestructive | delete item | always confirm | no |
+| externalRead | read email (reserved) | none | n/a |
+| externalWrite | archive email, delegate to external AI (reserved) | always confirm | no |
+| irreversible | send email, permanent delete (reserved) | always confirm | no |
+
+A descriptor can be stricter than its category (`effectiveConfirmation = max(floor, declared)`), never looser.
+
+### 18.3 Decision order (`Authorizer.decide`)
+
+1. Unknown action → deny.
+2. Permission not granted → deny. External permissions are never granted by default.
+3. `noPrivateDataToExternalAI` and the request is marked private → deny.
+4. Origin is untrusted content and the category is not localReversible/externalRead → deny (even with a confirmation).
+5. A stored denial for this action+target and the origin is not the user directly → deny (parameters ignored, so rephrasing doesn't help).
+6. A confirmation is supplied → it must match the request fingerprint (action, target, parameters), be unused, and be under 5 minutes old → allow; otherwise deny.
+7. By origin: **user** → allow unless the floor is "always" (then ask). **system** → allow only for localReversible actions covered by a standing rule. **model** → allow only for localReversible actions covered by a standing rule, else ask. **untrusted content** → ask.
+
+Model confidence, priority and urgency are not parameters of this function.
+
+### 18.4 Standing rules (typed, closed set)
+
+| Rule | Default | Effect | Revocable |
+|---|---|---|---|
+| autoRemindDeadlines | on | scheduler may set/deliver reminders derived from your deadlines | yes |
+| autoApplyInterpretations | on | date rules and the local model may apply their reading of your own captures | yes |
+| confirmBeforeDelete | on | restates the destructive floor | no (locked) |
+| showDraftBeforeSending | on | email send always asks | no (locked) |
+| noPrivateDataToExternalAI | on | private content never goes to external AI | no (locked) |
+
+There is no free-text policy language. Allow-type rules can only cover named localReversible actions.
+
+### 18.5 Grants and denials
+
+Defaults: `local.items.modify`, `local.items.delete`, `local.reminders`, `local.notifications`. Seeded once; revocations persist across restarts. Declining a confirmation records a denial for that action+target; Settings › Permissions › "Things you declined" lifts it.
+
+### 18.6 Audit
+
+`AuditRecord`: request id, time, action, category, target kind/id, target label (≤ 80 chars), origin label, authorization label, status, verification, confirmation obtained, dry run, detail (≤ 200 chars). No parameters, no item notes, no content bodies. Trimmed to the newest 2000. Viewable in Settings › Activity log.
+
+## 19. Daily engine (as built)
+
+Files: `Sources/WrenCore/Daily/`.
+
+- `WrenEngine.tick()` delivers due reminders (through the broker, origin `.system`, authorized by `autoRemindDeadlines`), then evaluates the briefing and check-in. It is called on launch, wake, clock/timezone/day change, and a timer set to `nextWake()` (earliest reminder, next daily window, at most 60 s).
+- `Briefing.build` and `CheckIn.build` derive everything from persisted items. No model.
+- `DailyRun` (one row per local day, keyed `yyyy-MM-dd`) records each event's state: `pending, sent, skippedEmpty, missed, undelivered, completed, dismissed, disabled`. The state is written **before** delivery (at-most-once), so a crash or restart can't send twice.
+
+| Event | Default | Window | Started inside window | Started after window |
+|---|---|---|---|---|
+| Briefing | 11:00 | until check-in time (or 23:00 if check-in off) | sent once, late | `missed`, never sent |
+| Check-in | 19:00 | until 23:00 | sent once, late | `missed`, never sent |
+
+Empty summaries are `skippedEmpty` unless "send even when there's nothing to report" is on. Without notification permission the state is `undelivered`, and the content stays viewable in the menu. Times use `Calendar.time(minutesAfterMidnight:on:)` with `.nextTime`, so a time inside a DST gap moves to the next valid minute; day keys use the local calendar, so fall-back days still get one event.
+
+Check-in actions (Done, Snooze, Leave for tomorrow, Reschedule…) are user actions through the broker. The engine never changes items itself.
+
+## 20. Launch at login and single instance
+
+- `SMAppService.mainApp` behind `LoginItemService`; policy in `LoginItemController`. Default **off**. On launch, if you opted in and macOS lost the registration (app moved or replaced), Wren registers again; it never registers unasked.
+- `.notFound` from macOS (never registered) is shown as Off. Registration errors are shown in Settings and the toggle returns to off.
+- A second Wren process (for example login launch plus a manual open) exits immediately, so only one scheduler runs.
+
+## 21. Dependency injection
+
+| Concern | Protocol / type | Production | Tests |
+|---|---|---|---|
+| Clock and timezone | `WrenClock` | `SystemClock` (autoupdating calendar) | `FixedClock` |
+| Persistence | `WrenStore`, `PolicyStoring` | SwiftData file store | in-memory or temp-file store |
+| Notification delivery | `WrenNotifier` | `NotificationService` | `FakeNotifier` |
+| Scheduling | `WrenEngine` + `DailySchedule` | timer in `AppModel` | direct `tick()` calls |
+| Model access | `IntentProcessor(client:model:)` | `OllamaClient` | stub `URLProtocol`, nil client |
+| Authorization | `Authorizer` (pure), `ActionBroker` | SwiftData policy | same, temp store |
+| Login item | `LoginItemService` | `SMAppService` | `FakeLoginService` |

@@ -21,6 +21,78 @@ struct SettingsView: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
+                    section("Daily rhythm") {
+                        Toggle("Morning briefing", isOn: Binding(get: { model.daily.briefingEnabled }, set: { v in model.updateDaily { $0.briefingEnabled = v } }))
+                        if model.daily.briefingEnabled {
+                            timePicker("Briefing at", minutes: model.daily.briefingMinutes, range: DailySettings.briefingRange) { v in model.updateDaily { $0.briefingMinutes = v } }
+                        }
+                        Toggle("Evening check-in", isOn: Binding(get: { model.daily.checkInEnabled }, set: { v in model.updateDaily { $0.checkInEnabled = v } }))
+                        if model.daily.checkInEnabled {
+                            timePicker("Check-in at", minutes: model.daily.checkInMinutes, range: DailySettings.checkInRange) { v in model.updateDaily { $0.checkInMinutes = v } }
+                        }
+                        Toggle("Send even when there's nothing to report", isOn: Binding(get: { model.daily.sendEmptySummaries }, set: { v in model.updateDaily { $0.sendEmptySummaries = v } }))
+                        Text("Each runs at most once a day. If your Mac was asleep, a briefing is sent on wake until the check-in time, and a check-in until 11 PM; after that it's skipped, never sent the next day.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+
+                    section("Startup") {
+                        Toggle("Open Wren when I log in", isOn: Binding(get: { model.settings.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
+                        HStack {
+                            Text(model.loginStatus.label).font(.caption).foregroundStyle(model.loginStatus == .enabled || model.loginStatus == .disabled ? Color.secondary : Color.orange)
+                            Spacer()
+                            Button("Login Items…") { SystemLoginItemService.openSystemSettings() }.controlSize(.small)
+                        }
+                        Text("Reminders and daily summaries only arrive while Wren is running.").font(.caption).foregroundStyle(.secondary)
+                    }
+
+                    section("Permissions") {
+                        ForEach(StandingRuleKind.allCases) { k in
+                            let locked = PolicySnapshot.protectedRules.contains(k)
+                            Toggle(isOn: Binding(get: { model.policy.rules.contains(k) }, set: { model.setRule(k, $0) })) {
+                                HStack(spacing: 4) {
+                                    Text(k.title)
+                                    if locked { Image(systemName: "lock.fill").font(.caption2).foregroundStyle(.secondary) }
+                                }
+                            }
+                            .disabled(locked)
+                        }
+                        DisclosureGroup("What Wren may do") {
+                            VStack(alignment: .leading, spacing: 6) {
+                                ForEach(model.broker?.allDescriptors ?? [], id: \.id) { d in
+                                    HStack(alignment: .firstTextBaseline) {
+                                        VStack(alignment: .leading, spacing: 1) {
+                                            Text(d.summary)
+                                            Text("\(d.category.label) · \(d.effectiveConfirmation == .always ? "always asks first" : "no extra prompt")")
+                                                .font(.caption2).foregroundStyle(.secondary)
+                                        }
+                                        Spacer()
+                                        Text(model.policy.grants.contains(d.permission) ? "Allowed" : "Not granted")
+                                            .font(.caption).foregroundStyle(model.policy.grants.contains(d.permission) ? Color.secondary : Color.orange)
+                                    }
+                                }
+                                Text("External permissions (email, AI services) can't be granted yet; those integrations don't exist.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            .font(.callout)
+                            .padding(.top, 4)
+                        }
+                        let denials = model.denials
+                        if !denials.isEmpty {
+                            DisclosureGroup("Things you declined (\(denials.count))") {
+                                ForEach(denials) { d in
+                                    HStack {
+                                        Text("\(d.action) · \(d.targetLabel)").font(.caption).lineLimit(1)
+                                        Spacer()
+                                        Button("Allow again") { model.liftDenial(d.key) }.controlSize(.small)
+                                    }
+                                }
+                            }
+                        }
+                        Button("Activity log…") { model.route = .activity }
+                        Text("Wren acts only on your instruction, a rule above, or your confirmation. Model suggestions and text inside emails or pages never count as permission.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+
                     section("Capture shortcut") {
                         Toggle("Enable global shortcut", isOn: Binding(get: { model.hotKeyEnabled }, set: { model.setHotKeyEnabled($0) }))
                         HStack {
@@ -91,7 +163,7 @@ struct SettingsView: View {
                 .padding(14)
             }
         }
-        .onAppear { reminderHour = model.settings.dateOnlyReminderHour }
+        .onAppear { reminderHour = model.settings.dateOnlyReminderHour; model.refreshLoginStatus() }
         .onDisappear(perform: stopRecording)
     }
 
@@ -101,6 +173,17 @@ struct SettingsView: View {
         case .denied: "Turned off in System Settings"
         default: "Not yet allowed"
         }
+    }
+
+    func timePicker(_ label: String, minutes: Int, range: ClosedRange<Int>, set: @escaping (Int) -> Void) -> some View {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: .now)
+        let lower = today.addingTimeInterval(TimeInterval(range.lowerBound * 60))
+        let upper = today.addingTimeInterval(TimeInterval(range.upperBound * 60))
+        return DatePicker(label, selection: Binding(
+            get: { cal.time(minutesAfterMidnight: minutes, on: .now) },
+            set: { d in let c = cal.dateComponents([.hour, .minute], from: d); set((c.hour ?? 0) * 60 + (c.minute ?? 0)) }),
+            in: lower...upper, displayedComponents: .hourAndMinute)
     }
 
     func section<C: View>(_ title: String, @ViewBuilder _ content: () -> C) -> some View {

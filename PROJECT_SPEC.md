@@ -204,3 +204,10 @@ Any bulk action, meaning more than one target, is reviewed regardless of class u
 
 - Phase 10's text ends at "Morning email". The briefing format and any later phase details are not yet reflected.
 - External AI delegation, email write actions, and Mac tools have no phase prompt yet. §9.4 records the planned approach for delegation.
+
+## 10. Milestone 2 decisions (2026-10-10)
+
+- **Defaults.** Morning briefing 11:00 on, evening check-in 19:00 on, empty summaries off, launch at login **off** until you turn it on.
+- **Permission categories, defaults and confirmation requirements** are specified in ARCHITECTURE.md §18. In short: your own clicks on reversible things just happen; deleting always asks; anything external is not granted and, once granted, always asks before writing; content Wren reads can never cause a consequential action.
+- **Recovery after restart.** Reminders, briefing and check-in are evaluated from the database on every launch and wake. A daily event missed for its whole window is recorded as missed and never sent the next day.
+- **Standing rules** are a closed, typed set (ARCHITECTURE.md §18.4). Requests like "never send an email without showing me the draft" map to fixed rules; anything not in the set is not a rule.

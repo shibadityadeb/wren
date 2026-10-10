@@ -12,10 +12,18 @@ struct PopoverView: View {
             case let .detail(id):
                 if let c = model.item(id) { ItemDetailView(model: model, item: c) } else { ListPane(model: model) }
             case .settings: SettingsView(model: model)
+            case .briefing: BriefingView(model: model)
+            case .checkIn: CheckInView(model: model)
+            case .activity: ActivityView(model: model)
             }
         }
         .frame(width: 380)
         .frame(minHeight: 200, maxHeight: 560)
+        .alert("Confirm", isPresented: Binding(get: { model.confirmation != nil }, set: { if !$0 { model.cancelPendingConfirmation() } }),
+               presenting: model.confirmation) { _ in
+            Button("Cancel", role: .cancel) { model.cancelPendingConfirmation() }
+            Button("Confirm", role: .destructive) { model.approvePendingConfirmation() }
+        } message: { p in Text(p.prompt) }
     }
 }
 
@@ -59,7 +67,7 @@ struct ListPane: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        if !model.dueUndelivered.isEmpty && !model.notifications.canDeliver {
+                        if !model.dueUndelivered.isEmpty && !model.notifications.canDeliverNow {
                             SectionLabel("Due now")
                             ForEach(model.dueUndelivered) { Row(model: model, item: $0) }
                         }
@@ -98,6 +106,10 @@ struct ListPane: View {
             Text("Wren").font(.headline)
             Spacer()
             ModelBadge(status: model.modelStatus)
+            Button { model.route = .briefing } label: { Image(systemName: "sun.max") }
+                .buttonStyle(.borderless).help("Today's briefing")
+            Button { model.route = .checkIn } label: { Image(systemName: "moon") }
+                .buttonStyle(.borderless).help("Evening check-in")
             Button { model.openCapturePanel() } label: { Image(systemName: "square.and.pencil") }
                 .buttonStyle(.borderless).help("Capture (\(model.hotKeyDisplay))")
             Button { model.route = .settings } label: { Image(systemName: "gearshape") }

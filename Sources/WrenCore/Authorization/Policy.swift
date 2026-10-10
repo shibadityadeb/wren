@@ -155,6 +155,6 @@ public enum Authorizer {
     }
 
     static func confirmationPrompt(_ d: ActionDescriptor, _ r: ActionRequest) -> String {
-        "\(d.summary): “\(r.target.label)” (suggested by \(r.origin.label))"
+        r.origin.isDirectUser ? "\(d.summary): “\(r.target.label)”" : "\(d.summary): “\(r.target.label)” (suggested by \(r.origin.label))"
     }
 }

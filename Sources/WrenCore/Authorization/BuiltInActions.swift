@@ -76,7 +76,9 @@ public enum BuiltInAction {
              { s, c, p in
                  guard c.processing != .manual else { throw BrokerError.refused("You edited this item; Wren won't overwrite it.") }
                  let i = try p.interpretation()
-                 try s.applyInterpretation(i, to: c, model: p.string("model"), reminderPolicy: p.reminderPolicy(clock),
+                 // Deadline reminders only when the auto-remind rule is on (checked by the caller via policy).
+                 let policy = p.bool("scheduleReminders") == false ? nil : p.reminderPolicy(clock)
+                 try s.applyInterpretation(i, to: c, model: p.string("model"), reminderPolicy: policy,
                                            state: p.string("state").flatMap(ProcessingState.init(rawValue:)) ?? .processed, now: clock.now)
                  return nil
              },
@@ -199,8 +201,9 @@ public extension WrenStore.Edit {
 }
 
 public extension Interpretation {
-    func parameters(model: String?, state: ProcessingState, dateOnlyReminderHour: Int) -> [String: JSONValue] {
+    func parameters(model: String?, state: ProcessingState, dateOnlyReminderHour: Int, scheduleReminders: Bool = true) -> [String: JSONValue] {
         [
+            "scheduleReminders": .bool(scheduleReminders),
             "kind": .string(kind.rawValue), "title": .string(title), "priority": .string(String(priority.rawValue)),
             "deadline": deadline.map { .number($0.timeIntervalSince1970) } ?? .null, "deadlineHasTime": .bool(deadlineHasTime),
             "note": note.map(JSONValue.string) ?? .null, "model": model.map(JSONValue.string) ?? .null,

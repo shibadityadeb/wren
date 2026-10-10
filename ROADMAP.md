@@ -6,6 +6,58 @@ Each phase ends with: a green build, tests passing (commands recorded), a git co
 Deliverables: PROJECT_SPEC.md, ARCHITECTURE.md, ROADMAP.md, TEST_PLAN.md, git repository initialised in `Wren/`.
 Acceptance: architecture documented, MVP scope unambiguous, every dependency justified, core vs. later clearly split.
 
+## Milestone 2 status (2026-10-10): trusted execution foundation
+
+### Audit at start
+
+| State | Items |
+|---|---|
+| Implemented and verified | store and transitions, date rules, model-output validation, local-only Ollama client (stubbed), hotkey registration, capture panel, restart persistence, undelivered reminders stay due |
+| Partial | scheduler lived in the UI model with real time and no tests; UI wrote to the store directly; delete had no confirmation; interpretations applied without an authorization record; notification delivery never observed |
+| Missing | launch at login, briefing, check-in, DailyRun dedupe, permissions, rules, audit, injectable clock |
+
+### Checklist
+
+- [x] Injectable clock and notifier
+- [x] New models with backup before first upgraded open
+- [x] Authorization: actions, categories, Authorizer, typed standing rules, sticky denials, confirmations, broker, audit
+- [x] All UI and notification actions routed through the broker; delete confirms
+- [x] Briefing and check-in builders from persisted data only
+- [x] DailySchedule windows, dedupe, missed events, DST
+- [x] WrenEngine (reminders + daily) independent of Ollama
+- [x] Launch at login (SMAppService) and single-instance guard
+- [x] UI: Today, Check-in, Activity panes; Settings for rhythm, startup, permissions
+- [x] Tests (77), upgrade of the real store, release build, docs, CI
+
+### Verified
+
+| What | How |
+|---|---|
+| Full test suite | `swift test`: 77 tests, 1 skipped (live Ollama), 0 failures |
+| Upgrade of an existing store | Real store from Milestone 1: backup written to `Backups/schema-v2`, 3 items intact, 5 new tables, default policy seeded with no external grants |
+| Reminder delivery through the broker | Real app: capture "in 1 minute" → audit `reminder.deliver succeeded verified`, authorized by "Automatically remind me about deadlines"; macOS listed it among delivered notifications |
+| Missed daily events | Real app launched after 23:00: briefing and check-in recorded `missed`, nothing sent |
+| Delete needs confirmation | Real app: delete request → audit `awaitingConfirmation`, item still present |
+| Login item registration | Real app (debug build): registered → macOS background-items database listed Wren; unregistered → disposition disabled, setting back to off |
+
+### Not verified (needs you)
+
+- Whether banners actually appear on screen (Focus decides).
+- The 11:00 briefing and 19:00 check-in firing at their real times, and their notification actions.
+- Launch at login across a real logout/login.
+- The confirmation alert and new panes as seen live (rendered offscreen and inspected instead).
+
+### Remaining gaps
+
+- Email, browser automation, external AI delegation and voice: not started, by design.
+- A model-proposed action has nowhere to come from yet (no tool-using model flow); the parser and policy are ready and tested.
+- Timezone change mid-day creates a new day key and could allow a second briefing that day.
+- The scheduler only runs while Wren runs.
+
+### Next recommended milestone
+
+Phase 5 assistant behaviours on top of the broker: goals with progress, waiting-item follow-up dates, repeated-postponement questions, stale-item review, and reference resolution ("move that to Sunday") as model proposals that go through confirmation.
+
 ## Milestone 1 status (2026-10-10)
 
 The first implementation milestone covers Phase 1, Phase 2, the foundation of Phase 3, and the notification foundation of Phase 4.
