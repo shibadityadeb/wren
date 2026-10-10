@@ -1,5 +1,7 @@
 # Wren
 
+[![CI](https://github.com/shibadityadeb/wren/actions/workflows/ci.yml/badge.svg)](https://github.com/shibadityadeb/wren/actions/workflows/ci.yml)
+
 Wren remembers what you said you'd do, helps you follow through, and brings important things back to your attention.
 
 It is a native macOS menu-bar agent. You press a shortcut, type what you need to do, and get back to work. Wren saves it locally, reads any date in it, and reminds you at the right time. No cloud service, account, or API key is involved.

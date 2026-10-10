@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-build:
+    name: Test and build Wren.app
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 16.4 if available
+        run: |
+          if [ -d /Applications/Xcode_16.4.app ]; then
+            sudo xcode-select -s /Applications/Xcode_16.4.app
+          fi
+          xcodebuild -version
+          swift --version
+
+      - name: Cache SwiftPM build
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-${{ hashFiles('Sources/**/*.swift') }}
+          restore-keys: spm-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-
+
+      - name: Unit tests
+        run: swift test
+
+      - name: Build app bundle
+        run: scripts/build-app.sh release
+
+      - name: Verify bundle
+        run: |
+          codesign --verify --strict --verbose=2 build/Wren.app
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" build/Wren.app/Contents/Info.plist
+          /usr/libexec/PlistBuddy -c "Print :LSUIElement" build/Wren.app/Contents/Info.plist
+          test -f build/Wren.app/Contents/Resources/Wren.icns
+          # Release builds must not contain the debug-only capture hook.
+          if strings build/Wren.app/Contents/MacOS/Wren | grep -q "debug capture saved"; then
+            echo "Release binary contains debug hook"; exit 1
+          fi
+
+      - name: Package
+        run: ditto -c -k --keepParent build/Wren.app build/Wren.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Wren-${{ github.sha }}
+          path: build/Wren.zip
+          retention-days: 14
