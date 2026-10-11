@@ -314,7 +314,7 @@ struct ConnectedToday: View {
 
     var body: some View {
         let _ = model.connectorVersion
-        let cal = model.hub.calendar.state.isUsable, gm = model.hub.gmail.state.isUsable
+        let cal = model.calendarUsable, gm = model.hub.gmail.state.isUsable
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("From your connected accounts").font(.title3.weight(.semibold))
@@ -359,7 +359,7 @@ struct ConnectedToday: View {
     func load() async {
         problems = []
         let c = model.clock.calendar, now = model.clock.now
-        if model.hub.calendar.state.isUsable {
+        if model.calendarUsable {
             do { events = try await model.fetchEvents(from: now, to: c.date(byAdding: .day, value: 1, to: c.startOfDay(for: now))!, origin: .user(.popover)) }
             catch { problems.append("Calendar: \(model.errorText(error))") }
         }

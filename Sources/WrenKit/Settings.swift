@@ -65,6 +65,11 @@ final class WrenSettings {
         get { d.bool(forKey: "voiceEnabled") }
         set { d.set(newValue, forKey: "voiceEnabled") }
     }
+    /// Read calendars from macOS (EventKit).
+    var macCalendarEnabled: Bool {
+        get { d.bool(forKey: "macCalendarEnabled") }
+        set { d.set(newValue, forKey: "macCalendarEnabled") }
+    }
     /// Listen for "Hey Wren" in the background (opt-in, off by default).
     var wakeWordEnabled: Bool {
         get { d.bool(forKey: "wakeWordEnabled") }
@@ -100,7 +105,7 @@ final class WrenSettings {
     /// Every preference key Wren writes. "Reset preferences" removes exactly these.
     static let allKeys = ["hotKeyEnabled", "hotKey", "ollamaModel", "useModel", "dateOnlyReminderHour", "captureDraft",
                           "dailySettings", "launchAtLogin", "insightSettings", "notificationPause", "lastAutomaticBackup",
-                          "voiceEnabled", "voiceHotKey", "wakeWordEnabled", "chatgptEnabled", "chatgptDestination", "chatgptModel", "openaiModel", "gmailCacheEnabled", "importantSenders"]
+                          "voiceEnabled", "voiceHotKey", "wakeWordEnabled", "macCalendarEnabled", "chatgptEnabled", "chatgptDestination", "chatgptModel", "openaiModel", "gmailCacheEnabled", "importantSenders"]
 
     func resetAll() { Self.allKeys.forEach(d.removeObject(forKey:)) }
 

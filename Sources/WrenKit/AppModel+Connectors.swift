@@ -13,6 +13,8 @@ final class ConnectorHub {
     let google: GoogleAccount
     let gmail: GoogleConnector
     let calendar: GoogleConnector
+    /// Calendars already on this Mac (no sign-in).
+    let macCalendar: MacCalendarConnector
     let notion: NotionConnector
     let chatgpt: ChatGPTConnector
     /// Provider registrations injected into this build by Wren's maintainers.
@@ -26,7 +28,9 @@ final class ConnectorHub {
         gmail = GoogleConnector(.gmail, account: google, statusStore: statusStore)
         gmail.emailCache = settings.gmailCacheEnabled ? EmailCache(directory: WrenStore.defaultDirectory) : nil
         calendar = GoogleConnector(.googleCalendar, account: google, statusStore: statusStore)
-        notion = NotionConnector(config: providers.notion, store: credentials, statusStore: statusStore)
+        notion = NotionConnector(store: credentials, statusStore: statusStore)
+        macCalendar = MacCalendarConnector(enabled: settings.macCalendarEnabled)
+        macCalendar.onEnabledChange = { settings.macCalendarEnabled = $0 }
         chatgpt = ChatGPTConnector(store: credentials, statusStore: statusStore, handoffEnabled: settings.chatgptHandoffEnabled,
                                    selectedModel: settings.chatgptModel, destination: { ConnectorHub.destinationName(settings) })
         chatgpt.handoffChanged = { settings.chatgptHandoffEnabled = $0 }
@@ -39,7 +43,13 @@ final class ConnectorHub {
             c.onPermissions = { on in perms.forEach { try? policy?.setGrant($0, granted: on) } }
         }
         try? policy?.setGrant(.chatgptHandoff, granted: chatgpt.handoffAvailable)
-        [chatgpt, voice, gmail, calendar, notion, PlannedConnector(.localFiles), PlannedConnector(.shortcuts)].forEach(registry.register)
+        let calPerm = ConnectorCatalog.descriptor(.macCalendar).permissions
+        macCalendar.onPermissions = { [weak calendar] on in
+            // The calendar-read permission stays granted while either calendar source is connected.
+            let any = on || (calendar?.state.isUsable ?? false)
+            calPerm.forEach { try? policy?.setGrant($0, granted: any) }
+        }
+        [chatgpt, voice, gmail, macCalendar, calendar, notion, PlannedConnector(.localFiles), PlannedConnector(.shortcuts)].forEach(registry.register)
     }
 
     /// Earlier builds kept an OpenAI model choice and status. Credentials earlier builds put in the
@@ -73,7 +83,7 @@ extension AppModel {
             do { return .answer(try await emailAnswer(text)) } catch { return .notFound(errorText(error)) }
         }
         if CalendarQuestion.isCalendarQuestion(text) {
-            guard hub.calendar.state.isUsable else { return .notFound("Google Calendar isn't connected. Open Connectors › Google Calendar to set it up.") }
+            guard calendarUsable else { return .notFound("No calendar is connected. Open Connectors › Calendar and allow access to the calendars on this Mac.") }
             do { return .answer(try await calendarAnswer(text)) } catch { return .notFound(errorText(error)) }
         }
         return nil
@@ -106,13 +116,24 @@ extension AppModel {
         return ConnectorAnswers.email(question: text, query: q, triaged: try await fetchTriaged(q, origin: .user(.hotkey)), now: clock.now, calendar: clock.calendar)
     }
 
+    /// Some calendar is connected: this Mac's calendars, or Google Calendar directly.
+    var calendarUsable: Bool { hub.macCalendar.state.isUsable || hub.calendar.state.isUsable }
+
+    /// Events from this Mac's calendars (local) and Google Calendar (when connected directly), merged.
     func fetchEvents(from: Date, to: Date, search: String? = nil, origin: ActionOrigin) async throws -> [CalendarEvent] {
-        guard let broker else { throw ConnectorError.notConfigured("No database.") }
-        let client = hub.calendar.calendar
-        let cal = clock.calendar
-        return try await broker.performExternal(calendarRead(origin), detail: { "\($0.count) events" }) {
-            try await client.events(from: from, to: to, search: search, calendar: cal)
+        var out = hub.macCalendar.state.isUsable ? hub.macCalendar.events(from: from, to: to, search: search) : []
+        if hub.calendar.state.isUsable {
+            guard let broker else { throw ConnectorError.notConfigured("No database.") }
+            let client = hub.calendar.calendar
+            let cal = clock.calendar
+            let google = try await broker.performExternal(calendarRead(origin), detail: { "\($0.count) events" }) {
+                try await client.events(from: from, to: to, search: search, calendar: cal)
+            }
+            // The same Google account is often also on this Mac: keep one of each event.
+            let seen = Set(out.map { "\($0.title.lowercased())|\($0.start.timeIntervalSince1970)" })
+            out += google.filter { !seen.contains("\($0.title.lowercased())|\($0.start.timeIntervalSince1970)") }
         }
+        return out.sorted { $0.start < $1.start }
     }
 
     func calendarAnswer(_ text: String) async throws -> Answer {
@@ -125,9 +146,9 @@ extension AppModel {
         let b = briefing
         var lines: [AnswerLine] = (b.overdue + b.dueToday).map { AnswerLine("\($0.title) · \($0.deadline.map { DueText.describe($0, hasTime: false) } ?? "")", recordID: $0.id) }
         var basis = ["Wren items: overdue and due today"]
-        if hub.calendar.state.isUsable, let cal = try? await fetchEvents(from: clock.now, to: clock.calendar.date(byAdding: .day, value: 1, to: clock.calendar.startOfDay(for: clock.now))!, origin: .user(.hotkey)) {
+        if calendarUsable, let cal = try? await fetchEvents(from: clock.now, to: clock.calendar.date(byAdding: .day, value: 1, to: clock.calendar.startOfDay(for: clock.now))!, origin: .user(.hotkey)) {
             lines += cal.map { AnswerLine("\($0.timeText(calendar: clock.calendar, now: clock.now)) · \($0.title)", recordID: nil, externalURL: $0.link) }
-            basis.append("Google Calendar: rest of today")
+            basis.append("Calendar: rest of today")
         }
         if hub.gmail.state.isUsable, let mail = try? await fetchTriaged(EmailQuestion.gmailQuery("needs my attention today"), origin: .user(.hotkey)) {
             lines += mail.filter(\.needsAttention).prefix(6).map { AnswerLine("\($0.message.senderName): \($0.message.subject) · \($0.explanation)", recordID: nil, externalURL: $0.message.webURL) }
@@ -139,10 +160,10 @@ extension AppModel {
 
     /// For the morning briefing; runs as the scheduler under the "include connected sources" rule.
     func externalBriefing() async -> ExternalBriefing? {
-        guard hub.gmail.state.isUsable || hub.calendar.state.isUsable else { return nil }
+        guard hub.gmail.state.isUsable || calendarUsable else { return nil }
         var out = ExternalBriefing()
         let cal = clock.calendar, now = clock.now
-        if hub.calendar.state.isUsable {
+        if calendarUsable {
             do {
                 let es = try await fetchEvents(from: now, to: cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now))!, origin: .system("briefing"))
                 out.events = ConnectorAnswers.briefingEvents(es, now: now, calendar: cal)
@@ -193,6 +214,10 @@ extension AppModel {
             await hub.calendar.refresh()
             connectorsChanged()
         }
+    }
+
+    func connectMacCalendar() {
+        Task { await hub.macCalendar.connect(); connectorsChanged() }
     }
 
     func connectNotion() {
@@ -364,7 +389,7 @@ extension AppModel {
         guard let broker else { return "" }
         let client = hub.notion.client
         let req = ActionRequest(action: BuiltInAction.readNotion, target: TargetRef(kind: "notion", id: p.id, label: p.title), origin: .user(.popover), createdAt: clock.now)
-        return try await broker.performExternal(req, detail: { "\($0.count) characters" }) { NotionClient.plainText(try await client.blocks(p.id)) }
+        return try await broker.performExternal(req, detail: { "\($0.count) characters" }) { try await client.pageText(p.id) }
     }
 
     /// Creating a page is an external write: the button press on the exact title and parent shown is the confirmation.

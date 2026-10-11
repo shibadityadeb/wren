@@ -473,114 +473,124 @@ final class ChatGPTConnectorTests: XCTestCase {
 // MARK: - Notion public OAuth through the maintainers' relay
 
 @MainActor
-final class NotionOAuthTests: XCTestCase {
-    let config = NotionOAuthConfig(clientID: "1f2d3c4b-0000-4000-8000-123456789abc", relay: URL(string: "https://relay.wren.example")!)
+final class NotionMCPTests: XCTestCase {
     var store: InMemoryCredentialStore!
     override func setUp() async throws { RouteStub.reset(); store = InMemoryCredentialStore() }
 
-    func testAuthorizationURLAndState() {
-        let o = NotionOAuth(config: config, session: stub())
-        let s = NotionOAuth.makeState(port: 54321)
-        XCTAssertTrue(s.hasPrefix("54321.")); XCTAssertGreaterThan(s.count, 30)
-        let q = query(o.authorizationURL(state: s))
-        XCTAssertEqual(q["owner"], "user"); XCTAssertEqual(q["response_type"], "code")
-        XCTAssertEqual(q["client_id"], config.clientID)
-        XCTAssertEqual(q["redirect_uri"], "https://relay.wren.example/notion/callback")
-        XCTAssertNil(q["client_secret"])
-        XCTAssertTrue(config.isPlausible)
-        XCTAssertFalse(NotionOAuthConfig(clientID: "x", relay: URL(string: "http://relay.example")!).isPlausible, "relay must be HTTPS")
+    static let metadata = #"{"issuer":"https://mcp.notion.com","authorization_endpoint":"https://mcp.notion.com/authorize","token_endpoint":"https://mcp.notion.com/token","registration_endpoint":"https://mcp.notion.com/register","revocation_endpoint":"https://mcp.notion.com/token","code_challenge_methods_supported":["S256"]}"#
+
+    func make() -> NotionConnector {
+        RouteStub.routes["/.well-known/oauth-authorization-server"] = RouteStub.json(Self.metadata)
+        RouteStub.routes["/register"] = RouteStub.json(#"{"client_id":"wren-client-1","token_endpoint_auth_method":"none"}"#)
+        let c = NotionConnector(store: store, statusStore: MemoryStatusStore(), session: stub())
+        c.signInTimeout = 3
+        return c
     }
 
-    func make() -> NotionConnector { NotionConnector(config: config, store: store, statusStore: MemoryStatusStore(), session: stub()) }
+    /// MCP replies: initialize (JSON) then a tool result (as server-sent events, like Notion sends).
+    func stubMCP(tool: String) {
+        RouteStub.headers["/mcp"] = ["Content-Type": "text/event-stream", "Mcp-Session-Id": "S1"]
+        RouteStub.sequences["/mcp"] = [
+            (200, Data("event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2025-06-18\"}}\n\n".utf8)),
+            (202, Data()),
+            (200, Data("event: message\ndata: \(tool)\n\n".utf8)),
+        ]
+    }
+    static func toolResult(id: Int, _ text: String, isError: Bool = false) -> String {
+        let inner = try! JSONEncoder().encode(JSONValue.object(["content": .array([.object(["type": .string("text"), "text": .string(text)])]), "isError": .bool(isError)]))
+        return #"{"jsonrpc":"2.0","id":\#(id),"result":\#(String(decoding: inner, as: UTF8.self))}"#
+    }
 
-    func connect(_ c: NotionConnector, _ callback: @escaping (String) -> String) async {
+    func connect(_ c: NotionConnector, _ answer: @escaping ([String: String]) -> String?) async {
         await c.connect { url in
-            let state = query(url)["state"]!
-            let port = state.split(separator: ".").first!
-            redirect(to: URL(string: "http://127.0.0.1:\(port)/notion/callback")!, callback(state))
+            let q = query(url)
+            if let reply = answer(q) { redirect(to: URL(string: q["redirect_uri"]!)!, reply) }
         }
     }
 
-    func testConnectVerifiesBeforeReportingAndDisconnectRevokes() async throws {
+    func testConnectRegistersItselfAndVerifiesWithARealCall() async throws {
         let c = make()
-        var granted: [Bool] = []
-        c.onPermissions = { granted.append($0) }
-        XCTAssertEqual(c.state, .available)
-        RouteStub.routes["/notion/token"] = RouteStub.json(#"{"access_token":"NT1","refresh_token":"NR1","bot_id":"b1","workspace_id":"w1","workspace_name":"Acme Notes","owner_name":"Sam"}"#)
-        RouteStub.routes["/v1/users/me"] = RouteStub.json(#"{"object":"user","type":"bot","bot":{"workspace_name":"Acme Notes"}}"#)
-        await connect(c) { "code=NC&state=\($0)" }
-        XCTAssertEqual(c.state, .connected(account: "Acme Notes"))
+        RouteStub.routes["/token"] = RouteStub.json(#"{"access_token":"NT1","refresh_token":"NR1","expires_in":3600,"token_type":"bearer"}"#)
+        stubMCP(tool: Self.toolResult(id: 2, #"{"workspace":{"id":"w1","name":"Acme Notes"},"user":{"name":"Sam","email":"sam@example.com"}}"#))
+        var asked: [String: String] = [:]
+        await connect(c) { q in asked = q; return "code=NC&state=\(q["state"]!)&iss=https%3A%2F%2Fmcp.notion.com" }
+        XCTAssertEqual(c.state, .connected(account: "Acme Notes"), "\(c.state) \(c.lastConnectError ?? "")")
         XCTAssertEqual(c.workspace, "Acme Notes")
-        let ex = try JSONDecoder().decode(JSONValue.self, from: RouteStub.requests.first { $0.0.url?.path == "/notion/token" }!.1!)
-        XCTAssertEqual(ex["code"]?.string, "NC")
-        XCTAssertEqual(RouteStub.requests.first { $0.0.url?.path == "/v1/users/me" }!.0.value(forHTTPHeaderField: "Authorization"), "Bearer NT1")
-        XCTAssertEqual(granted.last, true)
-
-        RouteStub.routes["/notion/revoke"] = RouteStub.json(#"{"request_id":"r"}"#)
-        await c.disconnect()
-        let rv = try JSONDecoder().decode(JSONValue.self, from: RouteStub.requests.last!.1!)
-        XCTAssertEqual(rv["token"]?.string, "NT1")
-        XCTAssertNil(c.notion.tokens); XCTAssertEqual(c.state, .disconnected); XCTAssertEqual(granted.last, false)
-        XCTAssertNil(c.disconnectNote)
+        // Registration: public client, exactly this loopback address.
+        let reg = try JSONDecoder().decode(JSONValue.self, from: RouteStub.requests.first { $0.0.url?.path == "/register" }!.1!)
+        XCTAssertEqual(reg["token_endpoint_auth_method"]?.string, "none")
+        XCTAssertEqual(reg["redirect_uris"]?.array.first?.string, asked["redirect_uri"])
+        XCTAssertTrue(asked["redirect_uri"]!.hasPrefix("http://127.0.0.1:"))
+        XCTAssertEqual(asked["client_id"], "wren-client-1"); XCTAssertEqual(asked["code_challenge_method"], "S256")
+        XCTAssertEqual(asked["resource"], "https://mcp.notion.com/mcp")
+        let tok = form(RouteStub.requests.first { $0.0.url?.path == "/token" }!.1)
+        XCTAssertEqual(tok["code"], "NC"); XCTAssertNotNil(tok["code_verifier"]); XCTAssertNil(tok["client_secret"])
+        let mcpCalls = RouteStub.requests.filter { $0.0.url?.path == "/mcp" }
+        XCTAssertEqual(mcpCalls.last!.0.value(forHTTPHeaderField: "Authorization"), "Bearer NT1")
+        XCTAssertEqual(mcpCalls.last!.0.value(forHTTPHeaderField: "Mcp-Session-Id"), "S1")
+        XCTAssertTrue(String(decoding: mcpCalls.last!.1!, as: UTF8.self).contains("notion-get-self"))
+        XCTAssertEqual(Set(RouteStub.hosts), ["mcp.notion.com"], "only Notion's server; no Wren server")
     }
 
-    func testDeniedAndRejectedCodeStoreNothing() async {
+    func testSearchFetchAndCreateUseNotionTools() async throws {
         let c = make()
-        await connect(c) { "error=access_denied&state=\($0)" }
-        guard case .missingPermissions = c.state else { return XCTFail("\(c.state)") }
-        RouteStub.routes["/notion/token"] = RouteStub.json(#"{"error":"invalid_grant","error_description":"bad code"}"#, 400)
-        await connect(c) { "code=old&state=\($0)" }
+        try store.writeJSON(NotionConnector.key, NotionMCPConnection(clientID: "x", redirectURI: "http://127.0.0.1:1/notion/callback", accessToken: "NT1",
+                                                                     refreshToken: "NR1", expiresAt: Date().addingTimeInterval(3600), workspace: "W", user: nil, savedAt: Date()))
+        stubMCP(tool: Self.toolResult(id: 2, #"{"results":[{"id":"p1","title":"Project decisions","url":"https://www.notion.so/p1","type":"page"},{"id":"p2","title":"Ideas","url":"https://www.notion.so/p2"}],"type":"workspace_search"}"#))
+        let pages = try await c.client.searchPages("decisions")
+        XCTAssertEqual(pages.map(\.title), ["Project decisions", "Ideas"])
+        let fetched = ###"{"id":"p1","title":"Project decisions","content":"## Decision\n- Use SwiftData"}"###
+        RouteStub.routes["/mcp"] = (200, Data("event: message\ndata: \(Self.toolResult(id: 3, fetched))\n\n".utf8))
+        let text = try await c.client.pageText("p1")
+        XCTAssertEqual(text, "# Project decisions\n\n## Decision\n- Use SwiftData")
+        RouteStub.routes["/mcp"] = (200, Data("event: message\ndata: \(Self.toolResult(id: 4, #"{"pages":[{"id":"new1","url":"https://www.notion.so/new1","title":"Ideas"}]}"#))\n\n".utf8))
+        let made = try await c.client.createPage(parentID: "p1", title: "Ideas", body: "line 1")
+        XCTAssertEqual(made.id, "new1")
+        let sent = try JSONDecoder().decode(JSONValue.self, from: RouteStub.requests.last!.1!)
+        XCTAssertEqual(sent["params"]?["name"]?.string, "notion-create-pages")
+        XCTAssertEqual(sent["params"]?["arguments"]?["parent"]?["page_id"]?.string, "p1")
+        // A tool error is an error, never a result.
+        RouteStub.routes["/mcp"] = (200, Data("event: message\ndata: \(Self.toolResult(id: 5, "Page not found", isError: true))\n\n".utf8))
+        do { _ = try await c.client.pageText("nope"); XCTFail() } catch {}
+    }
+
+    func testDeniedCancelledAndBadStateLeaveNothingBehind() async {
+        let c = make()
+        await connect(c) { q in "error=access_denied&state=\(q["state"]!)" }
+        XCTAssertEqual(c.state, .available); XCTAssertNotNil(c.lastConnectError); XCTAssertNil(c.connection)
+        await connect(c) { _ in nil }   // the browser never comes back
+        XCTAssertEqual(c.state, .available); XCTAssertNil(c.connection)
+        await connect(c) { q in "code=NC&state=\(q["state"]!)&iss=https%3A%2F%2Fevil.example" }
+        XCTAssertNil(c.connection, "a response from another issuer is refused")
+    }
+
+    func testExpiryRefreshRevocationAndDisconnect() async throws {
+        let c = make()
+        try store.writeJSON(NotionConnector.key, NotionMCPConnection(clientID: "cid", redirectURI: "http://127.0.0.1:1/notion/callback", accessToken: "old",
+                                                                     refreshToken: "NR1", expiresAt: Date().addingTimeInterval(-5), workspace: "W", user: nil, savedAt: Date()))
+        RouteStub.routes["/token"] = RouteStub.json(#"{"access_token":"new","refresh_token":"NR2","expires_in":3600}"#)
+        stubMCP(tool: Self.toolResult(id: 2, #"{"workspace":{"name":"W"}}"#))
+        await c.refresh()
+        XCTAssertEqual(c.state, .connected(account: "W"))
+        let refresh = form(RouteStub.requests.first { $0.0.url?.path == "/token" }!.1)
+        XCTAssertEqual(refresh["grant_type"], "refresh_token"); XCTAssertEqual(refresh["client_id"], "cid")
+        XCTAssertEqual(c.connection?.refreshToken, "NR2")
+        // Refresh token expired (30 days unused / 180 days): reconnect.
+        var conn = c.connection!; conn.expiresAt = Date().addingTimeInterval(-5)
+        try store.writeJSON(NotionConnector.key, conn)
+        RouteStub.routes["/token"] = RouteStub.json(#"{"error":"invalid_grant"}"#, 400)
+        await c.refresh()
         guard case .reauthorizationRequired = c.state else { return XCTFail("\(c.state)") }
-        XCTAssertNil(c.notion.tokens)
-        XCTAssertFalse(RouteStub.requests.contains { $0.0.url?.path == "/v1/users/me" })
-    }
-
-    func testWrongStateIsIgnored() async {
-        // A request with someone else's state doesn't complete sign-in; the right one still does.
-        let c = make()
-        RouteStub.routes["/notion/token"] = RouteStub.json(#"{"access_token":"NT1","workspace_name":"W"}"#)
-        RouteStub.routes["/v1/users/me"] = RouteStub.json(#"{"object":"user","type":"bot","bot":{}}"#)
-        await c.connect { url in
-            let state = query(url)["state"]!
-            let base = URL(string: "http://127.0.0.1:\(state.split(separator: ".").first!)/notion/callback")!
-            redirect(to: base, "code=EVIL&state=forged")
-            Task.detached {
-                try? await Task.sleep(nanoseconds: 300_000_000)
-                _ = try? await URLSession(configuration: .ephemeral).data(from: URL(string: base.absoluteString + "?code=GOOD&state=\(state)")!)
-            }
-        }
-        XCTAssertEqual(c.state, .connected(account: "W"))
-        let ex = try? JSONDecoder().decode(JSONValue.self, from: RouteStub.requests.first { $0.0.url?.path == "/notion/token" }!.1!)
-        XCTAssertEqual(ex?["code"]?.string, "GOOD")
-    }
-
-    func testExpiringTokenRefreshesThroughRelayAndFailuresAreHonest() async throws {
-        let c = make()
-        try c.notion.save(NotionTokens(accessToken: "old", refreshToken: "NR1", expiresAt: Date().addingTimeInterval(-5), workspaceName: "W"))
-        RouteStub.routes["/notion/refresh"] = RouteStub.json(#"{"access_token":"new","refresh_token":"NR2","expires_in":3600}"#)
-        RouteStub.routes["/v1/users/me"] = RouteStub.json(#"{"object":"user","type":"bot","bot":{}}"#)
+        // Network trouble is temporary and keeps the sign-in.
+        conn.expiresAt = Date().addingTimeInterval(3600); try store.writeJSON(NotionConnector.key, conn)
+        RouteStub.failures["/mcp"] = .notConnectedToInternet
         await c.refresh()
-        XCTAssertEqual(c.state, .connected(account: "W"))
-        XCTAssertEqual(c.notion.tokens?.accessToken, "new"); XCTAssertEqual(c.notion.tokens?.refreshToken, "NR2")
-
-        try c.notion.save(NotionTokens(accessToken: "x", refreshToken: "NR2", expiresAt: Date().addingTimeInterval(-5)))
-        RouteStub.routes["/notion/refresh"] = RouteStub.json(#"{"error":"invalid_grant"}"#, 400)
-        await c.refresh()
-        guard case .reauthorizationRequired = c.state else { return XCTFail("refresh failure → reconnect: \(c.state)") }
-
-        try c.notion.save(NotionTokens(accessToken: "x"))
-        RouteStub.routes["/v1/users/me"] = RouteStub.json(#"{"object":"error","code":"unauthorized"}"#, 401)
-        await c.refresh()
-        guard case .reauthorizationRequired = c.state else { return XCTFail("revoked in Notion → reconnect") }
-
-        RouteStub.failures["/v1/users/me"] = .networkConnectionLost
-        await c.refresh()
-        guard case .temporarilyUnavailable = c.state else { return XCTFail() }
-        XCTAssertNotNil(c.notion.tokens, "network errors keep the connection")
-
-        RouteStub.failures["/notion/revoke"] = .timedOut
+        guard case .temporarilyUnavailable = c.state else { return XCTFail("\(c.state)") }
+        XCTAssertNotNil(c.connection)
+        // Disconnect: revocation attempted, sign-in removed; unconfirmed revocation is said plainly.
+        RouteStub.routes["/token"] = (503, Data())
         await c.disconnect()
-        XCTAssertNil(c.notion.tokens); XCTAssertNotNil(c.disconnectNote)
+        XCTAssertNil(c.connection); XCTAssertEqual(c.state, .disconnected); XCTAssertNotNil(c.disconnectNote)
     }
 }
 
@@ -595,18 +605,20 @@ final class ProviderConfigTests: XCTestCase {
         XCTAssertEqual(ProviderConfig.from([:]), ProviderConfig())
         XCTAssertNil(ProviderConfig.from(["WrenGoogleClientID": "$(WREN_GOOGLE_CLIENT_ID)"]).google, "unsubstituted placeholder")
         XCTAssertNil(ProviderConfig.from(["WrenGoogleClientID": "nonsense"]).google)
-        let full = ProviderConfig.from(["WrenGoogleClientID": google.clientID,
-                                        "WrenNotionClientID": "1f2d3c4b-0000-4000-8000-123456789abc", "WrenNotionOAuthRelay": "https://relay.wren.example"])
+        let full = ProviderConfig.from(["WrenGoogleClientID": google.clientID, "WrenGoogleStatus": "unverified"])
         XCTAssertEqual(full.google, google)
-        XCTAssertEqual(full.notion?.relay.host, "relay.wren.example")
-        XCTAssertNil(ProviderConfig.from(["WrenNotionClientID": "1f2d3c4b-0000-4000-8000-123456789abc", "WrenNotionOAuthRelay": "http://insecure.example"]).notion)
+        XCTAssertEqual(full.googleStatus, .unverified)
+        XCTAssertTrue(full.googleStatus.userNotice!.contains("Advanced"), "users are told how to pass Google's unverified-app screen")
+        XCTAssertEqual(ProviderConfig.from([:]).googleStatus, .testing, "honest default")
+        XCTAssertNil(ProviderConfig.from(["WrenGoogleStatus": "verified"]).googleStatus.userNotice)
     }
 
     func testMissingProviderIsAMaintainerBlockerNotAUserTask() async {
         let store = InMemoryCredentialStore()
         let g = GoogleConnector(.gmail, account: GoogleAccount(config: nil, store: store, session: stub()), statusStore: MemoryStatusStore())
-        let n = NotionConnector(config: nil, store: store, statusStore: MemoryStatusStore(), session: stub())
-        for s in [g.state, n.state] {
+        let n = NotionConnector(store: store, statusStore: MemoryStatusStore(), session: stub())
+        XCTAssertEqual(n.state, .available, "Notion needs no maintainer setup")
+        for s in [g.state] {
             guard case .notAvailableInBuild = s else { return XCTFail("\(s)") }
             XCTAssertEqual(s.label, "Maintainer setup required"); XCTAssertEqual(s.bucket, .unavailable)
             let text = s.detail!.lowercased()
@@ -615,7 +627,6 @@ final class ProviderConfigTests: XCTestCase {
         }
         var opened = false
         await g.connect { _ in opened = true }
-        await n.connect { _ in opened = true }
         XCTAssertFalse(opened); XCTAssertTrue(RouteStub.requests.isEmpty)
     }
 

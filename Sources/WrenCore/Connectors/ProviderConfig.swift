@@ -7,18 +7,15 @@ import Foundation
 /// setup task for the user.
 public struct ProviderConfig: Equatable, Sendable {
     public var google: GoogleOAuthConfig?
-    public var notion: NotionOAuthConfig?
-    /// Whether Google has verified Wren's app for the Gmail and Calendar permissions. Until then Google
-    /// shows an "unverified app" warning and only test accounts the maintainers added can sign in.
-    public var googleVerified = false
+    /// Where Wren's Google app is in Google's process. It decides what Wren tells users to expect.
+    public var googleStatus: GoogleAppStatus = .testing
+    public var googleVerified: Bool { googleStatus == .verified }
 
-    public init(google: GoogleOAuthConfig? = nil, notion: NotionOAuthConfig? = nil) { self.google = google; self.notion = notion }
+    public init(google: GoogleOAuthConfig? = nil) { self.google = google }
 
     public enum Key {
         public static let googleClientID = "WrenGoogleClientID"
-        public static let googleVerified = "WrenGoogleVerified"
-        public static let notionClientID = "WrenNotionClientID"
-        public static let notionRelay = "WrenNotionOAuthRelay"
+        public static let googleStatus = "WrenGoogleStatus"
     }
 
     /// Reads and validates the injected values. Anything malformed counts as not configured.
@@ -32,11 +29,7 @@ public struct ProviderConfig: Equatable, Sendable {
             let c = GoogleOAuthConfig(clientID: id)
             if c.isPlausible { out.google = c }
         }
-        out.googleVerified = value(Key.googleVerified) == "1"
-        if let id = value(Key.notionClientID), let relay = value(Key.notionRelay).flatMap(URL.init(string:)) {
-            let c = NotionOAuthConfig(clientID: id, relay: relay)
-            if c.isPlausible { out.notion = c }
-        }
+        out.googleStatus = value(Key.googleStatus).flatMap(GoogleAppStatus.init(rawValue:)) ?? .testing
         return out
     }
 
@@ -45,5 +38,28 @@ public struct ProviderConfig: Equatable, Sendable {
     /// Plain-language blocker shown when a provider isn't in this build.
     public static func notInBuild(_ provider: String, feature: String) -> String {
         "This copy of Wren was built without \(provider) sign-in, so \(feature) can't be connected here. There's nothing for you to set up: Wren's maintainers have to enable it in the build you download."
+    }
+}
+
+/// Google's publishing state for Wren's OAuth app.
+public enum GoogleAppStatus: String, Sendable, Equatable {
+    /// Only listed test users can connect, and Google asks them to reconnect every 7 days.
+    case testing
+    /// Published but not verified: anyone can connect (Google caps it at 100 users) after Google's
+    /// "Google hasn't verified this app" screen.
+    case unverified
+    /// Google approved Wren's verification.
+    case verified
+
+    /// What users should expect, in plain words. nil when there's nothing to say.
+    public var userNotice: String? {
+        switch self {
+        case .testing:
+            "Wren's Google connection is in testing. Only Google accounts the Wren team added can connect, and Google asks you to connect again every 7 days."
+        case .unverified:
+            "Google will show “Google hasn't verified this app”. That's expected for a small app like Wren: choose Advanced, then Go to Wren, to continue. You can disconnect at any time."
+        case .verified:
+            nil
+        }
     }
 }

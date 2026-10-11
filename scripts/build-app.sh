@@ -6,7 +6,7 @@
 # --universal  builds arm64 and x86_64 separately and merges them with lipo (SwiftPM's
 #              multi-arch mode rejects this package's per-target language settings).
 #
-# Provider sign-in (maintainers only): Google and Notion app registrations are read from
+# Provider sign-in (maintainers only): Wren's Google client ID is read from
 # config/providers.env (git-ignored) or from the environment (CI secrets) and written into
 # Info.plist. Values are never printed. A missing value builds a copy of Wren that reports
 # "Not available in this build" for that provider. See docs/MAINTAINER_SETUP.md.
@@ -62,7 +62,7 @@ echo "→ brand assets from assets/logo.png"
 iconutil -c icns Brand/Wren.iconset -o build/Wren.icns
 
 # Provider registrations. Only these keys are read from the file; nothing in it is executed.
-PROVIDER_VARS=(WREN_GOOGLE_CLIENT_ID WREN_GOOGLE_VERIFIED WREN_NOTION_CLIENT_ID WREN_NOTION_OAUTH_RELAY)
+PROVIDER_VARS=(WREN_GOOGLE_CLIENT_ID WREN_GOOGLE_STATUS WREN_GOOGLE_VERIFIED)
 if [[ -f config/providers.env ]]; then
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ "$line" =~ '^[[:space:]]*(#|$)' ]] && continue
@@ -74,11 +74,9 @@ xml_escape() { local s="$1"; s="${s//&/&amp;}"; s="${s//</&lt;}"; s="${s//>/&gt;
 PROVIDER_PLIST=""
 add_provider() { [[ -n "$2" ]] && PROVIDER_PLIST+="  <key>$1</key><string>$(xml_escape "$2")</string>"$'\n' || true; }
 add_provider WrenGoogleClientID "${WREN_GOOGLE_CLIENT_ID:-}"
-add_provider WrenGoogleVerified "${WREN_GOOGLE_VERIFIED:-}"
-add_provider WrenNotionClientID "${WREN_NOTION_CLIENT_ID:-}"
-add_provider WrenNotionOAuthRelay "${WREN_NOTION_OAUTH_RELAY:-}"
+add_provider WrenGoogleStatus "${WREN_GOOGLE_STATUS:-$([[ "${WREN_GOOGLE_VERIFIED:-}" == 1 ]] && echo verified)}"
 included() { [[ -n "${(P)1:-}" ]] && echo "included" || echo "not included"; }
-echo "→ provider sign-in: Google $(included WREN_GOOGLE_CLIENT_ID), Notion $( [[ -n "${WREN_NOTION_CLIENT_ID:-}" && -n "${WREN_NOTION_OAUTH_RELAY:-}" ]] && echo included || echo 'not included'), ChatGPT always (no registration needed)"
+echo "→ provider sign-in: Google $(included WREN_GOOGLE_CLIENT_ID) (status: ${WREN_GOOGLE_STATUS:-testing}); ChatGPT and Notion always (they register Wren themselves)"
 
 echo "→ assembling $APP ($VERSION, build $BUILD_NUMBER)"
 rm -rf "$APP"
@@ -103,7 +101,9 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
   <key>NSHumanReadableCopyright</key><string>Local-first personal assistant. Data stays on this Mac.</string>
   <key>NSMicrophoneUsageDescription</key><string>Wren records only while you hold the push-to-talk shortcut, to turn what you say into a capture. Audio is transcribed on this Mac and deleted.</string>
-${PROVIDER_PLIST}  <key>NSSpeechRecognitionUsageDescription</key><string>Wren uses on-device speech recognition to turn your voice capture into text. Audio never leaves this Mac.</string>
+${PROVIDER_PLIST}  <key>NSCalendarsFullAccessUsageDescription</key><string>Wren reads your calendars (read-only) to answer questions like “what meetings do I have tomorrow?” and to add events to your briefing. Nothing leaves this Mac.</string>
+  <key>NSCalendarsUsageDescription</key><string>Wren reads your calendars (read-only) to answer questions about your schedule. Nothing leaves this Mac.</string>
+  <key>NSSpeechRecognitionUsageDescription</key><string>Wren uses on-device speech recognition to turn your voice capture into text. Audio never leaves this Mac.</string>
   <key>CFBundleURLTypes</key>
   <array><dict>
     <key>CFBundleURLName</key><string>$BUNDLE_ID</string>
@@ -120,6 +120,7 @@ cat > "$ENT" <<ENTITLEMENTS
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>com.apple.security.device.audio-input</key><true/>
+  <key>com.apple.security.personal-information.calendars</key><true/>
 </dict></plist>
 ENTITLEMENTS
 
