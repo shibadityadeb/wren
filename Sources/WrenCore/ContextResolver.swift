@@ -65,7 +65,7 @@ public enum ContextResolution: Sendable {
 
 /// A recognised command waiting for its target.
 public struct PendingCommand: Sendable, Equatable {
-    public enum Verb: String, Sendable, Codable { case reschedule, remind, complete, drop, archive }
+    public enum Verb: String, Sendable, Codable { case reschedule, remind, complete, drop, archive, snooze }
     public var verb: Verb
     public var date: ParsedDate?
     public var text: String
@@ -129,6 +129,15 @@ public struct ContextResolver: Sendable {
         if let m = s.firstMatch(of: /^(?:please\s+)?(?:move|push|reschedule|postpone|shift|bump|delay|defer)\s+(.+?)\s+(?:back\s+)?(?:to|until|till|for)\s+(.+)$/) {
             return (PendingCommand(verb: .reschedule, date: parser.parse(String(m.2), now: now), text: t), String(m.1))
         }
+        if let m = s.firstMatch(of: /^(?:please\s+)?snooze\s+(.+?)\s+(for|by|until|till|to)\s+(.+)$/) {
+            let amount = String(m.3)
+            let relative = String(m.2) == "for" || String(m.2) == "by"
+            let d = parser.parse(relative ? "in " + amount : amount, now: now)
+            return (PendingCommand(verb: .snooze, date: d, text: t), String(m.1))
+        }
+        if let m = s.firstMatch(of: /^(?:please\s+)?snooze(?:\s+(.+))?$/) {
+            return (PendingCommand(verb: .snooze, date: nil, text: t), m.1.map(String.init) ?? "it")
+        }
         if let m = s.firstMatch(of: /^remind me (?:about|of)\s+(.+?)\s+(?:the\s+)?(day|\d+\s+days?|two days|three days|a week)\s+before\s+(?:it'?s|it is|its)\s+due$/) {
             let raw = String(m.2)
             let n: Int = raw == "day" ? 1 : raw == "two days" ? 2 : raw == "three days" ? 3 : raw == "a week" ? 7 : Int(raw.prefix { $0.isNumber }) ?? 1
@@ -186,6 +195,10 @@ public struct ContextResolver: Sendable {
         guard let (cmd, refText) = command(text, now: now) else { return .notACommand }
         if (cmd.verb == .reschedule || cmd.verb == .remind) && cmd.date == nil && cmd.daysBeforeDeadline == nil {
             return .needsDate("When should it be? Try “Sunday”, “tomorrow at 9” or “next week”.")
+        }
+        if cmd.verb == .snooze {
+            guard let d = cmd.date else { return .needsDate("Snooze for how long? Try “for 30 minutes” or “until 5 PM”.") }
+            guard d.hasTime, d.date > now else { return .needsDate("That's not a later time today. Try “for 30 minutes” or “until 5 PM”.") }
         }
         let pool = items.filter { $0.status == .pending }
         return target(refText, cmd: cmd, pool: pool, context: context, now: now)
@@ -259,6 +272,13 @@ public struct ContextResolver: Sendable {
             if let c = context.recent.lazy.compactMap({ id in candidates.first { $0.id == id } }).first { return .unique(c, note: nil) }
             let options = Array(candidates.sorted { $0.lastActivityAt > $1.lastActivityAt }.prefix(4))
             return options.isEmpty ? .none("There's nothing open to apply that to.") : .ambiguous(options, question: "Which one do you mean?")
+        }
+        // "the current reminder", "this reminder": the reminder you most recently got.
+        if ref.firstMatch(of: /^(?:the |this |that |my |the last |the latest )?(?:current )?reminder$/) != nil {
+            let notified = candidates.filter { $0.lastReminderAt != nil }.sorted { $0.lastReminderAt! > $1.lastReminderAt! }
+            if let sel = context.selected, let c = notified.first(where: { $0.id == sel }) { return .unique(c, note: nil) }
+            if let c = notified.first { return .unique(c, note: nil) }
+            return .none("No reminder has gone off yet, so there's no current one.")
         }
         let tokens = Self.tokens(ref)
         guard !tokens.isEmpty else { return .ambiguous(Array(candidates.prefix(4)), question: "Which one do you mean?") }
@@ -352,6 +372,10 @@ public struct ContextResolver: Sendable {
             return ContextProposal(request: req(BuiltInAction.drop), preview: "Drop “\(c.title)” (you can reopen it)", note: n)
         case .archive:
             return ContextProposal(request: req(BuiltInAction.archive), preview: "Archive “\(c.title)” (you can reopen it)", note: n)
+        case .snooze:
+            let d = cmd.date!.date
+            return ContextProposal(request: req(BuiltInAction.snooze, ["until": .number(d.timeIntervalSince1970)]),
+                                   preview: "Snooze “\(c.title)” until \(DueText.describe(d, hasTime: true, now: now, calendar: calendar))", note: n)
         }
     }
 }

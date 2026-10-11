@@ -19,7 +19,7 @@ public enum CredentialError: Error, Equatable, LocalizedError {
 /// never synced to iCloud.
 public struct KeychainCredentialStore: CredentialStore {
     public let service: String
-    public init(service: String = "com.shibadityadeb.wren.connectors") { self.service = service }
+    public init(service: String = AppIdentity.keychainService) { self.service = service }
 
     func query(_ key: String) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: key]

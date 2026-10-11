@@ -6,11 +6,14 @@ import UserNotifications
 
 private let appLog = Logger(subsystem: "com.shibadityadeb.wren", category: "app")
 
-/// Menu-bar agent: a status item with a popover, a global shortcut, and the capture panel.
+/// One regular Mac app: a Dock icon and main window, exactly one menu-bar item with a popover,
+/// a global shortcut, the capture panel, reminders and the voice service, all in this process.
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSMenuDelegate {
     private var model: AppModel!
-    private var statusItem: NSStatusItem!
+    private var statusItem: NSStatusItem?
+    /// Exclusive lock on the data folder, held for the life of the process.
+    private var dataLock: DataDirectoryLock?
     private let popover = NSPopover()
     private var panel: CapturePanel!
     private let captureState = CaptureState()
@@ -34,12 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         // One Wren at a time: a login launch plus a manual open must not run two schedulers.
         // A relaunch (to finish a restore) waits for the previous copy to quit first.
         let isRelaunch = CommandLine.arguments.contains("--relaunch")
-        var isolatedDebugData = false
-        #if DEBUG
-        // A debug build pointed at a throwaway data folder can run beside the installed copy.
-        isolatedDebugData = ProcessInfo.processInfo.environment["WREN_DEBUG_DATA_DIR"] != nil
-        #endif
-        if let id = Bundle.main.bundleIdentifier, !isolatedDebugData {
+        if let id = Bundle.main.bundleIdentifier {
             var waited: TimeInterval = 0
             while true {
                 let others = NSRunningApplication.runningApplications(withBundleIdentifier: id).contains { $0.processIdentifier != getpid() }
@@ -57,14 +55,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 break
             }
         }
+        // Whatever the bundle identifier or install location, only one process may use the data.
+        var waitedForLock: TimeInterval = 0
+        while dataLock == nil {
+            do { dataLock = try DataDirectoryLock.acquire(directory: WrenStore.defaultDirectory) } catch {
+                if isRelaunch, waitedForLock < 10 { Thread.sleep(forTimeInterval: 0.25); waitedForLock += 0.25; continue }
+                appLog.notice("data folder in use by another Wren: \(error.localizedDescription, privacy: .public); exiting")
+                if case let DataDirectoryLock.Failure.heldByAnotherProcess(pid?) = error {
+                    NSRunningApplication(processIdentifier: pid)?.activate()
+                }
+                NSApp.terminate(nil)
+                return
+            }
+        }
+        AppMenu.install(target: self)
         model = AppModel()
         mainWindow = MainWindowController(model: model)
 
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.button?.image = WrenMark.menuBarImage()
-        statusItem.button?.action = #selector(togglePopover)
-        statusItem.button?.target = self
-        statusItem.button?.setAccessibilityLabel("Wren")
+        // Exactly one status item per process, created once here and removed on quit.
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        item.button?.image = WrenMark.menuBarImage()
+        item.button?.action = #selector(statusItemClicked)
+        item.button?.target = self
+        item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        item.button?.setAccessibilityLabel("Wren")
+        statusItem = item
 
         popover.behavior = .transient
         popover.animates = false
@@ -231,8 +246,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.isShown ? popover.performClose(nil) : openPopover()
     }
 
+    /// Left click: the popover. Right click or Control-click: a menu with Open, Capture, Settings and Quit.
+    @objc private func statusItemClicked() {
+        let ev = NSApp.currentEvent
+        if ev?.type == .rightMouseUp || ev?.modifierFlags.contains(.control) == true {
+            popover.performClose(nil)
+            let menu = statusMenu()
+            statusItem?.menu = menu
+            statusItem?.button?.performClick(nil)
+            statusItem?.menu = nil
+        } else {
+            togglePopover()
+        }
+    }
+
+    private func statusMenu() -> NSMenu {
+        let m = NSMenu()
+        m.addItem(withTitle: "Open Wren", action: #selector(openMainWindowAction), keyEquivalent: "").target = self
+        m.addItem(withTitle: "New Capture", action: #selector(newCaptureAction), keyEquivalent: "").target = self
+        m.addItem(.separator())
+        m.addItem(withTitle: "Settings…", action: #selector(openSettingsAction), keyEquivalent: "").target = self
+        m.addItem(.separator())
+        m.addItem(withTitle: "Quit Wren", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
+        return m
+    }
+
+    @objc func openMainWindowAction() { popover.performClose(nil); mainWindow.show() }
+    @objc func newCaptureAction() { popover.performClose(nil); showCapture() }
+    @objc func openSettingsAction() { popover.performClose(nil); model.route = .settings; mainWindow.show() }
+    @objc func showAboutAction() {
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.orderFrontStandardAboutPanel(options: [.credits: NSAttributedString(string: "Local-first personal assistant. Your data stays on this Mac.")])
+    }
+
+    @objc func openHelpAction() {
+        NSWorkspace.shared.open(URL(string: "https://github.com/shibadityadeb/wren#readme")!)
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        voice?.cancel()
+        hotKeys?.unregister()
+        voiceKeys?.unregister()
+        if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }
+        statusItem = nil
+        dataLock?.release()
+        appLog.notice("quit: status item removed, shortcuts released, data unlocked")
+    }
+
     func openPopover() {
-        guard let button = statusItem.button else { return }
+        guard let button = statusItem?.button else { return }
         model.reload()
         Task { await model.refreshAI(); model.notificationStatus = await model.notifications.refreshStatus() }
         NSApp.activate(ignoringOtherApps: true)
@@ -255,7 +317,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     // MARK: URL scheme fallback: `open wren://capture`
 
     func application(_ application: NSApplication, open urls: [URL]) {
-        for url in urls where url.scheme == "wren" {
+        for url in urls where AppIdentity.urlSchemes.contains(url.scheme ?? "") {
             switch url.host {
             case "capture": showCapture()
             case "open": mainWindow.show()
@@ -480,7 +542,8 @@ public enum WrenMain {
         let d = AppDelegate()
         delegate = d
         app.delegate = d
-        app.setActivationPolicy(.accessory)
+        // A regular app: Dock icon, app menu, Cmd+Q. The menu-bar item is part of the same process.
+        app.setActivationPolicy(.regular)
         app.run()
     }
 }

@@ -7,6 +7,8 @@ public struct ParsedDate: Equatable, Sendable {
     /// True for ranges like "this weekend" or "next week" where Wren picked a representative day.
     public var isApproximate: Bool
     public var phrase: String
+    /// "at 3" with no am/pm, morning/evening or 24-hour form: could be 3 AM or 3 PM.
+    public var meridiemAmbiguous: Bool = false
 }
 
 /// Deterministic English date/time reader. It only resolves what is literally written;
@@ -35,8 +37,9 @@ public struct DateParser: Sendable {
             var t = t0
             // "tonight at 8" / "tomorrow evening at 7": the part of day decides am/pm.
             if !t.meridiemKnown, let implied = d.impliedHour, implied >= 12, t.hour < 12 { t.hour += 12 }
+            let ambiguous = !t.meridiemKnown && d.impliedHour == nil && (1...11).contains(t.hour)
             guard let date = calendar.date(bySettingHour: t.hour, minute: t.minute, second: 0, of: d.date) else { return nil }
-            return ParsedDate(date: date, hasTime: true, isApproximate: d.approx, phrase: joinPhrases(s, d.range, t.range))
+            return ParsedDate(date: date, hasTime: true, isApproximate: d.approx, phrase: joinPhrases(s, d.range, t.range), meridiemAmbiguous: ambiguous)
         case let (d?, nil):
             let start = calendar.startOfDay(for: d.date)
             if let h = d.impliedHour, let date = calendar.date(bySettingHour: h, minute: 0, second: 0, of: start) {
@@ -55,7 +58,8 @@ public struct DateParser: Sendable {
                 }
             }
             guard let date = candidates.min() else { return nil }
-            return ParsedDate(date: date, hasTime: true, isApproximate: !t.meridiemKnown, phrase: String(s[t.range]))
+            return ParsedDate(date: date, hasTime: true, isApproximate: !t.meridiemKnown, phrase: String(s[t.range]),
+                              meridiemAmbiguous: !t.meridiemKnown && (1...11).contains(t.hour))
         default:
             return nil
         }
@@ -127,9 +131,13 @@ public struct DateParser: Sendable {
             return DayHit(date: d, range: m.range, approx: false, impliedHour: nil)
         }
         // Weekdays. A weekday equal to today means next week's (test plan P3-15).
+        // "friday evening", "on monday morning": the part of day sets the time when none is written.
         for (name, wd) in Self.weekdays {
-            guard let re = try? Regex("\\b(next\\s+|this\\s+|on\\s+|by\\s+)?\(name)\\b"), let m = s.firstMatch(of: re) else { continue }
-            return DayHit(date: plus(daysUntil(weekday: wd, from: today, allowToday: false)), range: m.range, approx: false, impliedHour: nil)
+            guard let re = try? Regex("\\b(next\\s+|this\\s+|on\\s+|by\\s+)?\(name)(\\s+(morning|afternoon|evening|night))?\\b"),
+                  let m = s.firstMatch(of: re) else { continue }
+            let part = m.output.count > 3 ? m.output[3].substring.map(String.init) : nil
+            return DayHit(date: plus(daysUntil(weekday: wd, from: today, allowToday: false)), range: m.range, approx: false,
+                          impliedHour: part.map(Self.partOfDayHour))
         }
         return nil
     }
@@ -148,6 +156,9 @@ public struct DateParser: Sendable {
     // MARK: Times
 
     struct TimeHit { var hour: Int; var minute: Int; var meridiemKnown: Bool; var range: Range<String.Index> }
+
+    /// The time of day written in `s` (lowercased), if any.
+    func time(in s: String) -> TimeHit? { timePart(s) }
 
     private func timePart(_ s: String) -> TimeHit? {
         if let m = s.firstMatch(of: /\b(noon|midday)\b/) { return TimeHit(hour: 12, minute: 0, meridiemKnown: true, range: m.range) }

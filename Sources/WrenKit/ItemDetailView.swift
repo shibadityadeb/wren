@@ -248,6 +248,7 @@ struct ItemDetailView: View {
         case .followUpScheduled: "Follow-up set"
         case .followedUp: "Followed up"
         case .postponementReviewed: "Reviewed after several moves"
+        case .occurrenceDone: "Done for this time (keeps repeating)"
         }
     }
 }

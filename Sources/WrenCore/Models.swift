@@ -57,6 +57,9 @@ public enum EventKind: String, Codable, Sendable {
     case waitingUpdated, followUpScheduled, followedUp
     /// The user answered a "moved several times" observation (kept the date, etc.).
     case postponementReviewed
+    // Milestone 8
+    /// One occurrence of a repeating reminder was marked done; the series continues.
+    case occurrenceDone
 }
 
 /// One captured thing. Stores the verbatim text forever, plus the interpreted fields.
@@ -98,6 +101,11 @@ public final class Commitment {
     public var followUpAcknowledgedAt: Date?
     /// Private items are left out of anything sent outside the Mac unless included each time.
     public var isPrivate: Bool = false
+    // Reminders that macOS delivers (schema v5). Optional so v4 records load unchanged.
+    /// JSON `RecurrenceRule` for repeating reminders; nil for one-off ones.
+    public var recurrenceRaw: String?
+    /// Identifiers of the macOS notification requests currently scheduled for this item.
+    public var notificationIDsRaw: String?
     var statusRaw: String
     var kindRaw: String
     var priorityRaw: Int
@@ -122,6 +130,16 @@ public final class Commitment {
         priorityRaw = Priority.normal.rawValue
         sourceRaw = source.rawValue
         processingRaw = ProcessingState.awaiting.rawValue
+    }
+
+    public var recurrence: RecurrenceRule? {
+        get { recurrenceRaw.flatMap { try? JSONDecoder().decode(RecurrenceRule.self, from: Data($0.utf8)) } }
+        set { recurrenceRaw = newValue.flatMap { try? JSONEncoder().encode($0) }.map { String(decoding: $0, as: UTF8.self) } }
+    }
+
+    public var scheduledNotificationIDs: [String] {
+        get { notificationIDsRaw?.split(separator: "\n").map(String.init) ?? [] }
+        set { notificationIDsRaw = newValue.isEmpty ? nil : newValue.sorted().joined(separator: "\n") }
     }
 
     public var status: CommitmentStatus {

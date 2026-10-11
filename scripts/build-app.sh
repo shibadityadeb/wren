@@ -16,17 +16,24 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-CONFIG="release"; UNIVERSAL=0
+CONFIG="release"; UNIVERSAL=0; DEV_IDENTITY=0
 for a in "$@"; do
   case "$a" in
     debug|release) CONFIG="$a" ;;
     --universal) UNIVERSAL=1 ;;
+    --dev-identity) DEV_IDENTITY=1 ;;
     *) echo "unknown option $a"; exit 2 ;;
   esac
 done
 VERSION="$(tr -d ' \n' < VERSION)"
 BUILD_NUMBER="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
-APP="build/Wren.app"
+# --dev-identity: a separate "Wren Dev" app (own bundle ID, data folder, Keychain items and URL
+# scheme) for testing beside an installed Wren without touching its data. Never for release.
+BUNDLE_ID="com.shibadityadeb.wren"; APP_NAME="Wren"; URL_SCHEME="wren"; APP="build/Wren.app"
+if [[ $DEV_IDENTITY == 1 ]]; then
+  [[ "$CONFIG" == "debug" ]] || { echo "--dev-identity is for debug builds only"; exit 2; }
+  BUNDLE_ID="com.shibadityadeb.wren.dev"; APP_NAME="Wren Dev"; URL_SCHEME="wren-dev"; APP="build/Wren Dev.app"
+fi
 mkdir -p build
 
 if [[ $UNIVERSAL == 1 ]]; then
@@ -83,24 +90,24 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleIdentifier</key><string>com.shibadityadeb.wren</string>
-  <key>CFBundleName</key><string>Wren</string>
-  <key>CFBundleDisplayName</key><string>Wren</string>
+  <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
+  <key>CFBundleName</key><string>$APP_NAME</string>
+  <key>CFBundleDisplayName</key><string>$APP_NAME</string>
   <key>CFBundleExecutable</key><string>Wren</string>
   <key>CFBundleIconFile</key><string>Wren</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$BUILD_NUMBER</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
-  <key>LSUIElement</key><true/>
+  <key>LSUIElement</key><false/>
   <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
   <key>NSHumanReadableCopyright</key><string>Local-first personal assistant. Data stays on this Mac.</string>
   <key>NSMicrophoneUsageDescription</key><string>Wren records only while you hold the push-to-talk shortcut, to turn what you say into a capture. Audio is transcribed on this Mac and deleted.</string>
 ${PROVIDER_PLIST}  <key>NSSpeechRecognitionUsageDescription</key><string>Wren uses on-device speech recognition to turn your voice capture into text. Audio never leaves this Mac.</string>
   <key>CFBundleURLTypes</key>
   <array><dict>
-    <key>CFBundleURLName</key><string>com.shibadityadeb.wren</string>
-    <key>CFBundleURLSchemes</key><array><string>wren</string></array>
+    <key>CFBundleURLName</key><string>$BUNDLE_ID</string>
+    <key>CFBundleURLSchemes</key><array><string>$URL_SCHEME</string></array>
   </dict></array>
 </dict>
 </plist>
