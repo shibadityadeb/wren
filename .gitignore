@@ -19,5 +19,3 @@ dist/
 
 # Maintainer provider registrations (never commit)
 config/providers.env
-services/notion-oauth-relay/wrangler.toml
-services/notion-oauth-relay/.dev.vars

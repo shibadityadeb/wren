@@ -59,9 +59,7 @@ jobs:
         env:
           # Maintainer-registered provider apps; empty values build without that provider.
           WREN_GOOGLE_CLIENT_ID: ${{ secrets.WREN_GOOGLE_CLIENT_ID }}
-          WREN_GOOGLE_VERIFIED: ${{ vars.WREN_GOOGLE_VERIFIED }}
-          WREN_NOTION_CLIENT_ID: ${{ secrets.WREN_NOTION_CLIENT_ID }}
-          WREN_NOTION_OAUTH_RELAY: ${{ secrets.WREN_NOTION_OAUTH_RELAY }}
+          WREN_GOOGLE_STATUS: ${{ vars.WREN_GOOGLE_STATUS }}
         run: scripts/package-dmg.sh --skip-tests
       - name: Notarize and staple
         if: env.HAS_CERT == 'true' && env.HAS_NOTARY == 'true'

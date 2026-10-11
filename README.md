@@ -151,7 +151,8 @@ Each connector shows its real state (Available to connect, Connecting, Connected
 | Voice | Turn it on; allow Microphone and Speech Recognition when macOS asks | Push-to-talk capture, transcribed on your Mac |
 | Gmail | **Connect Google** (one sign-in for both) | Read-only: search, what needs attention, morning briefing |
 | Google Calendar | **Connect Google** (same sign-in) | Read-only: schedule questions, briefing, reminders from events |
-| Notion | **Connect Notion**, pick the pages Wren may use | Search and read those pages, create a page after you confirm |
+| Calendar | **Use this Mac's calendars** (macOS asks once) | Read-only: every calendar already on this Mac, including Google, iCloud and Outlook accounts |
+| Notion | **Connect Notion**, sign in and allow | Search and read pages, create a page after you confirm |
 | Local files, Apple Shortcuts | — | Planned |
 
 If a connector says **Maintainer setup required**, the copy of Wren you have was built without that provider's sign-in. There's nothing for you to set up; it's for Wren's maintainers to enable.
@@ -219,11 +220,21 @@ What you get: search mail ("Anything from the recruiter?"), "What needs my atten
 
 Mail is fetched when needed and **not stored** unless you turn on the 7-day cache of headers and previews. Text in an email is treated as data: it can't trigger any action. **Disconnect Google** revokes Wren's access to both Gmail and Calendar at Google, removes the sign-in from this Mac and deletes cached mail.
 
+### Calendar (this Mac)
+
+**Use this Mac's calendars** in Connectors › Calendar lets Wren read the calendars already in Apple's Calendar app. That includes Google, iCloud, Outlook and Exchange accounts you added in System Settings › Internet Accounts. macOS asks once for Calendars access. There's no sign-in, and nothing leaves your Mac.
+
+It's read-only. It powers "what meetings do I have tomorrow?", today's events on the Overview and in the briefing, and **Remind me** on an event. To include a Google calendar this way, add your Google account in System Settings › Internet Accounts and turn on Calendars.
+
+You can also connect **Google Calendar (direct)** through Connect Google. If both are on, Wren shows each event once.
+
 ### Notion
 
-**Connect Notion** opens Notion in your browser. Pick the workspace and the pages Wren may use; Wren can't see anything else. Wren shows the workspace it's connected to. **Change which pages Wren can use…** takes you back to Notion to adjust.
+**Connect Notion** opens Notion's sign-in page in your browser. Sign in, choose the workspace, and allow access. Wren comes back by itself and shows the workspace. There's nothing to set up in Notion first.
 
-You can search those pages, read them, include chosen pages as context in a Delegate request, and create a page (it asks first). Unsupported block types are shown as "[type block not shown]". Sign-in finishes through a small service run by Wren's maintainers that holds Wren's Notion app secret; it passes the token to Wren and stores nothing. **Disconnect** revokes the token with Notion and deletes it from this Mac.
+Wren uses Notion's official connection for apps (Notion MCP). It registers itself during sign-in, so there's no integration, token or secret.
+
+You can search your workspace, read pages, include chosen pages as context in a Delegate request, and create a page (it always asks first). Notion asks you to connect again after 30 days without use, or after 180 days. **Disconnect** removes the sign-in from this Mac and asks Notion to revoke it.
 
 ### Troubleshooting
 
@@ -235,7 +246,8 @@ You can search those pages, read them, include chosen pages as context in a Dele
 | "Reauthorization required" | Press **Reconnect** |
 | "Missing permissions" | Connect again and approve everything Wren asks for on the provider's page |
 | Gmail/Calendar: "Missing permission" | Connect again and leave the permission ticked on Google's page |
-| Notion pages missing | **Change which pages Wren can use…** and add them in Notion |
+| Notion says Reauthorization required | Notion's sign-in lasts up to 180 days, and ends after 30 days unused: press **Reconnect** |
+| Calendar shows no events | Add your accounts in System Settings › Internet Accounts, then **Check again** in Connectors › Calendar |
 | Voice: "on-device recognition isn't installed" | Turn on Dictation in System Settings › Keyboard once |
 | Voice: microphone denied | System Settings › Privacy & Security › Microphone › Wren |
 
@@ -310,7 +322,7 @@ Local packaging: `scripts/package-dmg.sh` (runs tests, builds universal, package
 
 ### Provider sign-in setup
 
-Google and Notion sign-in need app registrations made once by the maintainers and injected at build time; ChatGPT needs none. See [docs/MAINTAINER_SETUP.md](docs/MAINTAINER_SETUP.md). A build without them still works and shows those connectors as "Maintainer setup required".
+Google sign-in needs one app registration made by the maintainers and injected at build time. ChatGPT and Notion need none, because Wren registers itself with them. See [docs/MAINTAINER_SETUP.md](docs/MAINTAINER_SETUP.md). A build without them still works and shows Gmail and Google Calendar (direct) as "Maintainer setup required".
 
 ### Signing and notarization setup
 
@@ -336,12 +348,6 @@ The test suite covers persistence across reopen, status transitions, reminder de
 
 ```bash
 WREN_LIVE_OLLAMA=qwen2.5:3b swift test --filter "LiveModelTests|testLiveOllama"
-```
-
-The Notion sign-in relay has its own tests:
-
-```bash
-node --test services/notion-oauth-relay/relay.test.mjs
 ```
 
 To try a development build next to an installed Wren, build it as **Wren Dev**. It's a separate app with its own data folder, preferences, credentials and `wren-dev://` URL scheme, so it never touches your real data and never shows up as a second Wren:

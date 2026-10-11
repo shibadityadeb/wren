@@ -274,38 +274,17 @@ final class CalendarTests: XCTestCase {
 final class NotionTests: XCTestCase {
     override func setUp() { RouteStub.reset() }
 
-    func testSearchBlocksUnsupportedAndRateLimit() async throws {
-        RouteStub.sequences["/v1/search"] = [
-            RouteStub.json(#"{"message":"slow down"}"#, 429),
-            RouteStub.json(#"{"results":[{"object":"page","id":"p1","url":"https://www.notion.so/p1","last_edited_time":"2026-10-01T10:00:00.000Z","properties":{"Name":{"type":"title","title":[{"plain_text":"Project "},{"plain_text":"decisions"}]}}},{"object":"page","id":"p2","in_trash":true,"properties":{}}],"has_more":false}"#)]
-        RouteStub.routes["/v1/blocks/p1/children"] = RouteStub.json(#"{"results":[{"id":"b1","type":"heading_2","heading_2":{"rich_text":[{"plain_text":"Decision"}]}},{"id":"b2","type":"to_do","to_do":{"checked":true,"rich_text":[{"plain_text":"Use SwiftData"}]}},{"id":"b3","type":"image","image":{}},{"id":"b4","type":"toggle","has_children":true,"toggle":{"rich_text":[{"plain_text":"Details"}]}}],"has_more":false}"#)
-        RouteStub.routes["/v1/blocks/b4/children"] = RouteStub.json(#"{"results":[{"id":"b5","type":"paragraph","paragraph":{"rich_text":[{"plain_text":"Nested note"}]}}],"has_more":false}"#)
-        var n = NotionClient(session: session()) { "ntn_test" }
-        n.maxWait = 0.01
-        let pages = try await n.searchPages("decisions")
-        XCTAssertEqual(pages.map(\.title), ["Project decisions"], "rate-limited once, retried; trashed page hidden")
-        XCTAssertEqual(RouteStub.requests.first!.0.value(forHTTPHeaderField: "Notion-Version"), NotionClient.version)
-        let blocks = try await n.blocks("p1")
-        XCTAssertEqual(blocks.map(\.text), ["## Decision", "[x] Use SwiftData", "[image block not shown]", "Details", "Nested note"])
-        XCTAssertFalse(blocks[2].supported)
-        XCTAssertEqual(blocks[4].depth, 1)
-        XCTAssertTrue(NotionClient.plainText(blocks).contains("  Nested note"))
-    }
-
     func testCreatePageOnlyAfterConfirmation() async throws {
         let h = try Harness(now: Date(), calendar: calendar("Asia/Kolkata"))
         try h.policy.setGrant(.notionWrite, granted: true)
-        RouteStub.routes["/v1/pages"] = RouteStub.json(#"{"object":"page","id":"new1","properties":{"title":{"type":"title","title":[{"plain_text":"Ideas"}]}}}"#)
-        let n = NotionClient(session: session()) { "ntn_x" }
+        var created: [String] = []
         let req = ActionRequest(action: BuiltInAction.createNotionPage, target: TargetRef(kind: "notionParent", id: "p1", label: "Project"),
                                 parameters: ["title": .string("Ideas")], origin: .user(.popover), createdAt: Date())
-        do { _ = try await h.broker.performExternal(req) { try await n.createPage(parentID: "p1", title: "Ideas", body: "a") }; XCTFail() }
+        do { _ = try await h.broker.performExternal(req) { created.append("Ideas"); return "new1" }; XCTFail() }
         catch { XCTAssertEqual(error as? ActionBroker.ExternalOutcome, .needsConfirmation("Create a Notion page: “Project”")) }
-        XCTAssertTrue(RouteStub.requests.isEmpty, "nothing sent before confirmation")
-        let page = try await h.broker.performExternal(req, confirmation: h.broker.confirm(req)) { try await n.createPage(parentID: "p1", title: "Ideas", body: "line 1\nline 2") }
-        XCTAssertEqual(page.title, "Ideas")
-        let body = String(decoding: RouteStub.requests.last!.1!, as: UTF8.self)
-        XCTAssertTrue(body.contains("\"page_id\":\"p1\"") && body.contains("line 2"))
+        XCTAssertTrue(created.isEmpty, "nothing created before confirmation")
+        let id = try await h.broker.performExternal(req, confirmation: h.broker.confirm(req)) { created.append("Ideas"); return "new1" }
+        XCTAssertEqual(id, "new1"); XCTAssertEqual(created, ["Ideas"])
     }
 }
 

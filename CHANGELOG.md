@@ -4,6 +4,10 @@ Versions follow [semantic versioning](https://semver.org). The `VERSION` file is
 
 ## [Unreleased]
 
+- Notion connects through Notion's official connection for apps (Notion MCP): sign in on Notion's page and allow. There's nothing to set up, no integration, and no server of Wren's own.
+- New **Calendar** connector reads the calendars already on your Mac (Google, iCloud, Outlook accounts from System Settings) with one macOS permission and no sign-in. Google Calendar (direct) stays optional; events shown from both appear once.
+- Google setup for maintainers is a 15-minute, step-by-step guide. A new status setting tells users exactly what to expect (test users only, Google's "unverified app" screen, or verified).
+
 - One **Connect Google** for Gmail and Calendar. It explains what Wren can read, opens Google's own sign-in and permission page, and brings Wren back afterwards. Wren then shows the account, the permissions Google granted, Add for a skipped permission, Reconnect, and Disconnect Google.
 - Only the features whose permission Google granted switch on, after a real read.
 - Wren says plainly when Google hasn't finished reviewing its app, and that only test accounts can connect until then.

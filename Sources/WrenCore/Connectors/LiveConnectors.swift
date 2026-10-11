@@ -240,84 +240,114 @@ public final class GoogleConnector: BaseConnector, Connector {
     }
 }
 
-/// Notion through Wren's public integration (OAuth). The user picks pages on Notion's consent screen.
+/// Notion through Notion's hosted MCP server. Wren registers itself at sign-in (no integration,
+/// no secret, no server of Wren's own); the user signs in and chooses access on Notion's page.
 @MainActor
 public final class NotionConnector: BaseConnector, Connector {
+    public nonisolated static let key = "notion.mcp"
     let store: CredentialStore
     let session: URLSession
-    let config: NotionOAuthConfig?
-    public let notion: NotionSession
-    /// Set when the last disconnect couldn't confirm revocation with Notion.
+    let auth: NotionMCPAuth
+    public var signInTimeout: TimeInterval = 300
+    /// Set when the last disconnect couldn't be confirmed with Notion.
     public private(set) var disconnectNote: String?
+    private var cachedMCP: MCPClient?
 
-    public init(config: NotionOAuthConfig?, store: CredentialStore, statusStore: ConnectorStatusStoring, session: URLSession = .shared,
-                now: @escaping @Sendable () -> Date = { Date() }) {
-        self.store = store; self.session = session; self.config = config
-        notion = NotionSession(store: store)
+    public init(store: CredentialStore, statusStore: ConnectorStatusStoring, session: URLSession = .shared, now: @escaping @Sendable () -> Date = { Date() }) {
+        self.store = store; self.session = session
+        auth = NotionMCPAuth(session: session, now: now)
+        // Earlier builds kept a token from the old integration; it can't be used with Notion MCP.
+        for legacy in ["notion.oauth", "notion.token"] { try? store.delete(legacy) }
         super.init(.notion, statusStore: statusStore, now: now)
-        state = initialState
+        state = connection == nil ? .available : .temporarilyUnavailable("Not checked yet.")
     }
 
-    public var isConfigured: Bool { config != nil }
-    var oauth: NotionOAuth? { config.map { NotionOAuth(config: $0, session: session, now: now) } }
+    public var connection: NotionMCPConnection? { store.readJSON(Self.key, as: NotionMCPConnection.self) }
+    public var workspace: String? { connection?.workspace }
+    public var isSignedIn: Bool { connection != nil }
 
-    var initialState: ConnectorState {
-        guard config != nil else { return .notAvailableInBuild(ProviderConfig.notInBuild("Notion", feature: "Notion")) }
-        return notion.tokens == nil ? .available : .temporarilyUnavailable("Not checked yet.")
+    func accessToken(force: Bool) async throws -> String {
+        guard var c = connection else { throw ConnectorError.notConfigured("Notion isn't connected.") }
+        let expiring = c.expiresAt.map { $0.timeIntervalSince(now()) < 60 } ?? false
+        if force || expiring {
+            c = try await auth.refresh(c)
+            try store.writeJSON(Self.key, c)
+        }
+        return c.accessToken
     }
 
-    public var workspace: String? { notion.tokens?.workspaceName }
-
-    public var client: NotionClient {
-        let s = notion, o = oauth
-        return NotionClient(session: session) { try await s.accessToken(oauth: o) }
+    public var client: NotionMCPClient {
+        if let m = cachedMCP { return NotionMCPClient(mcp: m) }
+        let m = MCPClient(session: session) { [weak self] force in
+            guard let self else { throw ConnectorError.cancelled }
+            return try await self.accessToken(force: force)
+        }
+        cachedMCP = m
+        return NotionMCPClient(mcp: m)
     }
 
-    /// Opens Notion's consent page; Notion redirects to Wren's relay, which bounces to 127.0.0.1.
+    /// Opens Notion's sign-in and access page; Notion sends the browser back to Wren's loopback.
     public func connect(open: (URL) -> Void) async {
-        guard let oauth else { state = initialState; return }
         state = .connecting
         disconnectNote = nil
-        let receiver = LoopbackReceiver(path: NotionOAuth.callbackPath)
+        let previous = connection
+        let stateToken = UUID().uuidString
+        let receiver = LoopbackReceiver(path: NotionMCP.callbackPath, expectedState: stateToken)
         do {
+            let meta = try await auth.metadata()
             try await receiver.start()
-            let stateToken = NotionOAuth.makeState(port: receiver.port)
-            receiver.expectedState = stateToken
-            open(oauth.authorizationURL(state: stateToken))
-            let callback = try await receiver.waitForRedirect()
-            let code = try GoogleOAuth.parseCallback(callback, expectedState: stateToken)
-            let tokens = try await oauth.exchange(code: code)
-            try notion.save(tokens)
+            let redirect = receiver.redirectURL
+            let clientID = try await auth.register(meta, redirect: redirect)
+            let pkce = PKCE.make()
+            open(NotionMCPAuth.authorizationURL(meta, clientID: clientID, redirect: redirect, state: stateToken, pkce: pkce))
+            let callback = try await receiver.waitForRedirect(timeout: signInTimeout)
+            let code = try NotionMCPAuth.parseCallback(callback, expectedState: stateToken)
+            let c = try await auth.exchange(meta, code: code, clientID: clientID, redirect: redirect, pkce: pkce)
+            try store.writeJSON(Self.key, c)
+            cachedMCP = nil
             try await verify()
         } catch {
             receiver.stop()
-            if (error as? OAuthError) != nil { try? notion.clear() }
-            state = stateFor(error)
+            // A failed attempt never leaves half a sign-in; an existing one stays.
+            if let previous { try? store.writeJSON(Self.key, previous) } else { try? store.delete(Self.key) }
+            cachedMCP = nil
+            lastConnectError = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+            if previous != nil { state = .temporarilyUnavailable("Not checked yet."); return }
+            switch error {
+            case OAuthError.timedOut, OAuthError.denied, OAuthError.stateMismatch: _ = failed(error); state = .available
+            default: state = stateFor(error)
+            }
         }
     }
 
-    /// A real authorized call: who Notion says this connection is.
+    /// Why the last Connect Notion didn't finish.
+    public private(set) var lastConnectError: String?
+
+    /// A real, authorized call: which workspace this connection is.
     func verify() async throws {
         let who = try await client.identity()
-        let account = notion.tokens?.workspaceName ?? who
+        if var c = connection, c.workspace != who.workspace || c.user != who.user {
+            c.workspace = who.workspace; c.user = who.user
+            try? store.writeJSON(Self.key, c)
+        }
+        let account = who.workspace ?? who.user ?? "Notion"
+        lastConnectError = nil
         succeeded(account: account)
         state = .connected(account: account)
     }
 
     public func refresh() async {
-        guard config != nil else { state = initialState; return }
-        guard notion.tokens != nil else { state = .available; return }
+        guard connection != nil else { state = .available; return }
         do { try await verify() } catch { state = stateFor(error) }
     }
 
     public func disconnect() async {
         disconnectNote = nil
-        if let t = notion.tokens, let oauth {
-            do { try await oauth.revoke(t.accessToken) } catch {
-                disconnectNote = "Wren removed its copy of the Notion token, but Notion didn't confirm the revocation. You can also remove Wren in Notion › Settings › Connections."
-            }
+        if let c = connection, !(await auth.revoke(c)) {
+            disconnectNote = "Wren deleted its Notion sign-in, but Notion didn't confirm the revocation. You can also remove Wren in Notion › Settings › Connections."
         }
-        try? notion.clear()
+        try? store.delete(Self.key)
+        cachedMCP = nil
         cleared()
     }
 }

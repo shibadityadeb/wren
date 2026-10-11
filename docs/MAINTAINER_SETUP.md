@@ -10,8 +10,9 @@ for it, with no setup steps for the user. That is the intended, honest fallback.
 | Provider | Registration | Secret | Where it lives |
 |---|---|---|---|
 | ChatGPT | None: Sign in with ChatGPT registers Wren dynamically on first sign-in | None | Nothing to configure |
+| Notion | None: Notion MCP registers Wren dynamically at sign-in | None | Nothing to configure |
+| Calendar (this Mac) | None: macOS Calendars permission | None | Nothing to configure |
 | Google (Gmail, Calendar) | Google OAuth client, type **Desktop app** | None: public client, loopback + PKCE | Client ID injected into the app at build time |
-| Notion | Notion **public** integration | Client secret, confidential | Only in the Notion relay service |
 
 ## Build-time injection
 
@@ -22,8 +23,7 @@ only reads these four keys from the file and never executes it or prints the val
 | Variable | Value |
 |---|---|
 | `WREN_GOOGLE_CLIENT_ID` | `….apps.googleusercontent.com` |
-| `WREN_NOTION_CLIENT_ID` | The public integration's OAuth client ID |
-| `WREN_NOTION_OAUTH_RELAY` | HTTPS base URL of the deployed relay |
+| `WREN_GOOGLE_STATUS` | `testing`, `unverified` or `verified` (what Wren tells users to expect) |
 
 For releases, add the same three names as **repository secrets**. The Release workflow passes them to
 packaging. `scripts/verify-dmg.sh` reports whether each provider is included without showing values.
@@ -65,35 +65,51 @@ its trusted app process:
 No devkit code is copied. If OpenAI publishes a native or C-callable runtime, Wren can switch to it
 behind the same `ChatGPTConnector`.
 
-## Google (Gmail and Google Calendar)
+## Google (Gmail and Google Calendar): the 15-minute setup
 
-Users see one **Connect Google** that covers Gmail and Calendar. Wren makes one sign-in with both
-read-only scopes, or the subset the user ticks, and uses `include_granted_scopes=true`, so adding
-the other one later keeps the first. It turns on only the features whose scope Google granted, and
-only after a real read succeeds.
+Users see one **Connect Google**. Wren makes one sign-in with both read-only scopes, or the subset the
+user ticks, and uses `include_granted_scopes=true`. It turns on only the features whose scope Google
+granted, and only after a real read succeeds. Most people get their calendars through
+**Calendar (this Mac)** instead, which needs no Google app at all.
 
-One OAuth application, owned by the maintainers, is shared by every user. To register it (this
-needs owner access to the Google Cloud project, so it can't be done from the codebase):
+You do this once. Everyone who downloads the DMG then just clicks Connect Google.
 
-1. In a Google Cloud project owned by the maintainers, enable the **Gmail API** and the
+**A. Create the app (Google Cloud Console, signed in as the owner)**
+1. Create a project named "Wren". APIs & Services › Library: enable **Gmail API** and
    **Google Calendar API**.
-2. Google Auth Platform › Branding: app name **Wren**, the Wren logo, a support email, a home page,
-   a privacy policy and an authorized domain.
-3. Audience: **External**. Leave it in **Testing** and add the Google accounts that may connect
-   (up to 100) under **Test users**.
-4. Data access: add only `https://www.googleapis.com/auth/gmail.readonly` and
-   `https://www.googleapis.com/auth/calendar.readonly`.
-5. Clients › Create client › **Desktop app**. Loopback redirects on any port are allowed for this
-   type, so no redirect URI is entered.
-6. Put the client ID in `config/providers.env` (`WREN_GOOGLE_CLIENT_ID`) or the repository secret of
-   the same name, and rebuild. Don't add the client secret anywhere: Wren is a public client
-   (loopback redirect, PKCE and state), and Google documents `client_secret` as optional for
-   installed apps, so none is shipped or sent.
-7. Leave `WREN_GOOGLE_VERIFIED` empty until Google approves verification. While it's empty, the
-   Connect Google screen tells users that only test accounts can connect. Set it to `1` (or the
-   repository variable of the same name) only after approval.
-8. Connect with a test account and follow docs/MANUAL_TESTS.md › Google. Don't call Google ready for
-   everyone until verification is approved.
+2. Google Auth Platform › Branding: app name **Wren**, the Wren logo, your support email, a home page
+   (the GitHub page is fine) and a privacy policy URL (for example, a page in the repo describing
+   docs/privacy).
+3. Audience: **External**.
+4. Data access › Add or remove scopes: add only `.../auth/gmail.readonly` and
+   `.../auth/calendar.readonly`.
+5. Clients › Create client › Application type **Desktop app**, name "Wren for Mac". Copy the
+   **client ID**. Ignore the client secret: Wren never uses it.
+
+**B. Choose who can connect**
+- **Just you and a few people:** Audience › Test users › add their Gmail addresses (up to 100). Set
+  `WREN_GOOGLE_STATUS=testing`. Google asks them to reconnect every 7 days.
+- **Anyone who downloads the DMG (recommended for a small app):** Audience › **Publish app**.
+  Without verification, Google shows "Google hasn't verified this app". Users choose
+  **Advanced › Go to Wren**, there's no 7-day reconnect, and Google caps it at 100 users. Set
+  `WREN_GOOGLE_STATUS=unverified`. Wren shows users exactly that instruction before they connect.
+- **Everyone, no warning:** submit for verification (next section). Set
+  `WREN_GOOGLE_STATUS=verified` only after Google approves.
+
+**C. Put it in the DMG**
+- GitHub › Settings › Secrets and variables › Actions:
+  - secret `WREN_GOOGLE_CLIENT_ID` = the client ID;
+  - variable `WREN_GOOGLE_STATUS` = `testing`, `unverified` or `verified`.
+- Tag a release (`git tag v0.9.0-preview.1 && git push --tags`). The DMG the Release workflow builds
+  contains the client ID, and `scripts/verify-dmg.sh` reports "Google included".
+- Local builds read the same two values from `config/providers.env`.
+
+**D. Check it**
+Install the DMG, Connectors › Gmail › Connect Google, approve with a test account, and follow
+docs/MANUAL_TESTS.md › Google.
+
+Wren is a public client (loopback redirect, PKCE and state). Google documents `client_secret` as
+optional for installed apps, so none is shipped or sent.
 
 ### Google verification: what's needed before ordinary users can connect
 
@@ -118,32 +134,30 @@ needs owner access to the Google Cloud project, so it can't be done from the cod
 Until verification is granted, ship builds with Google either excluded (users see "Maintainer setup
 required") or for listed testers only. Don't work around the consent screen.
 
-## Notion (public integration and relay)
+## Notion (nothing to register)
 
-Notion's token, refresh and revoke endpoints require the integration's client secret, so the secret
-lives in a small relay (`services/notion-oauth-relay/relay.mjs`) instead of the app. The relay is a
-dependency-free fetch handler. It stores nothing, logs no bodies, forwards Notion's redirect to the
-user's loopback listener using the port Wren puts in `state`, and returns only the token fields Wren
-uses. Wren still checks `state` itself.
+Wren connects through Notion's hosted MCP server (`https://mcp.notion.com/mcp`), using Notion's
+OAuth for MCP clients:
+- At each sign-in, Wren registers itself (RFC 7591) as a public client for that exact loopback
+  address.
+- It uses PKCE and state, and checks the issuer.
+- It exchanges the code and refreshes tokens with Notion directly.
 
-1. Deploy the relay, for example on Cloudflare Workers:
-   ```bash
-   cd services/notion-oauth-relay
-   cp wrangler.toml.example wrangler.toml
-   wrangler secret put NOTION_CLIENT_ID
-   wrangler secret put NOTION_CLIENT_SECRET
-   wrangler secret put PUBLIC_URL
-   wrangler deploy
-   ```
-   `PUBLIC_URL` is the relay's own HTTPS base URL.
-2. At notion.so/profile/integrations create a **Public** integration. Capabilities: read content and
-   insert content. Redirect URI: `<PUBLIC_URL>/notion/callback`. Fill in the company, website, privacy
-   policy and terms fields Notion asks for.
-3. Set the relay's secrets from the integration's OAuth client ID and secret.
-4. Put `WREN_NOTION_CLIENT_ID` and `WREN_NOTION_OAUTH_RELAY` (= `PUBLIC_URL`) in
-   `config/providers.env` or the repository secrets. The client secret never goes there.
+There's no Notion integration, client secret, relay or server of Wren's own. Wren reads and writes
+through Notion's MCP tools: `notion-get-self`, `notion-search`, `notion-fetch` and
+`notion-create-pages`. The last one is used only after the user confirms.
 
-Tests: `node --test services/notion-oauth-relay/relay.test.mjs`.
+Checked against the live service (2026-10-11):
+- the metadata at `/.well-known/oauth-authorization-server` advertises dynamic registration,
+  `token_endpoint_auth_method: none` and S256;
+- registering with an `http://127.0.0.1:<port>/notion/callback` redirect is accepted;
+- the authorize endpoint then forwards to Notion's normal consent page, while a made-up client ID is
+  rejected.
+
+A full sign-in needs a person with a Notion account.
+
+Notion refresh tokens end after 180 days, or after 30 days unused; Wren then shows "Reauthorization
+required".
 
 ## Verifying a build
 
