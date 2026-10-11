@@ -15,6 +15,8 @@ public final class WrenEngine {
     /// Current pause (persisted by the caller) and how to clear it when it expires.
     public var pause: () -> NotificationPause? = { nil }
     public var clearPause: () -> Void = {}
+    /// Read-only highlights from connected services for the briefing (nil when none connected).
+    public var externalBriefing: (() async -> ExternalBriefing?)?
     private var running = false
 
     public init(store: WrenStore, broker: ActionBroker, clock: WrenClock, notifier: WrenNotifier?, settings: @escaping () -> DailySettings,
@@ -135,7 +137,8 @@ public final class WrenEngine {
         case .run:
             let items = (try? store.all()) ?? []
             let fresh = freshInsights()
-            let briefing = Briefing.build(from: items, now: now, calendar: cal, insights: fresh)
+            var briefing = Briefing.build(from: items, now: now, calendar: cal, insights: fresh)
+            if e == .briefing, let provider = externalBriefing { briefing.external = await provider() }
             let checkIn = CheckIn.build(from: items, now: now, calendar: cal, insights: fresh)
             let empty = e == .briefing ? briefing.isEmpty : checkIn.isEmpty
             if empty && !s.sendEmptySummaries { set(.skippedEmpty); return .skippedEmpty }

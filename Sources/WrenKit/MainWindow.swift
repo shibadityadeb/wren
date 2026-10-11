@@ -8,7 +8,8 @@ struct MainWindowView: View {
     @Bindable var model: AppModel
 
     enum Section: String, CaseIterable, Identifiable {
-        case overview = "Overview", items = "Items", goals = "Goals", review = "Review", localAI = "Local AI", settings = "Settings"
+        case overview = "Overview", items = "Items", goals = "Goals", review = "Review", delegate = "Delegate",
+             connectors = "Connectors", localAI = "Local AI", settings = "Settings"
         var id: String { rawValue }
         var icon: String {
             switch self {
@@ -16,6 +17,8 @@ struct MainWindowView: View {
             case .items: "checklist"
             case .goals: "scope"
             case .review: "tray.full"
+            case .delegate: "arrow.up.forward.app"
+            case .connectors: "puzzlepiece.extension"
             case .localAI: "cpu"
             case .settings: "gearshape"
             }
@@ -26,6 +29,8 @@ struct MainWindowView: View {
             case .items: .list
             case .goals: .goals
             case .review: .review
+            case .delegate: .delegate
+            case .connectors: .connectors
             case .localAI: .aiSetup
             case .settings: .settings
             }
@@ -40,6 +45,8 @@ struct MainWindowView: View {
             case .goals, .goal: .goals
             case .review: .review
             case .aiSetup: .localAI
+            case .delegate: .delegate
+            case .connectors, .connector: .connectors
             case .settings, .activity: .settings
             }
         }, set: { if let s = $0 { model.route = s.route } })
@@ -109,6 +116,7 @@ struct OverviewView: View {
                 }
                 tiles
                 today(b)
+                ConnectedToday(model: model)
                 aiCard
                 Text("Your data stays on this Mac in ~/Library/Application Support/Wren. Wren lives in the menu bar too: close this window and it keeps reminding you.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -289,5 +297,70 @@ struct WrenLogo: View {
         }
         .frame(width: size, height: size)
         .accessibilityLabel("Wren logo")
+    }
+}
+
+/// Today's events and mail needing attention, only when those connectors are connected.
+struct ConnectedToday: View {
+    var model: AppModel
+    @State private var events: [CalendarEvent] = []
+    @State private var mail: [EmailTriage] = []
+    @State private var problems: [String] = []
+
+    var body: some View {
+        let _ = model.connectorVersion
+        let cal = model.hub.calendar.state.isUsable, gm = model.hub.gmail.state.isUsable
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("From your connected accounts").font(.title3.weight(.semibold))
+                Spacer()
+                Button("Connectors") { model.route = .connectors }.buttonStyle(.link)
+            }
+            if !cal && !gm {
+                Text("Connect Gmail or Google Calendar to see today's events and the mail that needs you here. Nothing is connected now.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            if cal {
+                Text("Calendar today").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                if events.isEmpty { Text("No more events today.").font(.callout).foregroundStyle(.secondary) }
+                ForEach(events) { e in
+                    HStack {
+                        Text("\(e.timeText(calendar: model.clock.calendar, now: model.clock.now)) · \(e.title)").lineLimit(1)
+                        Spacer()
+                        Button("Remind me") { model.reminderFromEvent(e) }.controlSize(.small)
+                    }
+                }
+            }
+            if gm {
+                Text("Mail that may need you (read-only)").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                if mail.isEmpty { Text("Nothing flagged in the last day.").font(.callout).foregroundStyle(.secondary) }
+                ForEach(mail.prefix(6), id: \.message.id) { t in
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("\(t.message.senderName): \(t.message.subject)").lineLimit(1)
+                            Text(t.explanation).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Add task…") { model.openCapturePanel(); model.prefillCapture?("Reply to \(t.message.senderName) about \(t.message.subject)") }.controlSize(.small)
+                        Link("Open", destination: t.message.webURL).font(.caption)
+                    }
+                }
+            }
+            ForEach(problems, id: \.self) { Text($0).font(.caption).foregroundStyle(.orange) }
+        }
+        .task(id: model.connectorVersion) { await load() }
+    }
+
+    func load() async {
+        problems = []
+        let c = model.clock.calendar, now = model.clock.now
+        if model.hub.calendar.state.isUsable {
+            do { events = try await model.fetchEvents(from: now, to: c.date(byAdding: .day, value: 1, to: c.startOfDay(for: now))!, origin: .user(.popover)) }
+            catch { problems.append("Calendar: \(model.errorText(error))") }
+        }
+        if model.hub.gmail.state.isUsable {
+            do { mail = try await model.fetchTriaged("newer_than:1d -category:promotions -category:social", origin: .user(.popover)).filter(\.needsAttention) }
+            catch { problems.append("Gmail: \(model.errorText(error))") }
+        }
     }
 }

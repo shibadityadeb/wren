@@ -75,6 +75,10 @@ struct ItemDetailView: View {
 
                     if kind == .waiting && item.status == .pending { waitingSection }
                     if item.status == .pending { goalSection }
+                    Toggle(isOn: Binding(get: { item.isPrivate }, set: { model.setPrivate(item, $0) })) {
+                        Label("Private: leave out of anything sent outside this Mac unless I include it", systemImage: "lock")
+                    }
+                    .toggleStyle(.checkbox).font(.caption)
                     if item.postponementCount > 0 {
                         Text("Moved \(item.postponementCount) time\(item.postponementCount == 1 ? "" : "s").").font(.caption).foregroundStyle(.secondary)
                     }

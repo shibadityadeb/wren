@@ -6,6 +6,7 @@ public enum StoreError: Error, LocalizedError, Equatable {
     case invalidTransition(from: CommitmentStatus, action: String)
     case emptyText
     case saveFailed(String)
+    case newerSchema(found: Int, supported: Int)
 
     public var errorDescription: String? {
         switch self {
@@ -13,6 +14,7 @@ public enum StoreError: Error, LocalizedError, Equatable {
         case let .invalidTransition(from, action): "Cannot \(action) an item that is \(from.rawValue)."
         case .emptyText: "Nothing to save."
         case let .saveFailed(r): "Saving failed: \(r)"
+        case let .newerSchema(f, s): "This data was saved by a newer version of Wren (data version \(f); this Wren understands up to \(s)). Wren won't open it, so nothing is lost. Install the newer Wren."
         }
     }
 }
@@ -27,7 +29,7 @@ public final class WrenStore {
     public let storeURL: URL?
 
     public static let models: [any PersistentModel.Type] = [
-        Commitment.self, ActivityEvent.self, DailyRun.self, Goal.self, GoalEvent.self, InsightRecord.self,
+        Commitment.self, ActivityEvent.self, DailyRun.self, Goal.self, GoalEvent.self, InsightRecord.self, DelegationRecord.self,
         AuditRecord.self, PermissionGrantRecord.self, StandingRuleRecord.self, DenialRecord.self,
     ]
 
@@ -61,7 +63,7 @@ public final class WrenStore {
     }
 
     /// Bumped whenever models are added or changed.
-    nonisolated public static let schemaVersion = 3
+    nonisolated public static let schemaVersion = 4
 
     public enum StartupRestore: Equatable, Sendable {
         case none
@@ -78,8 +80,18 @@ public final class WrenStore {
 
     public static func openDefault() throws -> WrenStore { try openDefault(appVersion: "dev").0 }
 
+    /// Records which schema last opened the data, so an older Wren refuses newer data instead of
+    /// silently migrating it down (which drops tables and columns it doesn't know).
+    nonisolated static func schemaMarker(_ manager: BackupManager) -> URL { manager.dataDirectory.appendingPathComponent("Wren.schema") }
+
+    nonisolated public static func recordedSchema(_ manager: BackupManager) -> Int? {
+        (try? String(contentsOf: schemaMarker(manager), encoding: .utf8)).flatMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+    }
+
     /// Testable form of `openDefault`, for any data folder.
     public static func open(manager: BackupManager, appVersion: String) throws -> (WrenStore, StartupRestore) {
+        if let found = recordedSchema(manager), found > schemaVersion { throw StoreError.newerSchema(found: found, supported: schemaVersion) }
+        defer { try? String(schemaVersion).write(to: schemaMarker(manager), atomically: true, encoding: .utf8) }
         var outcome = StartupRestore.none
         if let replaced = try? manager.applyPendingRestore() {
             do {

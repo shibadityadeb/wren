@@ -61,7 +61,9 @@ public final class ActionBroker {
     }
 
     /// Called only from a Wren confirmation UI after the user approves the exact request shown.
-    public func confirm(_ r: ActionRequest) -> Confirmation { Confirmation(for: r, at: clock.now) }
+    public func confirm(_ r: ActionRequest, includingPrivate: Bool = false) -> Confirmation {
+        Confirmation(for: r, at: clock.now, includingPrivate: includingPrivate)
+    }
 
     /// The user said no. The action stays denied for this target until they lift it.
     public func decline(_ r: ActionRequest, reason: String = "Declined") {
@@ -69,6 +71,42 @@ public final class ActionBroker {
         let rec = AuditRecord(request: r, descriptor: descriptor(r.action), at: clock.now)
         rec.status = .denied; rec.detail = "Declined by you"
         context.insert(rec); try? context.save()
+    }
+
+    public enum ExternalOutcome: Error, Equatable, LocalizedError {
+        case needsConfirmation(String)
+        case denied(String)
+        public var errorDescription: String? {
+            switch self { case let .needsConfirmation(m): "Needs your confirmation: \(m)"; case let .denied(m): m }
+        }
+    }
+
+    /// For connector calls that return data (reads, API requests): authorizes like `submit`, runs
+    /// `operation` only if allowed, and audits the attempt and its outcome (labels only).
+    public func performExternal<T: Sendable>(_ r: ActionRequest, confirmation: Confirmation? = nil, detail: (T) -> String = { _ in "done" },
+                                   _ operation: @MainActor () async throws -> T) async throws -> T {
+        let d = descriptor(r.action)
+        let rec = AuditRecord(request: r, descriptor: d, at: clock.now)
+        context.insert(rec)
+        defer { trimAudit(); try? context.save() }
+        let policy = (try? policyStore.load()) ?? PolicySnapshot(grants: [], rules: [])
+        switch Authorizer.decide(r, descriptor: d, policy: policy, confirmation: confirmation, usedConfirmations: usedConfirmations, now: clock.now) {
+        case let .deny(m):
+            rec.status = .denied; rec.detail = String(m.prefix(200)); throw ExternalOutcome.denied(m)
+        case let .needsConfirmation(m):
+            rec.status = .awaitingConfirmation; rec.detail = String(m.prefix(200)); throw ExternalOutcome.needsConfirmation(m)
+        case let .allow(source):
+            rec.authorization = source.label
+            if case let .userConfirmation(id) = source { usedConfirmations.insert(id); rec.confirmationObtained = true }
+            do {
+                let v = try await operation()
+                rec.status = .succeeded; rec.verification = .verified; rec.detail = String(detail(v).prefix(200))
+                return v
+            } catch {
+                rec.status = .failed; rec.detail = String(((error as? LocalizedError)?.errorDescription ?? "\(error)").prefix(200))
+                throw error
+            }
+        }
     }
 
     /// The user cancelled a proposal they asked for. Audited, but no lasting denial, so

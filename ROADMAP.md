@@ -6,6 +6,40 @@ Each phase ends with: a green build, tests passing (commands recorded), a git co
 Deliverables: PROJECT_SPEC.md, ARCHITECTURE.md, ROADMAP.md, TEST_PLAN.md, git repository initialised in `Wren/`.
 Acceptance: architecture documented, MVP scope unambiguous, every dependency justified, core vs. later clearly split.
 
+## Milestone 6 status (2026-10-11): connectors, voice and ChatGPT handoff (0.6.0)
+
+Developed on `feat/connectors-voice-and-chatgpt` and submitted as a pull request.
+
+### Works end to end (verified on the development Mac)
+
+| What | How |
+|---|---|
+| Connectors screen with honest states | Real app: ChatGPT/OpenAI/Voice/Notion Available, Gmail and Calendar Setup required (no Google client), Local files and Shortcuts Planned |
+| ChatGPT handoff | Real app: prompt (with deeper-thinking request) copied exactly, ChatGPT opened, record "handed off", audit "opened ChatGPT (not sent)" with confirmation; the test then turned the connector back off |
+| "Ask ChatGPT to …" in capture | Real app: opens Delegate with the task, nothing sent |
+| Unconnected questions | Real app: Gmail/Calendar questions say they aren't connected; "what needs my attention" answers from Wren items |
+| Schema v4 upgrade | Real store: pre-upgrade backup, 8 items and 38 history events unchanged, new table and column present |
+| Bundle | Microphone and speech usage descriptions present; `audio-input` entitlement signed in |
+
+### Implemented, verified with mocked providers only (needs your accounts to verify live)
+
+Gmail and Calendar (Google OAuth client required), Notion (integration token), OpenAI API (key). Their code paths are covered by deterministic tests; live tests are opt-in.
+
+### Found during verification
+
+Running the installed 0.5.0 after the 0.6.0 build had upgraded the data, Core Data silently migrated the store back down and dropped the new `DelegationRecord` table and `isPrivate` column (only a test record was affected; items, history and audit were intact). 0.6.0 adds a `Wren.schema` marker: a Wren that finds newer data refuses to open it (`StoreError.newerSchema`) and leaves it untouched. Versions before 0.6.0 can't be fixed; the README warns against downgrading.
+
+### Not verified
+
+- Voice recording and on-device transcription in a real session: Speech Recognition permission has never been granted on this Mac (macOS must ask you). The lifecycle is unit-tested; Apple's on-device recognizer reports available.
+- Any live Google, Notion or OpenAI connection.
+
+### Remaining gaps
+
+- Local files and Apple Shortcuts are planned only.
+- No web research connector.
+- Gmail actions (archive, send …) and Calendar writes are not implemented by design.
+
 ## Milestone 5 status (2026-10-11): daily use, visible window, distribution (0.5.0)
 
 Developed on `feat/daily-use-and-macos-distribution` and submitted as a pull request.

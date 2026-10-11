@@ -71,6 +71,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSUIElement</key><true/>
   <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
   <key>NSHumanReadableCopyright</key><string>Local-first personal assistant. Data stays on this Mac.</string>
+  <key>NSMicrophoneUsageDescription</key><string>Wren records only while you hold the push-to-talk shortcut, to turn what you say into a capture. Audio is transcribed on this Mac and deleted.</string>
+  <key>NSSpeechRecognitionUsageDescription</key><string>Wren uses on-device speech recognition to turn your voice capture into text. Audio never leaves this Mac.</string>
   <key>CFBundleURLTypes</key>
   <array><dict>
     <key>CFBundleURLName</key><string>com.shibadityadeb.wren</string>
@@ -80,13 +82,23 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
+# Hardened runtime needs an explicit entitlement for microphone access (voice capture).
+ENT="build/Wren.entitlements"
+cat > "$ENT" <<ENTITLEMENTS
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>com.apple.security.device.audio-input</key><true/>
+</dict></plist>
+ENTITLEMENTS
+
 IDENTITY="${WREN_SIGN_IDENTITY:--}"
 if [[ "$IDENTITY" == "-" ]]; then
   echo "→ ad-hoc signing (not for public distribution)"
-  codesign --force --sign - --options runtime --timestamp=none "$APP"
+  codesign --force --sign - --options runtime --timestamp=none --entitlements "$ENT" "$APP"
 else
   echo "→ signing with Developer ID (hardened runtime, secure timestamp)"
-  codesign --force --sign "$IDENTITY" --options runtime --timestamp "$APP"
+  codesign --force --sign "$IDENTITY" --options runtime --timestamp --entitlements "$ENT" "$APP"
 fi
 codesign --verify --strict --verbose=1 "$APP"
 echo "✓ built $APP ($(lipo -archs "$APP/Contents/MacOS/Wren"))"

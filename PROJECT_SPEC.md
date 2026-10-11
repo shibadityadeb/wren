@@ -236,3 +236,11 @@ Any bulk action, meaning more than one target, is reviewed regardless of class u
 - Pausing notifications changes no schedules; the recovery after a pause is one summary, never a burst.
 - Reset is two separate, explained, confirmed actions. No "clear test data", because Wren can't tell test data apart reliably.
 - Version 0.5.0.
+
+## 14. Milestone 6 decisions (2026-10-11)
+
+- Connectors are first-class and honest: Connected only after a real provider check; planned connectors have no Connect button.
+- ChatGPT works with your own account by handoff (copy + open, you send). No scripted control of the ChatGPT site, no cookies, no private endpoints. The OpenAI API is a separate, optional connector.
+- Gmail and Calendar are read-only. Notion sees only pages shared with its integration. Every external write and every transfer of content outside the Mac is previewed and confirmed each time; private content needs explicit inclusion.
+- Voice is push-to-talk with on-device recognition only; audio is deleted after transcription.
+- Version 0.6.0.

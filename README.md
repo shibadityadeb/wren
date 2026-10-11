@@ -26,6 +26,8 @@ Each release has `Wren-macOS-universal.dmg` (signed and notarized) or, until sig
 
 **Unsigned preview builds** are blocked by macOS the first time. Open Wren once, then go to **System Settings › Privacy & Security** and click **Open Anyway**. Do this only for a file from this repository whose checksum matches.
 
+**Downgrading:** don't run an older Wren after a newer one has opened your data. Versions before 0.6.0 silently migrate newer data down, dropping fields they don't know (for example the 0.6.0 "private" flag and delegation history). From 0.6.0 on, an older Wren refuses newer data instead and leaves it untouched.
+
 **Upgrading** is the same: drag the new Wren over the old one. Your data stays in `~/Library/Application Support/Wren`, keyed to the bundle identifier `com.shibadityadeb.wren`, and is backed up automatically before any database upgrade. If you'd turned on "Open Wren when I log in", it keeps working; there is only ever one login item.
 
 ### Verify a download
@@ -111,6 +113,79 @@ Open the menu bar bird, then the AI label in the header (or **Settings › Local
 
 Every change Wren proposes from what you type (with or without AI) is shown first and needs your confirmation. The model can suggest; it can never approve.
 
+## Connectors
+
+Open Wren's window › **Connectors** (or Settings › Connectors). Each connector shows its real state (Available, Setup required, Connecting, Connected, Partially connected, Temporarily unavailable, Permission denied, Disconnected, Planned), how it signs in, the permissions it grants Wren, what it can do, its privacy and data handling, the last successful check and the last error. A connector is only shown as Connected after Wren has checked it with the provider.
+
+| Connector | Status in this version | Needs from you |
+|---|---|---|
+| ChatGPT (handoff) | Working | Turn it on; choose browser or the ChatGPT app |
+| Voice | Working (on-device) | Turn it on; allow Microphone and Speech Recognition when macOS asks |
+| Gmail (read-only) | Implemented | Your own Google OAuth client, then **Connect with Google** |
+| Google Calendar (read-only) | Implemented | Same Google client, then **Connect with Google** |
+| Notion | Implemented | An internal integration token, and pages shared with it |
+| OpenAI API (optional) | Implemented | An API key (billed by OpenAI) |
+| Local files | Planned | — |
+| Apple Shortcuts | Planned | — |
+
+### ChatGPT handoff (your own account, no API key)
+
+Say or type "Ask ChatGPT to brainstorm ten names for this project" (also "Send this … to GPT", "Use my ChatGPT account to …", "Prepare a prompt for ChatGPT to …"), or open **Delegate**. Wren prepares the prompt and shows exactly what will leave your Mac. Private items are left out unless you tick them, and detected secrets (API keys, passwords, card numbers, verification codes) are replaced with "[removed]" unless you choose otherwise. **Copy and open ChatGPT** copies the prompt and opens chatgpt.com in your browser or the ChatGPT app. **You** paste it and press send: Wren never sends it and never says it was sent. Paste the answer back into Delegate to save it, summarise it on your Mac and turn parts into tasks.
+
+OpenAI doesn't document a supported way to prefill or submit a prompt by link, so Wren uses the clipboard. "Think deeply" requests are written into the prompt; Wren can't choose or confirm ChatGPT's model or thinking mode.
+
+### OpenAI API (optional)
+
+Separate from a ChatGPT subscription and billed by OpenAI per request. Paste a key in Connectors › OpenAI API; Wren checks it by listing your models and stores it in the Keychain. Choose a model from that list. Every request shows the exact text and runs only when you press **Send**. Answers are labelled with the model the API reports.
+
+### Voice
+
+Connectors › Voice › turn on push-to-talk. Hold **⌥⇧ Space**, speak, release. Apple's speech recognition runs **on this Mac** (`requiresOnDeviceRecognition`; Wren refuses server recognition), and the recording is deleted right after. The text lands in the capture panel for you to correct, then goes through exactly the same handling as typing (commands still show a preview). There's also a microphone button in the capture panel. Maximum 60 seconds. If on-device recognition isn't installed for your language, turn on Dictation once in System Settings › Keyboard.
+
+### Gmail and Google Calendar
+
+Both are **read-only**. Scopes requested:
+
+| Connector | Scope |
+|---|---|
+| Gmail | `https://www.googleapis.com/auth/gmail.readonly` |
+| Google Calendar | `https://www.googleapis.com/auth/calendar.readonly` |
+
+**One-time Google setup** (Google requires every desktop app to use its own OAuth client):
+
+1. [Google Cloud Console](https://console.cloud.google.com/) › create a project.
+2. APIs & Services › Library: enable **Gmail API** and/or **Google Calendar API**.
+3. OAuth consent screen: User type External (or Internal for a Workspace org, if your admin allows), add yourself as a test user.
+4. Credentials › Create credentials › OAuth client ID › **Desktop app**. Copy the client ID and client secret.
+5. In Wren: Connectors › Gmail › paste both › Save. They go to the Keychain. (A desktop client's secret isn't confidential, but Google's token endpoint asks for it.)
+6. **Connect with Google**: your browser opens Google's consent page; after you allow, Google redirects to a one-time listener on `127.0.0.1` and Wren finishes the sign-in with PKCE. Wren never sees your password.
+
+While your consent screen is in **Testing**, Google may expire access after 7 days; you'd reconnect. Google, not Wren, decides those limits.
+
+What you get: search mail ("Anything from the recruiter?"), "What needs my attention today?" (overdue Wren items + today's events + mail flagged as a request, deadline, bill, interview, security notice, Gmail-important or from your important senders), today's events and mail on the Overview, both in the morning briefing (Connectors › Gmail › "Include in the morning briefing"), "What meetings do I have tomorrow?", and "Remind me" on any event. Suggested tasks from email open in the capture panel for you to edit first.
+
+Mail is fetched when needed and **not stored** unless you turn on the 7-day cache of headers and previews. Wren never sends, archives, deletes or marks mail. Text in an email is treated as data: it can't trigger any action. Disconnecting revokes the token with Google, removes it from the Keychain and deletes cached mail.
+
+### Notion
+
+1. notion.so › Settings › Connections › Develop or manage integrations › New integration (internal). Capabilities: read content, insert content. Copy the token.
+2. On each page Wren may use: ••• › Connections › add your integration. Wren can't see other pages.
+3. Connectors › Notion › paste the token. Wren checks it with Notion (API version 2026-03-11) before saving it in the Keychain.
+
+You can search shared pages, read them, include chosen pages as context in a Delegate request, and create a page (it asks first). Unsupported block types are shown as "[type block not shown]". Disconnecting removes the token; also remove the integration in Notion.
+
+### Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| Google "Setup required" | Add your OAuth client (above) |
+| "Google rejected the OAuth client" | Check the client ID/secret; the client must be type Desktop app |
+| "Didn't grant the needed permission" | Tick the Gmail/Calendar box on Google's consent screen |
+| Permission denied after a week | Testing-mode consent screen expired the token: Reconnect |
+| Notion pages missing | Share them with your integration (••• › Connections) |
+| Voice: "on-device recognition isn't installed" | Turn on Dictation in System Settings › Keyboard once |
+| Voice: microphone denied | System Settings › Privacy & Security › Microphone › Wren |
+
 ## What Wren may do on its own
 
 Wren separates proposing, authorizing, executing, verifying and recording every action. In practice:
@@ -118,7 +193,7 @@ Wren separates proposing, authorizing, executing, verifying and recording every 
 - Your own clicks on reversible things (done, snooze, edit, drop) just happen.
 - Deleting always asks first.
 - On its own, Wren only sets and delivers reminders for your deadlines and applies the date rules or local model's reading of your own captures. Both are standing rules you can turn off.
-- External permissions (email, AI services) are not granted and their integrations don't exist yet.
+- Connecting a service grants only its read permission. Anything that leaves your Mac (a ChatGPT handoff, an OpenAI request, a new Notion page) is shown first and needs your press each time; private content needs an extra explicit tick.
 - Model suggestions and text inside emails, pages or documents never count as permission.
 - Everything Wren does or refuses is listed in Settings › Activity log, without your content.
 

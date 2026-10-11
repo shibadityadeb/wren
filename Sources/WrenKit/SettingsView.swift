@@ -124,6 +124,17 @@ struct SettingsView: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
 
+                    section("Connectors") {
+                        HStack {
+                            let sum = model.hub.registry.summary
+                            Text("\(sum[.connected] ?? 0) connected · \(sum[.needsSetup] ?? 0) need setup · \(sum[.planned] ?? 0) planned").font(.callout)
+                            Spacer()
+                            Button("Connectors…") { model.route = .connectors }
+                        }
+                        Text("ChatGPT handoff, voice, Gmail, Notion, Google Calendar, OpenAI API. Each shows its real status, permissions and privacy.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+
                     section("Local AI") {
                         HStack {
                             Text(model.ai.title).font(.callout)

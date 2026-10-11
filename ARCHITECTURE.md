@@ -6,6 +6,8 @@
 > 3. **Data:** a single `Commitment` model holds the verbatim `originalText`, a `kind` (commitment, idea, question, waiting, research, unsorted) and a `processing` state. This replaces a separate `Capture` entity. Only `kind == .commitment` gets automatic reminders. A separate `Capture` can be split out later if Phase 5 needs it.
 > 4. **UI:** the menu bar uses `NSStatusItem` + `NSPopover` rather than `MenuBarExtra`, so a notification tap can open the popover programmatically.
 
+> **Milestone 6 (2026-10-11).** Connectors, voice, ChatGPT handoff and delegation are documented in §35–§41.
+>
 > **Milestone 5 (2026-10-11).** Main window, export, backups and restore, notification pause and reset are documented in §30–§34.
 >
 > **Milestone 4 (2026-10-11).** Local AI readiness, model download, model-assisted commands and distribution are documented in §26–§29. The build no longer uses only `scripts/build-app.sh` for local runs: releases go through `scripts/package-dmg.sh`.
@@ -589,3 +591,58 @@ Frame is remembered (`WrenMainWindow` autosave). The logo is the bundled `Wren.i
 - **Reset preferences:** app action `settings.reset` (local destructive, confirmed) removes exactly the keys in `WrenSettings.allKeys` and unregisters the login item.
 - **Remove all data:** `data.eraseAll` (irreversible category, always confirmed; content-originated requests are denied) deletes all user models, keeps only this request's audit records, and re-seeds default grants and rules. "Back up first" makes a `preReset` backup and aborts if it fails. Backups, the app and anything outside `~/Library/Application Support/Wren` are untouched.
 - No "clear test data": Wren can't distinguish test entries reliably.
+
+
+## 35. Connector framework (Milestone 6)
+
+Files: `Sources/WrenCore/Connectors/`.
+
+- `ConnectorCatalog` declares every connector once: id, name, icon, summary, `ConnectorAuth`, capabilities (implemented or not, on-Mac or external), Wren permissions, privacy text, cleanup on disconnect, allowed hosts, planned flag. Settings is generated from it; adding a connector means adding a descriptor and an implementation.
+- `ConnectorState`: available · setupRequired · connecting · connected(account) · partiallyConnected · temporarilyUnavailable · permissionDenied · disconnected · planned, grouped into summary buckets. `.connected` is set only by a successful provider call.
+- `Connector` protocol (`refresh`, `disconnect`); `BaseConnector` records last success/error (`ConnectorStatus`, user defaults) and grants/revokes the connector's Wren permissions through the policy store on success/disconnect.
+- `CredentialStore`: `KeychainCredentialStore` (generic passwords, `WhenUnlockedThisDeviceOnly`, never synced) in the app, in-memory in tests. Credentials never enter SwiftData, exports, backups or logs.
+- `ConnectorHTTP`: HTTPS only, per-connector host allowlist, maps 401/403/429/5xx/timeouts to `ConnectorError`, never logs bodies or headers.
+
+| Connector | Auth | Validation | Hosts |
+|---|---|---|---|
+| Gmail | Google OAuth (PKCE, loopback) | `users/me/profile` | gmail.googleapis.com, oauth2.googleapis.com, accounts.google.com |
+| Google Calendar | Google OAuth | `calendars/primary` | www.googleapis.com, … |
+| Notion | internal integration token | `users/me` | api.notion.com |
+| OpenAI API | API key | `GET /v1/models` | api.openai.com |
+| ChatGPT | none (user handoff) | a destination (browser or app) exists; shown as *partially connected* because sign-in can't be checked | — (opened, not called) |
+| Voice | macOS Microphone + Speech | permission status + `supportsOnDeviceRecognition` | — |
+
+## 36. Google OAuth
+
+`GoogleOAuth`: authorization URL with `code_challenge` (S256), `state`, `access_type=offline`, `prompt=consent`; `LoopbackReceiver` listens on `127.0.0.1` (random port, local-only) for one GET, parses the request line, replies with a "you can close this tab" page; `parseCallback` checks `state`, maps `access_denied`, requires `code`; `exchange` sends code + verifier (+ the desktop client's secret if configured) and requires the requested scope in the response and a refresh token; `GoogleSession` refreshes tokens a minute before expiry and keeps the refresh token; `invalid_grant` → unauthorized → *permission denied*; `invalid_client` → setup problem; `revoke` on disconnect. The OAuth client (ID, optional secret) is entered by the user and kept in the Keychain; nothing is hardcoded.
+
+## 37. Gmail and Calendar
+
+- `GmailClient`: `messages.list` (q, pagination) + `messages.get?format=metadata` (From, To, Subject, Date, snippet, labels). No bodies, no attachments, GET only.
+- `EmailTriage`: deterministic reasons (request, deadline via `DateParser`, bill, interview, security, Gmail IMPORTANT, important sender); promotions/social/forums are low-value. Email text never reaches the authorizer as an instruction.
+- `EmailQuestion.gmailQuery`: "anything from the recruiter?" → `recruiter newer_than:30d`; "today", "unread", "attention" refine it.
+- `EmailCache`: optional, 7 days, headers and snippets, file-protected, deleted on disconnect.
+- `GoogleCalendarClient`: `events.list` with `singleEvents=true` (recurring events expanded), `orderBy=startTime`, `timeZone`, pagination, cancelled instances skipped; `dateTime` parsed with its offset, all-day `date` as a local calendar day.
+- Reads go through `ActionBroker.performExternal` as `email.read` / `calendar.read` (external read): allowed for the user when connected; allowed for the briefing (origin `.system`) only under the standing rule `includeConnectedSourcesInBriefing`; asks if a model proposes it; denied when disconnected. Each read is audited with a count only.
+
+## 38. Notion
+
+`NotionClient` (Notion-Version 2026-03-11): `users/me` (workspace, integration), `search` (pages, cursor pagination, trashed excluded), `blocks/{id}/children` (two levels; text blocks rendered; unsupported types kept as markers), `pages` (create under a shared parent page; external write, always confirmed), one retry after 429 honouring `Retry-After` (capped).
+
+## 39. ChatGPT handoff, OpenAI API and delegation
+
+- `HandoffRequest.detect` recognises "ask/tell ChatGPT to …", "send … to GPT", "use my ChatGPT account to …", "prepare a prompt for ChatGPT to …" and "deeper/think carefully" wording.
+- `HandoffDraft.prompt` = task + optional deeper-thinking paragraph + approved context. Private items are excluded unless the user ticks them; `SensitiveScanner` redacts API keys/tokens, private keys, `password:` values, verification codes and Luhn-valid card numbers unless the user opts in.
+- Action `chatgpt.handoff` (external write, always confirmed): the preview button press mints a confirmation bound to the exact prompt (it's a request parameter, so it's part of the fingerprint). The handler copies, checks the pasteboard, and opens chatgpt.com or the ChatGPT app. Status becomes `handedOff` ("waiting for you to send it and paste the answer"), never "sent".
+- Action `ai.delegate` (OpenAI API): same confirmation per request; result attributed with the API's reported `model`.
+- Private content: with the protected rule `noPrivateDataToExternalAI`, any external write with private content is denied unless the confirmation was minted with `includingPrivate: true` (the user ticked the private item).
+- `DelegationRecord` (SwiftData): task, destination, depth, exact prompt, status, response, response source, local summary, error. Local summary uses the local model (structured JSON) or an excerpt.
+- Untrusted origins can't trigger external writes at all (existing rule), so text in an email, page or tool output can't send anything.
+
+## 40. Voice
+
+`VoiceCapture` (core) drives push-to-talk: permissions asked only on first use; `AudioRecording` starts on key down; on key up the file is transcribed by `SpeechTranscribing` and deleted; results under 0.4 s, empty text or non-on-device transcripts are rejected; 60-second limit; cancel and retry. App implementations: `SystemRecorder` (`AVAudioRecorder`, 16 kHz mono PCM, temp file), `OnDeviceTranscriber` (`SFSpeechURLRecognitionRequest`, `requiresOnDeviceRecognition = true`), `SystemVoicePermissions`. Push-to-talk uses a second Carbon hotkey (id 2) with release events. The transcript is placed in the capture panel's text field, so it follows the typed path exactly. The app bundle declares `NSMicrophoneUsageDescription`, `NSSpeechRecognitionUsageDescription` and the hardened-runtime entitlement `com.apple.security.device.audio-input`.
+
+## 41. Schema v4
+
+`Commitment.isPrivate` (default false) and `DelegationRecord`. A consistent pre-upgrade backup is taken on first open, as for earlier schema changes.

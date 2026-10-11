@@ -2,6 +2,19 @@
 
 Versions follow [semantic versioning](https://semver.org). The `VERSION` file is the source of truth; release tags are `v<VERSION>` (stable) or `v<VERSION>-preview.N` (prerelease).
 
+## [0.6.0]
+
+Connectors, voice and ChatGPT handoff.
+
+- Connectors in the window and Settings: ChatGPT, OpenAI API, Voice, Gmail, Notion, Google Calendar (and Local files and Apple Shortcuts as planned), each with its real state, permissions, privacy and setup.
+- ChatGPT handoff with your own account: preview exactly what leaves your Mac, private items and secrets left out unless you include them, copy and open ChatGPT, paste the answer back, summarise locally, make tasks.
+- Push-to-talk voice capture with on-device transcription.
+- Gmail and Google Calendar, read-only: questions, today's events and mail that needs you, and the morning briefing.
+- Notion: search shared pages, use them as context, create a page after confirmation.
+- Optional OpenAI API connector.
+- Delegate panel and history.
+- Items can be marked private.
+
 ## [0.5.0]
 
 Feels like a real Mac app, and your data is safe to keep, move and recover.

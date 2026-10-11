@@ -10,6 +10,7 @@ struct CaptureView: View {
     var choose: (Candidate, PendingCommand) -> Void = { _, _ in }
     var saveAsNew: (String) -> Void = { _ in }
     var openAISetup: () -> Void = {}
+    var toggleVoice: () -> Void = {}
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -21,6 +22,14 @@ struct CaptureView: View {
                 Text("Wren").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 Spacer()
                 Text(state.status).font(.caption).foregroundStyle(.tertiary)
+                if state.voiceEnabled {
+                    Button { toggleVoice() } label: {
+                        Label(state.recording ? "Stop" : "Speak", systemImage: state.recording ? "stop.circle.fill" : "mic")
+                            .foregroundStyle(state.recording ? Color.red : Color.secondary)
+                    }
+                    .buttonStyle(.borderless).font(.caption)
+                    .help("Or hold the push-to-talk shortcut")
+                }
                 if !state.aiAvailable {
                     Button("Local AI not set up") { openAISetup() }.buttonStyle(.link).font(.caption)
                         .help("Wren still saves everything. Set up local AI for better understanding.")
@@ -34,6 +43,12 @@ struct CaptureView: View {
                     if case let .proposal(p)? = state.reply { confirm(p) } else { submit(state.text) }
                 }
                 .onChange(of: state.text) { if state.reply != nil && !state.busy { state.reply = nil } }
+            if let v = state.voiceStatus {
+                HStack(spacing: 6) {
+                    if state.recording { Circle().fill(Color.red).frame(width: 8, height: 8) }
+                    Text(v).font(.caption).foregroundStyle(state.recording ? Color.red : Color.secondary)
+                }
+            }
             if let reply = state.reply { replyView(reply) }
             HStack(spacing: 14) {
                 if case .proposal? = state.reply { hint("return", "Confirm") } else { hint("return", "Save") }
@@ -112,5 +127,8 @@ final class CaptureState {
     /// Wren's answer to a command (preview, question, list), shown under the field.
     var reply: ContextResolution?
     var aiAvailable = true
+    var voiceEnabled = false
+    var recording = false
+    var voiceStatus: String?
     var busy = false
 }

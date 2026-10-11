@@ -8,17 +8,27 @@ final class HotKeyService {
     private var hotKeyRef: EventHotKeyRef?
     private var handlerRef: EventHandlerRef?
     private let onPress: () -> Void
+    private let onRelease: () -> Void
+    private let hotKeyID: UInt32
 
-    init(onPress: @escaping () -> Void) {
-        self.onPress = onPress
-        var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+    /// `id` distinguishes several hotkeys (1 = capture, 2 = push-to-talk). Release events are
+    /// delivered too, for hold-to-talk.
+    init(id: UInt32 = 1, onPress: @escaping () -> Void, onRelease: @escaping () -> Void = {}) {
+        self.onPress = onPress; self.onRelease = onRelease; hotKeyID = id
+        var specs = [EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed)),
+                     EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyReleased))]
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
-        InstallEventHandler(GetApplicationEventTarget(), { _, _, userData in
-            guard let userData else { return OSStatus(eventNotHandledErr) }
+        InstallEventHandler(GetApplicationEventTarget(), { _, event, userData in
+            guard let userData, let event else { return OSStatus(eventNotHandledErr) }
             let service = Unmanaged<HotKeyService>.fromOpaque(userData).takeUnretainedValue()
-            DispatchQueue.main.async { service.onPress() }
+            var hk = EventHotKeyID()
+            GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil,
+                              MemoryLayout<EventHotKeyID>.size, nil, &hk)
+            guard hk.id == service.hotKeyID else { return OSStatus(eventNotHandledErr) }
+            let released = GetEventKind(event) == UInt32(kEventHotKeyReleased)
+            DispatchQueue.main.async { released ? service.onRelease() : service.onPress() }
             return noErr
-        }, 1, &spec, selfPtr, &handlerRef)
+        }, 2, &specs, selfPtr, &handlerRef)
     }
 
     deinit {
@@ -29,7 +39,7 @@ final class HotKeyService {
     /// Returns nil on success, or a human-readable reason.
     func register(_ spec: HotKeySpec) -> String? {
         unregister()
-        let id = EventHotKeyID(signature: OSType(0x5752_454E), id: 1) // 'WREN'
+        let id = EventHotKeyID(signature: OSType(0x5752_454E), id: hotKeyID) // 'WREN'
         let status = RegisterEventHotKey(spec.keyCode, spec.carbonModifiers, id, GetApplicationEventTarget(), 0, &hotKeyRef)
         switch status {
         case noErr: return nil

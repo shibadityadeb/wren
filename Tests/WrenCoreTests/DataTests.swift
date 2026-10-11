@@ -200,6 +200,20 @@ final class BackupTests: XCTestCase {
         XCTAssertEqual(try store.all().map(\.title), ["Precious"])
     }
 
+    func testOlderWrenRefusesNewerDataInsteadOfDowngrading() throws {
+        let url = tempStoreURL()
+        let mgr = BackupManager(dataDirectory: url.deletingLastPathComponent())
+        do { let s = try WrenStore(url: url); _ = try s.capture("Keep me", source: .manual) }
+        _ = try WrenStore.open(manager: mgr, appVersion: "t")
+        XCTAssertEqual(WrenStore.recordedSchema(mgr), WrenStore.schemaVersion, "marker written on open")
+        try String(WrenStore.schemaVersion + 1).write(to: url.deletingLastPathComponent().appendingPathComponent("Wren.schema"), atomically: true, encoding: .utf8)
+        let before = try Data(contentsOf: url)
+        XCTAssertThrowsError(try WrenStore.open(manager: mgr, appVersion: "t")) {
+            XCTAssertEqual($0 as? StoreError, .newerSchema(found: WrenStore.schemaVersion + 1, supported: WrenStore.schemaVersion))
+        }
+        XCTAssertEqual(try Data(contentsOf: url), before, "the newer data wasn't touched")
+    }
+
     func testRollbackPutsPreviousStoreBack() throws {
         let url = tempStoreURL()
         let mgr = BackupManager(dataDirectory: url.deletingLastPathComponent())

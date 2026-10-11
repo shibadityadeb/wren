@@ -95,6 +95,10 @@ public enum SnapshotRenderer {
                        size: CGSize(width: 600, height: 260), appearance: appearance, to: dir.appendingPathComponent("capture-clarify-\(tag).png"))
             model.route = .overview
             try render(MainWindowView(model: model), size: CGSize(width: 980, height: 720), appearance: appearance, to: dir.appendingPathComponent("window-overview-\(tag).png"))
+            for (r, name) in [(Route.connectors, "connectors"), (.connector(.gmail), "gmail"), (.connector(.chatgpt), "chatgpt"), (.delegate, "delegate")] {
+                model.route = r
+                try render(MainWindowView(model: model), size: CGSize(width: 980, height: 760), appearance: appearance, to: dir.appendingPathComponent("window-\(name)-\(tag).png"))
+            }
             model.route = .settings
             try render(MainWindowView(model: model), size: CGSize(width: 980, height: 720), appearance: appearance, to: dir.appendingPathComponent("window-settings-\(tag).png"))
             model.pause = NotificationPause(since: now, until: now.addingTimeInterval(3600))

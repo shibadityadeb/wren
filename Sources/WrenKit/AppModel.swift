@@ -13,7 +13,8 @@ enum ModelDownload: Equatable {
     case finished(model: String)
 }
 
-enum Route: Equatable { case overview, list, detail(UUID), settings, briefing, checkIn, activity, goals, goal(UUID), review, aiSetup }
+enum Route: Equatable { case overview, list, detail(UUID), settings, briefing, checkIn, activity, goals, goal(UUID), review, aiSetup,
+                         connectors, connector(ConnectorID), delegate }
 
 /// A request waiting for the user to approve or cancel, shown as a native alert.
 struct PendingConfirmation: Identifiable {
@@ -82,6 +83,13 @@ final class AppModel {
     @ObservationIgnored var showPopover: () -> Void = {}
     @ObservationIgnored var applyHotKey: () -> Void = {}
     @ObservationIgnored var openMainWindow: () -> Void = {}
+    @ObservationIgnored var applyVoiceHotKey: () -> Void = {}
+    /// Puts text in the capture panel for the user to review (never saves by itself).
+    @ObservationIgnored var prefillCapture: ((String) -> Void)?
+    @ObservationIgnored var hub: ConnectorHub!
+    /// Bumped when connector state changes, so views re-read it.
+    var connectorVersion = 0
+    var delegationDraft: (task: String, depth: HandoffDepth)?
 
     init(store injected: WrenStore? = nil, loginService: LoginItemService? = nil) {
         loginItems = LoginItemController(service: loginService ?? SystemLoginItemService())
@@ -119,6 +127,8 @@ final class AppModel {
         daily = settings.daily
         insightSettings = settings.insights
         pause = settings.pause
+        hub = ConnectorHub(settings: settings, policy: policyStore)
+        engine?.externalBriefing = { [weak self] in await self?.externalBriefing() }
         reload()
         notifications.onResponse = { [weak self] r in self?.handle(r) }
         engine?.clearPause = { [weak self] in self?.settings.pause = nil; self?.pause = nil }
@@ -142,6 +152,8 @@ final class AppModel {
         loginStatus = loginItems.reconcileOnLaunch(userWantsEnabled: settings.launchAtLogin)
         Task {
             notificationStatus = await notifications.refreshStatus()
+            await hub.registry.refreshAll()
+            connectorVersion += 1
             await refreshAI()
             processAwaiting()
             await tick()

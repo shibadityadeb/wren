@@ -24,6 +24,9 @@ struct RouteView: View {
         case .checkIn: CheckInView(model: model)
         case .activity: ActivityView(model: model)
         case .aiSetup: AISetupView(model: model)
+        case .connectors: ConnectorsView(model: model)
+        case let .connector(id): ConnectorDetailView(model: model, id: id)
+        case .delegate: DelegateView(model: model)
         case let .goal(id):
             if let g = model.goal(id) { GoalDetailView(model: model, goal: g) } else { ListPane(model: model) }
         }

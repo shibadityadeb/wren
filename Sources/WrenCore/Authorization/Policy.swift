@@ -13,6 +13,8 @@ public enum StandingRuleKind: String, Codable, Sendable, CaseIterable, Identifia
     case showDraftBeforeSending
     /// Never send content marked private to an external AI service.
     case noPrivateDataToExternalAI
+    /// The briefing may read connected Gmail and Calendar (read-only) on its own.
+    case includeConnectedSourcesInBriefing
 
     public var id: String { rawValue }
 
@@ -22,7 +24,8 @@ public enum StandingRuleKind: String, Codable, Sendable, CaseIterable, Identifia
         case .autoApplyInterpretations: "Apply the local model's reading of my captures"
         case .confirmBeforeDelete: "Ask me before deleting anything"
         case .showDraftBeforeSending: "Never send an email without showing me the final draft"
-        case .noPrivateDataToExternalAI: "Don't send private content to external AI services"
+        case .noPrivateDataToExternalAI: "Don't send private content outside this Mac unless I include it each time"
+        case .includeConnectedSourcesInBriefing: "Let the briefing read connected Gmail and Calendar"
         }
     }
 
@@ -32,6 +35,7 @@ public enum StandingRuleKind: String, Codable, Sendable, CaseIterable, Identifia
         switch self {
         case .autoRemindDeadlines: [BuiltInAction.scheduleReminder, BuiltInAction.deliverReminder, BuiltInAction.markReminderSummarized]
         case .autoApplyInterpretations: [BuiltInAction.applyInterpretation]
+        case .includeConnectedSourcesInBriefing: [BuiltInAction.readEmail, BuiltInAction.readCalendar]
         default: []
         }
     }
@@ -78,10 +82,12 @@ public struct Confirmation: Sendable, Equatable {
     public let id: UUID
     public let fingerprint: String
     public let grantedAt: Date
+    /// The user ticked "include private content" for exactly this request.
+    public let includesPrivate: Bool
     public static let lifetime: TimeInterval = 5 * 60
 
-    public init(for request: ActionRequest, at: Date) {
-        id = UUID(); fingerprint = request.fingerprint; grantedAt = at
+    public init(for request: ActionRequest, at: Date, includingPrivate: Bool = false) {
+        id = UUID(); fingerprint = request.fingerprint; grantedAt = at; includesPrivate = includingPrivate
     }
 }
 
@@ -107,8 +113,10 @@ public enum Authorizer {
             return .deny("Wren doesn't have the “\(d.permission.rawValue)” permission.")
         }
         // 2. Hard restrictions from rules.
-        if d.permission == .externalAI && r.containsPrivateContent && policy.rules.contains(.noPrivateDataToExternalAI) {
-            return .deny("Private content can't be sent to an external AI service.")
+        // Private content leaves the Mac only with a confirmation that explicitly includes it.
+        if (d.category == .externalWrite || d.category == .irreversible), r.containsPrivateContent,
+           policy.rules.contains(.noPrivateDataToExternalAI), confirmation?.includesPrivate != true {
+            return .deny("Private content can't be sent outside this Mac unless you explicitly include it for this request.")
         }
         // 3. Content Wren read can propose, never cause, consequential actions.
         if case .untrustedContent = r.origin, d.category != .localReversible && d.category != .externalRead {
@@ -138,7 +146,7 @@ public enum Authorizer {
             if policyLevel == .always { return .needsConfirmation(confirmationPrompt(d, r)) }
             return .allow(.directUserInstruction(channel))
         case .system:
-            guard d.category == .localReversible,
+            guard d.category == .localReversible || d.category == .externalRead,
                   let rule = policy.rules.first(where: { $0.allowsActions.contains(d.id) }) else {
                 return .deny("No standing rule lets Wren do “\(d.summary)” on its own.")
             }

@@ -278,6 +278,31 @@ Network calls are stubbed with recorded Gmail API responses. One optional live t
 5. Pause › For 1 hour: the banner shows; Resume: no burst of notifications.
 6. Reset preferences: confirm dialog; items still present afterwards.
 
+## Milestone 6 tests (implemented)
+
+All provider calls are mocked with `RouteStub` (no network, no credentials in CI).
+
+| Requirement | Tests |
+|---|---|
+| Registry, catalog, states | `ConnectorRegistryTests` |
+| Keychain handling | `CredentialTests.testInMemory`, `testRealKeychain` (local only) |
+| HTTPS + host allowlist, error mapping | `HTTPPolicyTests` |
+| OAuth URL, PKCE (RFC 7636 vector), callback/state validation, exchange, scope check, refresh, revocation errors | `GoogleOAuthTests` |
+| Gmail search, pagination, parsing, triage, read-only, cache, question mapping | `GmailTests` |
+| Malicious instructions in email | `GmailTests.testInjectedEmailInstructionsDoNothing` |
+| Calendar timezones, all-day, recurring, pagination, ranges | `CalendarTests` |
+| Notion search, unsupported blocks, nesting, rate limit, validate-before-save, disconnect cleanup, create only after confirmation | `NotionTests` |
+| OpenAI key validation, model list, attribution, timeout, disconnect; per-request confirmation; private needs explicit inclusion | `OpenAIConnectorTests` |
+| ChatGPT detection, preview, private/secret exclusion, confirmation, never "submitted", follow-ups, history | `HandoffTests` |
+| External reads need connection; briefing rule; revocation; audit | `ExternalReadPolicyTests` |
+| Briefing with connected sources, without Ollama | `ExternalReadPolicyTests.testBriefingIncludesConnectedSourcesWithoutOllama` |
+| Voice lifecycle, permissions, short/empty/server/errors, cancel, same pipeline as typing | `VoiceTests` |
+
+### Opt-in live checks
+
+- `WREN_LIVE_OLLAMA=qwen2.5:3b swift test --filter LiveModelTests`
+- Gmail/Calendar/Notion/OpenAI: connect in the app and use Connectors › Check again; each connector's status shows the last successful check.
+
 ## Commands recorded per phase
 
 ```
