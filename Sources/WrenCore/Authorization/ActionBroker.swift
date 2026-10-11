@@ -119,6 +119,14 @@ public final class ActionBroker {
 
     /// Records something Wren did outside a request (for example applying a restore at startup),
     /// so the activity log stays complete. Labels only.
+    /// Records a request that was not carried out (for example ChatGPT wasn't connected), so the
+    /// activity log shows it was asked for and that nothing was sent.
+    public func recordNotRun(_ r: ActionRequest, reason: String) {
+        let rec = AuditRecord(request: r, descriptor: descriptor(r.action), at: clock.now)
+        rec.status = .failed; rec.verification = .notRun; rec.detail = String(("Not sent: " + reason).prefix(200))
+        context.insert(rec); try? context.save()
+    }
+
     public func recordEvent(action: ActionID, target: TargetRef, origin: ActionOrigin, detail: String) {
         let r = ActionRequest(action: action, target: target, origin: origin, createdAt: clock.now)
         let rec = AuditRecord(request: r, descriptor: descriptor(action), at: clock.now)

@@ -7,7 +7,12 @@ enum CaptureReply {
     case saved
     case resolution(ContextResolution)
     case failed(String)
+    /// A request for an assistant: the panel shows it as "Ask ChatGPT" (or offers a choice for a
+    /// general question) and runs it from there.
+    case ask(AIRequest)
 }
+
+
 
 /// Goals, waiting items, insights and contextual commands. Every change goes through `run`
 /// (the ActionBroker). Contextual proposals are confirmed explicitly before they run.
@@ -29,39 +34,82 @@ extension AppModel {
 
     // MARK: Capture panel entry point
 
-    /// A command about an existing item gets a preview or question; anything else is saved as a new capture.
+    /// Every input is classified first (explicit save, reminder, ask an assistant, change an item,
+    /// question about stored items, general question, or something to remember), and only the
+    /// matching action or card follows. Cards never come from an unrelated guess.
     func submitFromCapture(_ text: String, channel: UserChannel = .hotkey) async -> CaptureReply {
         // A spoken command may still start with "Hey Wren,"; it isn't part of the request.
         let spoken = channel == .voice ? ReminderCommand.stripAddress(text) : text
         let trimmed = spoken.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return .failed("Nothing to save.") }
         reload()
+        let source: CaptureSource = channel == .voice ? .voice : .hotkey
+        if let body = IntentRouter.explicitCapture(trimmed) {
+            reminderFollowUp = nil
+            return capture(body, source: source) ? .saved : .failed("Couldn't save. Your text is still here.")
+        }
         if let r = await reminderRequest(trimmed, channel: channel) { return r }
-        // "Ask ChatGPT to …" opens the delegation panel with a preview; nothing is sent from here.
-        if let h = HandoffRequest.detect(trimmed) {
-            delegationDraft = (h.task, h.depth)
-            route = .delegate
-            openMainWindow()
-            return .resolution(.answer(Answer(title: "Prepared a ChatGPT handoff", lines: [AnswerLine(h.task, recordID: nil)],
-                                              basis: "Review the exact prompt in Wren's window. Nothing has left your Mac.")))
-        }
-        if let r = await connectorAnswer(trimmed) { return .resolution(r) }
         let all = (try? store?.all()) ?? []
-        let result = resolver.resolve(trimmed, items: all, goals: goals, context: conversation, now: clock.now)
-        switch result {
-        case .notACommand:
-            // Ask the local model only when the text looks like a command or question.
-            if ContextResolver.mightBeCommandOrQuestion(trimmed), let r = await modelInterpretation(trimmed, all: all) { return .resolution(r) }
-            return capture(trimmed, source: .hotkey) ? .saved : .failed("Couldn't save. Your text is still here.")
-        case let .notFound(msg):
-            // The model may only help if it found something real; an empty answer would hide the reason.
-            if let r = await modelInterpretation(trimmed, all: all) {
-                if case let .answer(a) = r, a.lines.isEmpty {} else { return .resolution(r) }
+        switch IntentRouter.route(trimmed, now: clock.now, calendar: clock.calendar, resolver: resolver) {
+        case .explicitCapture(let body):
+            return capture(body, source: source) ? .saved : .failed("Couldn't save. Your text is still here.")
+        case .askAI(let request):
+            return .ask(request)
+        case .reminder:
+            // reminderRequest handles every reminder; reaching here means it couldn't, so keep the words.
+            return capture(trimmed, source: source) ? .saved : .failed("Couldn't save. Your text is still here.")
+        case .itemCommand, .storedQuery:
+            if let r = await connectorAnswer(trimmed) { return .resolution(r) }
+            let result = resolver.resolve(trimmed, items: all, goals: goals, context: conversation, now: clock.now)
+            if case let .notFound(msg) = result {
+                // The model may only help if it found something real; an empty answer would hide the reason.
+                if case let .resolved(r)? = await modelInterpretation(trimmed, all: all) {
+                    if case let .answer(a) = r, a.lines.isEmpty {} else { return .resolution(r) }
+                }
+                return .resolution(.notFound(msg))
             }
-            return .resolution(.notFound(msg))
-        default:
+            if case .notACommand = result { return capture(trimmed, source: source) ? .saved : .failed("Couldn't save. Your text is still here.") }
             return .resolution(result)
+        case .generalQuestion(let request):
+            // Questions Wren can answer from connected Gmail or Calendar go there first.
+            if let r = await connectorAnswer(trimmed) { return .resolution(r) }
+            return .ask(request)
+        case .capture:
+            if let r = await connectorAnswer(trimmed) { return .resolution(r) }
+            // Ask the local model only when the text looks like a command or question.
+            if ContextResolver.mightBeCommandOrQuestion(trimmed) {
+                switch await modelInterpretation(trimmed, all: all) {
+                case let .resolved(r)?: return .resolution(r)
+                case .generalQuestion?: return .ask(AIRequest(prompt: IntentRouter.questionPromptPublic(trimmed), original: text, target: nil))
+                case nil: break
+                }
+            }
+            return capture(trimmed, source: source) ? .saved : .failed("Couldn't save. Your text is still here.")
         }
+    }
+
+    // MARK: Asking ChatGPT from the panel
+
+    func askChatGPT(_ r: AIRequest, channel: UserChannel, onDelta: @escaping @MainActor (String) -> Void) async -> AskOutcome {
+        guard let asks else { return .failed("Wren's database isn't available.", retryable: false) }
+        let o = await asks.askChatGPT(r, channel: channel, onDelta: onDelta)
+        connectorsChanged()
+        return o
+    }
+
+    /// The local model answers a general question on this Mac. nil when no local model is set up.
+    func askLocalModel(_ r: AIRequest) async -> AskOutcome? {
+        guard let name = ai.usableModel, let client = try? OllamaClient() else { return nil }
+        let schema: JSONValue = .object(["type": .string("object"), "properties": .object(["answer": .object(["type": .string("string")])]),
+                                         "required": .array([.string("answer")])])
+        guard let raw = try? await client.chatJSON(model: name, system: "Answer the question helpfully and concisely. Reply with JSON {\"answer\": …}.",
+                                                   user: r.prompt, schema: schema, timeout: 120),
+              let d = raw.data(using: .utf8), let v = try? JSONDecoder().decode(JSONValue.self, from: d), let a = v["answer"]?.string, !a.isEmpty
+        else { return .failed("The local model didn't answer.", retryable: true) }
+        guard let record = newDelegation(r.prompt, destination: .localModel, depth: r.depth) else { return .failed("Couldn't save the answer.", retryable: false) }
+        record.prompt = r.prompt; record.response = a; record.responseSource = "Local model \(name) on this Mac"; record.status = .responseImported
+        saveDelegation(record)
+        return .answered(text: a, source: "Local model \(name), on this Mac", recordID: record.id)
     }
 
     // MARK: Reminders from words
@@ -142,13 +190,16 @@ extension AppModel {
         return .resolution(.answer(Answer(title: "Reminder set: \(title)", lines: lines, basis: "From your words: “\(text)”")))
     }
 
+    enum ModelReading { case resolved(ContextResolution), generalQuestion }
+
     /// Model-assisted understanding. Any failure falls back to the non-AI path; nothing is lost.
-    private func modelInterpretation(_ text: String, all: [Commitment]) async -> ContextResolution? {
+    private func modelInterpretation(_ text: String, all: [Commitment]) async -> ModelReading? {
         guard settings.useModel, let name = ai.usableModel, let client = try? OllamaClient() else { return nil }
         let interpreter = ModelCommandInterpreter(client: client, model: name, resolver: resolver)
         let started = Date()
         switch await interpreter.interpret(text, items: all, goals: goals, context: conversation, now: clock.now) {
-        case let .resolution(r): noteModelSuccess(since: started); return r
+        case let .resolution(r): noteModelSuccess(since: started); return .resolved(r)
+        case .generalQuestion: noteModelSuccess(since: started); return .generalQuestion
         case .newItem: noteModelSuccess(since: started); return nil
         case let .unavailable(reason): noteModelFailure(reason); return nil
         case .invalid: return nil

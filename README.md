@@ -83,6 +83,7 @@ The script compiles the Swift package, regenerates the icon from `assets/logo.pn
 | Reset | Settings › Reset |
 | Set a reminder | Type or say "remind me to call Sam tomorrow at 10 AM", "remind me to submit the report Friday evening" or "remind me to take a break every weekday at 3 PM". Or use **New reminder** in the window. |
 | Change or snooze a reminder | "Move my API reminder to Sunday at noon" or "snooze the current reminder for 30 minutes". Wren shows the change; Return confirms. |
+| Ask ChatGPT | Type "ask ChatGPT to explain quantum physics" or "can you check on GPT what is quantum physics". The panel shows the question and the real answer from your ChatGPT plan, or Connect ChatGPT if you aren't signed in. A question that names no assistant lets you choose local AI, ChatGPT or saving it. Start with "Note:" to just save text. |
 | Talk to Wren | Say "Hey Wren" (turn it on in Connectors › Voice) or press **⌥⇧ Space**, then say what you need. |
 | Quit | ⌘Q, Wren › Quit Wren, right-click the bird › Quit Wren, or **Quit** at the bottom of the menu. |
 

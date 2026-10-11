@@ -170,11 +170,12 @@ extension AppModel {
     }
 
     /// Sign in with ChatGPT. `reconsent` shows OpenAI's permission screen again (to allow plan usage).
-    func connectChatGPT(reconsent: Bool = false) {
+    func connectChatGPT(reconsent: Bool = false, then done: (() -> Void)? = nil) {
         Task {
             await hub.chatgpt.connect(reconsent: reconsent) { NSWorkspace.shared.open($0) }
             NSApp.activate(ignoringOtherApps: true)
             connectorsChanged()
+            done?()
         }
     }
 

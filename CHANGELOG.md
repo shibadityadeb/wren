@@ -2,6 +2,13 @@
 
 Versions follow [semantic versioning](https://semver.org). The `VERSION` file is the source of truth; release tags are `v<VERSION>` (stable) or `v<VERSION>-preview.N` (prerelease).
 
+## [Unreleased]
+
+- Every input in the capture panel is classified before anything happens: save, reminder, ask ChatGPT, change an item, question about your items, general question, or something to remember. "Can you check on GPT what is quantum physics" now asks ChatGPT instead of showing an unrelated waiting-items card.
+- Asking ChatGPT happens in the panel. It shows the question, sends it with your ChatGPT plan, and streams the real answer. If you're not connected or not allowed, it shows Connect ChatGPT and keeps your question. Usage limits, network errors and retry are explained. One request at a time.
+- A question that names no assistant lets you choose: local AI, ChatGPT, or save it as a note. "Note: …" or "Save this: …" always just saves.
+- The local model can no longer turn an unrelated sentence into an answer about your stored items.
+
 ## [0.8.0]
 
 A complete Mac app, reminders you can rely on, and talking to Wren.
