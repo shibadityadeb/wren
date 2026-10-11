@@ -206,6 +206,10 @@ public struct BackupManager: Sendable {
         }
         try fm.moveItem(at: pendingStore, to: storeURL)
         try? fm.removeItem(at: restoreDirectory.appendingPathComponent("pending"))
+        // Keep the three most recent replaced stores.
+        let old = ((try? fm.contentsOfDirectory(at: restoreDirectory, includingPropertiesForKeys: nil)) ?? [])
+            .filter { $0.lastPathComponent.hasPrefix("replaced-") }.sorted { $0.lastPathComponent > $1.lastPathComponent }
+        for d in old.dropFirst(3) { try? fm.removeItem(at: d) }
         return replaced
     }
 

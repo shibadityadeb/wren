@@ -2,6 +2,16 @@
 
 Versions follow [semantic versioning](https://semver.org). The `VERSION` file is the source of truth; release tags are `v<VERSION>` (stable) or `v<VERSION>-preview.N` (prerelease).
 
+## [0.5.0]
+
+Feels like a real Mac app, and your data is safe to keep, move and recover.
+
+- Opening Wren shows a window: what Wren does, open commitments, goals, waiting items, today's overdue and due items, upcoming reminders, Local AI status, and a New capture button. The menu bar and ⌥ Space still work as before; "Open Wren" in the menu brings the window back.
+- Export everything to a readable, versioned JSON file.
+- Backups: daily while Wren runs, before upgrades, restores and resets, and on demand. Each is a consistent database snapshot with a checksum and is verified before you can restore it. Restoring backs up your current data first and puts it back if anything goes wrong.
+- Pause notifications for an hour, until the end of the day, or until you resume. Nothing is lost; anything that came due arrives as one summary.
+- Reset preferences, or remove all Wren data, with a clear explanation, an optional backup first and a confirmation.
+
 ## [0.4.0]
 
 Local AI that works, and a downloadable installer.

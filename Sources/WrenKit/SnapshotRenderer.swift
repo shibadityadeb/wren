@@ -93,8 +93,12 @@ public enum SnapshotRenderer {
             try render(CaptureView(state: cs2, submit: { _ in }, cancel: {}).padding(20)
                 .background(appearance == .aqua ? Color(white: 0.85) : Color(white: 0.15)),
                        size: CGSize(width: 600, height: 260), appearance: appearance, to: dir.appendingPathComponent("capture-clarify-\(tag).png"))
+            model.route = .overview
+            try render(MainWindowView(model: model), size: CGSize(width: 980, height: 720), appearance: appearance, to: dir.appendingPathComponent("window-overview-\(tag).png"))
             model.route = .settings
-            try render(PopoverView(model: model), size: CGSize(width: 380, height: 1700), appearance: appearance, to: dir.appendingPathComponent("popover-settings-\(tag).png"))
+            try render(MainWindowView(model: model), size: CGSize(width: 980, height: 720), appearance: appearance, to: dir.appendingPathComponent("window-settings-\(tag).png"))
+            model.pause = NotificationPause(since: now, until: now.addingTimeInterval(3600))
+            try render(PopoverView(model: model), size: CGSize(width: 380, height: 2300), appearance: appearance, to: dir.appendingPathComponent("popover-settings-\(tag).png"))
             let state = CaptureState()
             state.text = "Submit the scholarship form by Friday"
             try render(CaptureView(state: state, submit: { _ in }, cancel: {}).padding(20)

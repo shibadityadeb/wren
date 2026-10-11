@@ -49,6 +49,22 @@ final class WrenSettings {
         get { d.bool(forKey: "launchAtLogin") }
         set { d.set(newValue, forKey: "launchAtLogin") }
     }
+    var pause: NotificationPause? {
+        get { (d.data(forKey: "notificationPause")).flatMap { try? JSONDecoder().decode(NotificationPause.self, from: $0) } }
+        set {
+            if let newValue { d.set(try? JSONEncoder().encode(newValue), forKey: "notificationPause") } else { d.removeObject(forKey: "notificationPause") }
+        }
+    }
+    var lastAutomaticBackup: Date? {
+        get { d.object(forKey: "lastAutomaticBackup") as? Date }
+        set { d.set(newValue, forKey: "lastAutomaticBackup") }
+    }
+    /// Every preference key Wren writes. "Reset preferences" removes exactly these.
+    static let allKeys = ["hotKeyEnabled", "hotKey", "ollamaModel", "useModel", "dateOnlyReminderHour", "captureDraft",
+                          "dailySettings", "launchAtLogin", "insightSettings", "notificationPause", "lastAutomaticBackup"]
+
+    func resetAll() { Self.allKeys.forEach(d.removeObject(forKey:)) }
+
     /// Unsent text in the capture overlay, kept if the overlay is dismissed by clicking away.
     var captureDraft: String {
         get { d.string(forKey: "captureDraft") ?? "" }

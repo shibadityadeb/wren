@@ -2,29 +2,52 @@ import SwiftUI
 import WrenCore
 
 /// Compact menu-bar popover: a quick list, an editor, and settings. Not a dashboard.
+/// True when a pane is shown inside the main window (which has its own sidebar and chrome).
+private struct InWindowKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    var wrenInWindow: Bool {
+        get { self[InWindowKey.self] }
+        set { self[InWindowKey.self] = newValue }
+    }
+}
+
+/// Shows the pane for the current route. Shared by the popover and the main window.
+struct RouteView: View {
+    @Bindable var model: AppModel
+    var body: some View {
+        switch model.route {
+        case .list, .goals, .review, .overview: ListPane(model: model)
+        case let .detail(id):
+            if let c = model.item(id) { ItemDetailView(model: model, item: c) } else { ListPane(model: model) }
+        case .settings: SettingsView(model: model)
+        case .briefing: BriefingView(model: model)
+        case .checkIn: CheckInView(model: model)
+        case .activity: ActivityView(model: model)
+        case .aiSetup: AISetupView(model: model)
+        case let .goal(id):
+            if let g = model.goal(id) { GoalDetailView(model: model, goal: g) } else { ListPane(model: model) }
+        }
+    }
+}
+
+/// Compact menu-bar popover: a quick list, an editor, and settings. Not a dashboard.
 struct PopoverView: View {
     @Bindable var model: AppModel
 
     var body: some View {
-        Group {
-            switch model.route {
-            case .list: ListPane(model: model)
-            case let .detail(id):
-                if let c = model.item(id) { ItemDetailView(model: model, item: c) } else { ListPane(model: model) }
-            case .settings: SettingsView(model: model)
-            case .briefing: BriefingView(model: model)
-            case .checkIn: CheckInView(model: model)
-            case .activity: ActivityView(model: model)
-            case .goals, .review: ListPane(model: model)
-            case .aiSetup: AISetupView(model: model)
-            case let .goal(id):
-                if let g = model.goal(id) { GoalDetailView(model: model, goal: g) } else { ListPane(model: model) }
-            }
-        }
-        .frame(width: 380)
-        .frame(minHeight: 200, maxHeight: 560)
-        .alert("Confirm", isPresented: Binding(get: { model.confirmation != nil }, set: { if !$0 { model.cancelPendingConfirmation() } }),
-               presenting: model.confirmation) { _ in
+        RouteView(model: model)
+            .frame(width: 380)
+            .frame(minHeight: 200, maxHeight: 560)
+            .modifier(ConfirmationAlert(model: model))
+    }
+}
+
+/// The broker's confirmation prompt as a native alert.
+struct ConfirmationAlert: ViewModifier {
+    @Bindable var model: AppModel
+    func body(content: Content) -> some View {
+        content.alert("Confirm", isPresented: Binding(get: { model.confirmation != nil }, set: { if !$0 { model.cancelPendingConfirmation() } }),
+                      presenting: model.confirmation) { _ in
             Button("Cancel", role: .cancel) { model.cancelPendingConfirmation() }
             Button("Confirm", role: .destructive) { model.approvePendingConfirmation() }
         } message: { p in Text(p.prompt) }
@@ -33,6 +56,7 @@ struct PopoverView: View {
 
 struct ListPane: View {
     @Bindable var model: AppModel
+    @Environment(\.wrenInWindow) private var inWindow
     @State private var draft = ""
     @State private var showClosed = false
 
@@ -41,11 +65,19 @@ struct ListPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
-            MainTabs(model: model)
-            Divider()
+            if !inWindow {
+                header
+                MainTabs(model: model)
+                Divider()
+            }
             if let msg = model.storeError ?? model.banner {
                 Notice(text: msg, systemImage: "exclamationmark.triangle")
+            }
+            if let p = model.pauseLabel {
+                Notice(text: "\(p). Reminders are kept and will be summarised when you resume.", systemImage: "bell.slash",
+                       action: ("Resume", { model.resumeNotifications() }))
+            } else if let r = model.resumeNote {
+                Notice(text: r, systemImage: "bell", action: ("OK", { model.resumeNote = nil }))
             }
             if model.notificationStatus == .denied {
                 Notice(text: "Notifications are off for Wren. Due items appear here instead.", systemImage: "bell.slash",
@@ -65,8 +97,10 @@ struct ListPane: View {
             } else {
                 itemsBody
             }
-            Divider()
-            footer
+            if !inWindow {
+                Divider()
+                footer
+            }
         }
     }
 
@@ -134,10 +168,12 @@ struct ListPane: View {
     }
 
     var footer: some View {
-        HStack {
-            Text("\(model.pending.count) open").font(.caption).foregroundStyle(.secondary)
+        HStack(spacing: 10) {
+            Button("Open Wren") { model.openMainWindow() }.buttonStyle(.borderless).font(.caption)
+            PauseMenu(model: model).font(.caption)
             Spacer()
-            Button("Quit Wren") { NSApp.terminate(nil) }.buttonStyle(.borderless).font(.caption)
+            Text("\(model.pending.count) open").font(.caption).foregroundStyle(.secondary)
+            Button("Quit") { NSApp.terminate(nil) }.buttonStyle(.borderless).font(.caption)
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
     }
@@ -266,5 +302,21 @@ struct EmptyState: View {
         }
         .frame(maxWidth: .infinity)
         .padding(32)
+    }
+}
+
+/// Pause / resume notifications.
+struct PauseMenu: View {
+    var model: AppModel
+    var body: some View {
+        if model.pause != nil {
+            Button { model.resumeNotifications() } label: { Label("Resume", systemImage: "bell.slash") }
+                .buttonStyle(.borderless).help(model.pauseLabel ?? "")
+        } else {
+            Menu {
+                ForEach(NotificationPause.Option.allCases, id: \.self) { o in Button(o.label) { model.pauseNotifications(o) } }
+            } label: { Label("Pause", systemImage: "bell") }
+            .menuStyle(.borderlessButton).fixedSize().help("Pause notifications")
+        }
     }
 }

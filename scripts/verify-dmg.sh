@@ -42,7 +42,7 @@ NESTED="$(find "$APP" -type f -perm +111 ! -path "*/MacOS/Wren" | wc -l | tr -d 
 echo "✓ architectures: $ARCHS (no nested executables)"
 
 if find "$APP" \( -name "*.store" -o -name "Fixtures" -o -name "*.p12" -o -name "*.p8" \) | grep -q .; then fail "test data or secrets in bundle"; fi
-if strings "$APP/Contents/MacOS/Wren" | grep -qE "debug capture saved|debug command proposal|debug ai step"; then fail "debug hooks present"; fi
+if strings "$APP/Contents/MacOS/Wren" | grep -qE "debug capture saved|debug command proposal|debug ai step|debug restore|debug paused"; then fail "debug hooks present"; fi
 echo "✓ no debug hooks, fixtures or secrets"
 
 codesign --verify --deep --strict "$APP" || fail "signature invalid"

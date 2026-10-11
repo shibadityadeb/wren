@@ -6,6 +6,8 @@
 > 3. **Data:** a single `Commitment` model holds the verbatim `originalText`, a `kind` (commitment, idea, question, waiting, research, unsorted) and a `processing` state. This replaces a separate `Capture` entity. Only `kind == .commitment` gets automatic reminders. A separate `Capture` can be split out later if Phase 5 needs it.
 > 4. **UI:** the menu bar uses `NSStatusItem` + `NSPopover` rather than `MenuBarExtra`, so a notification tap can open the popover programmatically.
 
+> **Milestone 5 (2026-10-11).** Main window, export, backups and restore, notification pause and reset are documented in §30–§34.
+>
 > **Milestone 4 (2026-10-11).** Local AI readiness, model download, model-assisted commands and distribution are documented in §26–§29. The build no longer uses only `scripts/build-app.sh` for local runs: releases go through `scripts/package-dmg.sh`.
 >
 > **Milestone 3 (2026-10-10).** Goals, waiting follow-ups, insights and contextual references are documented in §22–§25.
@@ -546,3 +548,44 @@ Capture interpretation (`IntentProcessor`) additionally accepts an optional `cla
 | `scripts/verify-dmg.sh` | checksum, `hdiutil verify`, contents, bundle id/version/LSUIElement/min OS, both slices present, no nested executables, no fixtures/secrets/debug strings, signature, notarization when required, `--smoke-test` on every slice this Mac can run |
 | CI (`ci.yml`) | tests natively on `macos-15` (arm64) and `macos-15-intel`; universal unsigned preview DMG uploaded as an artifact; re-verified on Intel |
 | Release (`release.yml`) | tag `v*`: tag must match `VERSION`; tests on both architectures; optional certificate import (temporary keychain) → sign → package → `notarytool submit --wait` → staple → verify; verify on Intel; publish. Stable tags require notarization; unsigned builds publish only under prerelease tags. Manual dispatch builds an artifact only. Actions pinned to commit SHAs; `contents: write` only in the publish job. |
+
+
+## 30. Main window and activation (Milestone 5)
+
+Wren stays an `LSUIElement` menu-bar app (no Dock icon). `MainWindowController` owns one `NSWindow` hosting `MainWindowView` (SwiftUI `NavigationSplitView`: Overview, Items, Goals, Review, Local AI, Settings). Items/Goals/Review/Settings reuse the popover panes through `RouteView` with `\.wrenInWindow` hiding popover chrome; the window and popover share `AppModel.route`.
+
+| When | Behaviour |
+|---|---|
+| Launched normally (Finder, Spotlight, `open`) | window shown and activated (`NSApp.activate` + `makeKeyAndOrderFront` + `orderFrontRegardless`) |
+| Launched as a login item (`keyAELaunchedAsLogInItem`) | stays in the menu bar |
+| Opened again while running | `applicationShouldHandleReopen` → window to front |
+| A second process starts | `InstanceGuard`: exits and activates the running copy; a `--relaunch` (restore) waits up to 10 s for the old copy to quit |
+| Window closed | Wren keeps running (`applicationShouldTerminateAfterLastWindowClosed` → false) |
+
+Frame is remembered (`WrenMainWindow` autosave). The logo is the bundled `Wren.icns` (generated from `assets/logo.png`), falling back to the traced vector mark.
+
+## 31. Export format (`wren-export` v1)
+
+`WrenExport` (Codable). Top level: `manifest` (format, formatVersion, exportedAt, appVersion, schemaVersion, timeZone, counts, includes, excludes), `items`, `goals`, `observations`, `dailyRuns`, `policy`, `activityLog`. Items carry `goalID`, `isMilestone`, `waiting` (who, what, since, follow-up, acknowledged) and `history` (at, kind, note); goals carry `linkedItemIDs`, the progress method and its explanation. Dates: ISO 8601 UTC with fractional seconds. `WrenExport.decode` validates format and version and rejects newer versions. `WrenExport.write` is atomic and refuses to replace a file unless the save dialog confirmed it. Excluded: credentials (none are stored), preferences, AI models, runtime state.
+
+## 32. Backups and restore
+
+`BackupManager` (in `WrenCore/Data`).
+
+- **Snapshot:** `sqlite3_backup_*` from the live store (opened read-write so a closed WAL store can be read; only reads are issued) into `Backups/<timestamp>-<reason>/Wren.store`, switched to a single-file journal, then `PRAGMA integrity_check` and a Wren-table check.
+- **Manifest** `wren-backup` v1: createdAt, appVersion, schemaVersion, reason (`manual · automatic · preMigration · preRestore · preReset`), SHA-256, size, counts.
+- **Retention:** newest 7 automatic, 10 manual, 5 per other reason.
+- **Verify:** manifest format/version, checksum, integrity → a verified temporary copy. Legacy `schema-vN` folders (0.2–0.4: store + WAL) are copied, checkpointed and checked.
+- **Restore:** broker action `data.restoreBackup` (local destructive, always confirmed) → verify → `preRestore` backup → stage in `Restore/pending/`. Wren relaunches; before the store opens, `WrenStore.open(manager:)` moves the live store to `Restore/replaced-<ts>/` and the staged one into place. If the result won't open, it rolls back and reports `.failedAndRolledBack`. A corrupt staged file fails the integrity check before anything moves. The newest 3 replaced stores are kept. The restored database gets an audit entry noting the restore.
+- **Delete:** `backup.delete` (confirmed); paths must be direct children of `Backups/`.
+- Pre-upgrade backups use the same snapshot once per schema version.
+
+## 33. Notification pause
+
+`NotificationPause { since, until? }`, persisted in user defaults. `WrenEngine.tick` returns immediately while active: no deliveries, no daily-run changes, no schedule changes. When it ends (expiry on the next tick, or `resume()`), `deliverPauseSummary` sends one notification listing everything due; only if macOS accepts it is each reminder recorded as sent through `reminder.markSummarized` (covered by the auto-remind rule), with a history note. Then normal ticking resumes, and the DailyRun window rules decide whether today's briefing or check-in is still sent (once) or recorded missed.
+
+## 34. Reset
+
+- **Reset preferences:** app action `settings.reset` (local destructive, confirmed) removes exactly the keys in `WrenSettings.allKeys` and unregisters the login item.
+- **Remove all data:** `data.eraseAll` (irreversible category, always confirmed; content-originated requests are denied) deletes all user models, keeps only this request's audit records, and re-seeds default grants and rules. "Back up first" makes a `preReset` backup and aborts if it fails. Backups, the app and anything outside `~/Library/Application Support/Wren` are untouched.
+- No "clear test data": Wren can't distinguish test entries reliably.

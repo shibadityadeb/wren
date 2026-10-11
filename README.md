@@ -10,7 +10,7 @@ It is a native macOS menu-bar agent. You press a shortcut, type what you need to
 
 **All releases:** https://github.com/shibadityadeb/wren/releases
 
-Each release has `Wren-macOS-universal.dmg` (signed and notarized) or, until signing is set up, `Wren-macOS-universal-unsigned.dmg` (marked as a preview), plus a `.sha256` checksum. Every push to `main` also produces a preview DMG as a download on the [Actions](https://github.com/shibadityadeb/wren/actions/workflows/ci.yml) run page.
+Each release has `Wren-macOS-universal.dmg` (signed and notarized) or, until signing is set up, `Wren-macOS-universal-unsigned.dmg` (marked as a preview), plus a `.sha256` checksum. Every push (any branch) and pull request also produces an unsigned preview DMG, downloadable from the run's page under [Actions](https://github.com/shibadityadeb/wren/actions/workflows/ci.yml); the run summary lists its version, architectures, minimum macOS and signing status.
 
 | | |
 |---|---|
@@ -50,6 +50,8 @@ The script compiles the Swift package, regenerates the icon from `assets/logo.pn
 
 ## Using Wren
 
+**Opening Wren** from Applications, Spotlight or Finder shows its window: what Wren does, your open commitments, active goals and waiting items, today's overdue and due items, upcoming reminders, Local AI status, and a **New capture** button. The sidebar has Items, Goals, Review, Local AI and Settings. Closing the window doesn't quit Wren: it keeps running in the menu bar (the bird), with no Dock icon. **Open Wren** in the menu, or opening the app again, brings the window back. When Wren starts at login it stays quietly in the menu bar.
+
 | Do this | How |
 |---|---|
 | Capture | Press **⌥ Space** anywhere, type, press **Return**. **Esc** cancels. Clicking away keeps your draft. |
@@ -69,7 +71,10 @@ The script compiles the Swift package, regenerates the icon from `assets/logo.pn
 | Change briefing or check-in time, or turn them off | Settings › Daily rhythm |
 | Open Wren at login | Settings › Startup (off until you turn it on) |
 | See and change what Wren may do | Settings › Permissions, and Activity log |
-| Quit | **Quit Wren**, at the bottom of the menu. |
+| Pause notifications | **Pause** at the bottom of the menu, or Settings › Notifications: for 1 hour, until the end of today, or until you resume |
+| Export, back up, restore | Settings › Your data |
+| Reset | Settings › Reset |
+| Quit | **Quit**, at the bottom of the menu. |
 
 Wren reads dates from your own words even without a language model. It understands phrases like "tomorrow", "tonight at 8", "by Friday", "this weekend", "next week", "in 2 hours", "15 October", "9pm", and "end of month". It never invents a date. A deadline without a time gets a reminder at 10:00 on that day, and you can change that hour in Settings. Numeric dates like 10/11 are deliberately not supported, because the day and month order is ambiguous.
 
@@ -140,7 +145,30 @@ If notifications are off, due items appear under **Due now** in the menu. Wren d
 | Preferences | `defaults read com.shibadityadeb.wren` |
 | Diagnostics | `/usr/bin/log show --predicate 'subsystem == "com.shibadityadeb.wren"' --last 1h` |
 
-Capture text is never written to the logs. To reset Wren, quit it and delete the `Wren` folder in Application Support.
+Capture text is never written to the logs.
+
+### Export
+
+Settings › Your data › **Export…** writes one readable JSON file (format `wren-export`, version 1): every item with its original wording, dates, reminders, status and full history; waiting details and follow-ups; goals, progress settings and linked items; review decisions; briefing records; permissions and standing rules; the activity log (labels only). Dates are ISO 8601 in UTC with the Mac's time zone in the manifest. It contains no passwords, keys or tokens, and doesn't include preferences or AI models. Wren never overwrites an existing file without the save dialog asking first.
+
+### Backups and restore
+
+Wren backs up its database once a day while running, before every upgrade, restore and reset, and when you press **Back Up Now**. Each backup is a consistent SQLite snapshot (taken with SQLite's backup API, safe while Wren is writing) with a `manifest.json` holding the date, app version, schema version, record counts and a SHA-256 checksum. Kept: the newest 7 daily, 10 manual and 5 of each automatic kind. Location: `~/Library/Application Support/Wren/Backups`.
+
+**Preview** verifies the checksum and database integrity and shows what the backup holds. **Restore…** asks for confirmation, backs up your current data, then restarts Wren and swaps the data in before anything opens it. If the restored data can't be opened, Wren puts your previous data back and tells you. The replaced data is also kept in `Restore/`. Backups made by Wren 0.2–0.4 (plain copies) can be previewed and restored too.
+
+### Reset
+
+Settings › Reset offers two separate actions, each explained and confirmed:
+
+- **Reset preferences**: shortcut, times, review thresholds, AI model choice, pause and open-at-login go back to defaults. Items are kept.
+- **Remove all Wren data**: deletes every item, goal, history entry, review decision and briefing record, and resets permissions to defaults. "Back up first" is on by default. Backups, Wren itself and Ollama models are not touched, and nothing outside Wren's data folder is.
+
+Wren doesn't offer "clear test data": it can't reliably tell test entries from real ones.
+
+### Pausing notifications
+
+While paused, Wren delivers no reminders, briefing or check-in, and changes nothing: deadlines and reminder times stay as they are, and no reminder is recorded as sent. The pause survives restarts. When it ends (on its own or with **Resume**), everything that came due is listed in **one** summary notification, and only if macOS accepts it are those reminders recorded as delivered. A briefing or check-in whose time passed during the pause follows the usual rule: still in its window, it's sent once; otherwise it's marked missed. Notifications macOS had already shown before the pause can't be taken back.
 
 ## Releases (maintainers)
 
