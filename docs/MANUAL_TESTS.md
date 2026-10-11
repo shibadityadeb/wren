@@ -35,7 +35,8 @@ touched. Debug URLs exist only in debug builds. Read results with:
 | M-LIFE-3 | Lifecycle | One bird in the menu bar, ⌘Q from the keyboard, Dock click reopens the window | **Not run** by hand (needs someone at the screen) |
 | M-DATA-1 | Upgrade | A copy of the real 0.8.0 store (schema 5) opens under schema 6 with every item, delegation and audit record intact | **Passed live** (`items=8 delegations=1 audit=22` before and after; `WREN_MIGRATION_COPY` test) |
 | M-DATA-2 | Upgrade | Wren Dev's existing data opens after the upgrade | **Passed live** |
-| M-VOICE-1 | Voice | Real microphone, "Hey Wren", the voice shortcut | **Not run**: needs a person to speak and to allow Microphone and Speech Recognition |
+| M-VOICE-1 | Voice | Real microphone, "Hey Wren", the voice shortcut, the listening orb, gated idle listening, pause on screen lock | **Not run**: needs a person to speak and to allow Microphone and Speech Recognition |
+| M-VOICE-2 | Voice | A spoken command waits for review (editable, runs on Return) instead of acting | **Passed live** in Wren Dev (`voice command awaiting review`; no item created) |
 | M-NOTION-1 | Notion | Full sign-in and search | **Not run**: needs a Notion account at the screen (registration and consent page were reached live in an earlier pass) |
 | M-CAL-1 | Calendar (this Mac) | Reading events through macOS | **Not run**: needs a person to allow Calendars access |
 
@@ -96,7 +97,9 @@ Debug: `open "wren-dev://debug/reminders"` logs `debug pending <id> next=<date>`
 
 ### M-VOICE (needs Microphone and Speech Recognition allowed)
 1. Connectors › Voice › "Listen for “Hey Wren”".
-2. Say "Hey Wren, remind me to call Sam tomorrow at 10 AM": reply "Reminder set: Call Sam, tomorrow at 10:00 AM".
+2. Say "Hey Wren, remind me to call Sam tomorrow at 10 AM". Expected: the panel opens with the animated orb and "Listening…", the words appear as you speak; after you pause it shows "Transcribed" with the text editable. Change "10" to "11" and press Return: "Reminder set: Call Sam, tomorrow at 11:00 AM".
+2a. Lock the screen (⌃⌘Q) with "Hey Wren" on: the orange microphone indicator goes off; unlock: it comes back.
+2b. Sit in silence for a minute with "Hey Wren" on: Activity Monitor shows Wren near-idle (no continuous recognition).
 3. Say "Hey Wren, search in GPT: explain transformers": a GPT delegation as in M-GPT.
 4. Say "Hey Wren, what am I waiting on?": an answer from Wren's own items, nothing sent anywhere.
 5. Start speaking and press Esc: nothing happens; recording stops.

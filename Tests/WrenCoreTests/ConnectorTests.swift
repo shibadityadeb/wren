@@ -418,6 +418,7 @@ final class VoiceTests: XCTestCase {
         var isRunning = false
         var starts = 0, stops = 0
         var failStart: VoiceError?
+        var wakeListening = false
         func start() throws { if let failStart { throw failStart }; starts += 1; isRunning = true }
         func stop() { if isRunning { stops += 1 }; isRunning = false }
         func say(_ t: String) { onTranscript?(t) }

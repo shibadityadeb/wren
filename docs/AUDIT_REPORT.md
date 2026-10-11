@@ -58,6 +58,7 @@ maintainer configuration or provider verification · **Partial** · **Not implem
 | Tasks from natural language ("I need to … by Friday", "Create a task for … next Monday") | Partial: saved with framing and date left in the title | **Live** in Wren Dev (M-REM-1) + **Mock** pipeline test |
 | Reminders scheduled with macOS, reconciled at launch/wake, recurrence, snooze | Implemented, mock-tested; trigger dates never checked | **Mock**; trigger dates checked with `UNCalendarNotificationTrigger.nextTriggerDate()`; denied path **Live**; delivery while quit **Awaiting** (notifications denied for Wren Dev) |
 | Voice: one pipeline for shortcut and "Hey Wren" | Implemented (continuous on-device recognizer, not push-to-talk only) | Post-transcription path **Live** (debug URL); microphone **Awaiting** |
+| Voice: Siri-style listening UI, editable transcript before acting, gated idle listening, pause on lock | Not implemented (acted immediately; recognised all audio continuously) | Implemented; **Mock** (gate, suspend) + review mode **Live** in Wren Dev; microphone **Awaiting** |
 | Voice: microphone purpose string | **Docs inconsistent** (said push-to-talk only) | Fixed |
 | Single instance, quit, relaunch | Live (earlier pass) | **Live** again (M-LIFE-1/2) |
 | One bird, ⌘Q from keyboard, Dock reopen | Not run | Not run (needs someone at the screen) |

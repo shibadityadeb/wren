@@ -95,7 +95,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
                         saveAsNew: { [weak self] in self?.saveAsNew($0) },
                         openAISetup: { [weak self] in self?.openAISetup() },
                         toggleVoice: { [weak self] in self?.toggleVoice() },
-                        askAction: { [weak self] a in self?.askAction(a) })
+                        askAction: { [weak self] a in self?.askAction(a) },
+                        editedWhileListening: { [weak self] in self?.editedWhileListening() })
         }
         panel.onCancel = { [weak self] in self?.cancelCapture() }
         panel.onResign = { [weak self] in
@@ -109,10 +110,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
         model.applyHotKey = { [weak self] in self?.applyHotKey() }
         model.openMainWindow = { [weak self] in self?.popover.performClose(nil); self?.mainWindow.show() }
         // One voice service: "Hey Wren" and the voice shortcut feed the same capture and command path.
-        voice = VoiceSession(stream: LiveSpeechStream(), permissions: model.hub.voicePermissions)
+        let stream = LiveSpeechStream()
+        stream.onLevel = { [weak self] l in
+            guard let self, self.captureState.recording else { return }
+            self.captureState.voiceLevel = l
+        }
+        voice = VoiceSession(stream: stream, permissions: model.hub.voicePermissions)
+        observeScreenLock()
         // Note: nothing here touches the microphone; it opens only when "Hey Wren" or the shortcut is used.
         voice.onPhase = { [weak self] p in self?.voicePhaseChanged(p) }
-        voice.onLiveCommand = { [weak self] t in self?.captureState.text = t }
+        voice.onLiveCommand = { [weak self] t in
+            guard let self else { return }
+            self.captureState.lastVoiceText = t
+            self.captureState.text = t
+        }
         voice.onCommand = { [weak self] t, trigger in self?.runVoiceCommand(t, trigger) }
         voice.onEndedWithoutCommand = { [weak self] end in
             self?.captureState.voiceStatus = end == .timeLimit ? "Stopped after 20 seconds." : "Didn't hear a command. Try again and say what you need."
@@ -188,15 +199,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
             autoClose?.cancel()
             if !panel.isVisible { showCapture() }
             captureState.reply = nil
+            captureState.ask = nil
+            captureState.reviewingVoice = false
+            captureState.voiceLevel = 0
+            captureState.lastVoiceText = voice.liveCommand
             captureState.text = voice.liveCommand
             captureState.recording = true
-            captureState.voiceStatus = trigger == .wakeWord ? "Listening… (heard “Hey Wren”). Pause when you're done." : "Listening… Pause when you're done, or press the shortcut again."
+            captureState.voiceStatus = trigger == .wakeWord ? "Heard “Hey Wren”. Say what you need, then pause." : "Say what you need, then pause, or press the shortcut again."
             voiceTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { self?.voice.tick() }
             }
         case .handling:
             captureState.recording = false
-            captureState.voiceStatus = "Transcribed on this Mac."
+            captureState.voiceStatus = nil
         case .listening, .off:
             captureState.recording = false
         case let .failed(e):
@@ -213,6 +228,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
     private func runVoiceCommand(_ text: String, _ trigger: VoiceSession.Trigger) {
         appLog.notice("voice command received via \(trigger.rawValue, privacy: .public) (\(text.count, privacy: .public) characters)")
         if !panel.isVisible { showCapture() }
+        if model.settings.voiceReviewFirst {
+            // Show what was heard, editable; nothing happens until the user presses Return.
+            captureState.lastVoiceText = text
+            captureState.text = text
+            captureState.reviewingVoice = true
+            captureState.voiceStatus = nil
+            captureState.presentations += 1
+            panel.makeKey()
+            voice.finishedHandling()
+            appLog.notice("voice command awaiting review")
+            return
+        }
         captureState.text = text
         captureState.voiceStatus = "You said: “\(text)”"
         captureState.busy = true
@@ -284,15 +311,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
 
     private func submitCapture(_ text: String) {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !captureState.busy else { return }
+        // A reviewed spoken command runs as voice (same pipeline, same audit channel).
+        let channel: UserChannel = captureState.reviewingVoice ? .voice : .hotkey
+        if case .capturing = voice.phase { voice.cancel() }
+        captureState.reviewingVoice = false
+        captureState.recording = false
         captureState.busy = true
         Task {
-            let reply = await model.submitFromCapture(text)
+            let reply = await model.submitFromCapture(text, channel: channel)
             captureState.busy = false
             switch reply {
             case .saved: closeCapture()
             case let .resolution(r): captureState.reply = r
             case let .failed(msg): captureState.status = msg
-            case let .ask(r): showAsk(r, channel: .hotkey)
+            case let .ask(r): showAsk(r, channel: channel)
+            }
+        }
+    }
+
+    /// Typing while Wren is listening: stop listening and keep what's in the field for editing.
+    private func editedWhileListening() {
+        guard captureState.recording else { return }
+        voice.cancel()
+        captureState.recording = false
+        captureState.reviewingVoice = true
+        captureState.voiceStatus = nil
+    }
+
+    /// No listening while the screen is locked or the display sleeps; it resumes afterwards.
+    private func observeScreenLock() {
+        let dnc = DistributedNotificationCenter.default()
+        var locked = false
+        dnc.addObserver(forName: .init("com.apple.screenIsLocked"), object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { locked = true; self?.voice?.suspend(); appLog.notice("screen locked: listening paused") }
+        }
+        dnc.addObserver(forName: .init("com.apple.screenIsUnlocked"), object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { locked = false; self?.voice?.resumeIfEnabled() }
+        }
+        let ws = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.screensDidSleepNotification, NSWorkspace.willSleepNotification] {
+            ws.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.voice?.suspend() } }
+        }
+        for name in [NSWorkspace.screensDidWakeNotification, NSWorkspace.didWakeNotification] {
+            ws.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { if !locked { self?.voice?.resumeIfEnabled() } }
             }
         }
     }
@@ -450,6 +512,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
     }
 
     private func closeCapture() {
+        captureState.reviewingVoice = false
         captureState.text = ""
         captureState.reply = nil
         captureState.ask = nil

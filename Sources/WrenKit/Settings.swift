@@ -102,6 +102,11 @@ final class WrenSettings {
         get { d.stringArray(forKey: "importantSenders") ?? [] }
         set { d.set(newValue, forKey: "importantSenders") }
     }
+    /// After you stop speaking, show the transcript to edit and run with Return (default), or run it at once.
+    var voiceReviewFirst: Bool {
+        get { d.object(forKey: "voiceReviewFirst") as? Bool ?? true }
+        set { d.set(newValue, forKey: "voiceReviewFirst") }
+    }
     var mail: MailPreferences {
         get { (d.data(forKey: "mailPreferences")).flatMap { try? JSONDecoder().decode(MailPreferences.self, from: $0) } ?? MailPreferences() }
         set { d.set(try? JSONEncoder().encode(newValue.normalized()), forKey: "mailPreferences") }
@@ -109,7 +114,7 @@ final class WrenSettings {
     /// Every preference key Wren writes. "Reset preferences" removes exactly these.
     static let allKeys = ["hotKeyEnabled", "hotKey", "ollamaModel", "useModel", "dateOnlyReminderHour", "captureDraft",
                           "dailySettings", "launchAtLogin", "insightSettings", "notificationPause", "lastAutomaticBackup",
-                          "voiceEnabled", "voiceHotKey", "wakeWordEnabled", "macCalendarEnabled", "chatgptEnabled", "chatgptDestination", "chatgptModel", "openaiModel", "gmailCacheEnabled", "importantSenders", "mailPreferences"]
+                          "voiceEnabled", "voiceHotKey", "wakeWordEnabled", "macCalendarEnabled", "chatgptEnabled", "chatgptDestination", "chatgptModel", "openaiModel", "gmailCacheEnabled", "importantSenders", "mailPreferences", "voiceReviewFirst"]
 
     func resetAll() { Self.allKeys.forEach(d.removeObject(forKey:)) }
 

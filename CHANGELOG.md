@@ -16,6 +16,7 @@ Real integrations, tracked GPT requests, Gmail inbox intelligence, and an audit 
 - The microphone permission text describes "Hey Wren" accurately.
 - Data version 6 (new delegation fields; a backup is made before the upgrade). Wren 0.8 won't open 0.9 data.
 - `wren-tools live-check chatgpt` runs one real delegation for maintainers.
+- **"Hey Wren" feels like Siri:** an animated orb shows Wren is listening, your words appear as you speak, and after you pause they stay in the panel to edit; Return runs them (or switch to acting immediately in Voice settings). While waiting for the phrase Wren now only measures loudness and runs speech recognition only while someone is talking, and it stops listening while the screen is locked or asleep. (macOS still shows the microphone indicator while "Hey Wren" is on; no app can listen for a phrase without it.)
 
 ## Earlier unreleased changes (in 0.9.0)
 

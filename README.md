@@ -187,14 +187,14 @@ Wren uses your plan only for requests you start and confirm; background tasks ne
 
 Turn these on in Connectors › Voice. Both run the same voice command:
 
-- **"Hey Wren"** (off until you turn it on). Wren listens in the background for the phrase only. Say "Hey Wren, remind me to call Sam tomorrow at 10 AM". Wren opens the capture panel, shows what it hears, stops recording when you pause, and then acts.
+- **"Hey Wren"** (off until you turn it on). Say "Hey Wren, search in GPT: explain transformers". The capture panel opens with a Siri-style animated orb and **Listening…**, your words appear as you speak, and recording stops when you pause. The panel then shows **Transcribed** with the text editable: fix anything, then press **Return** to run it, or **Esc** to cancel. (Settings › Connectors › Voice can switch to running straight away.) Typing while Wren listens stops listening and keeps the text.
 - **The voice shortcut** (default **⌥⇧ Space**, changeable; Wren tells you if it clashes with another shortcut). Press it, speak, and pause, or press it again when you're done.
 
 Wren shows what it heard and what it did, for example "Reminder set: Call Sam, tomorrow at 10:00 AM, scheduled with macOS". A clear request such as setting a reminder runs straight away. Changing an existing item shows a preview to confirm. Anything unclear gets a short question. **Esc** or **Cancel** stops listening without doing anything.
 
 **Privacy:**
 - Speech is recognised on this Mac with Apple's on-device recognition. Wren refuses server recognition, and no audio is stored or sent anywhere.
-- While "Hey Wren" is on, macOS shows its orange microphone indicator, and Wren's menu-bar bird gets a dot.
+- To hear the phrase at all, the microphone has to stay open while "Hey Wren" is on and Wren is running, so macOS shows its orange microphone indicator (no app other than Siri can avoid that). Until someone speaks, Wren only measures loudness; speech recognition runs on this Mac only while someone is talking, and silence and background noise are never transcribed. Listening pauses while the screen is locked or the display sleeps.
 - Recording stops as soon as a command ends.
 - Quitting Wren turns the microphone off.
 

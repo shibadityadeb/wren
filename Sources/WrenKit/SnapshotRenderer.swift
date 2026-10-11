@@ -152,6 +152,22 @@ public enum SnapshotRenderer {
         try render(CaptureView(state: sending, submit: { _ in }, cancel: {}).padding(20).background(Color(white: 0.85)),
                    size: CGSize(width: 600, height: 240), appearance: .aqua, to: dir.appendingPathComponent("capture-gpt-sending-light.png"))
 
+        // Voice: listening, then the editable transcript.
+        let listening = CaptureState()
+        listening.voiceEnabled = true; listening.recording = true; listening.voiceLevel = 0.55
+        listening.text = "search in GPT explain quantum physics and give me"
+        listening.lastVoiceText = listening.text
+        listening.voiceStatus = "Heard “Hey Wren”. Say what you need, then pause."
+        try render(CaptureView(state: listening, submit: { _ in }, cancel: {}).padding(20).background(Color(white: 0.85)),
+                   size: CGSize(width: 600, height: 200), appearance: .aqua, to: dir.appendingPathComponent("capture-voice-listening-light.png"))
+        try render(CaptureView(state: listening, submit: { _ in }, cancel: {}).padding(20).background(Color(white: 0.15)),
+                   size: CGSize(width: 600, height: 200), appearance: .darkAqua, to: dir.appendingPathComponent("capture-voice-listening-dark.png"))
+        let review = CaptureState()
+        review.voiceEnabled = true; review.reviewingVoice = true
+        review.text = "search in GPT: explain quantum physics and give me a few useful beginner resources"
+        try render(CaptureView(state: review, submit: { _ in }, cancel: {}).padding(20).background(Color(white: 0.85)),
+                   size: CGSize(width: 600, height: 210), appearance: .aqua, to: dir.appendingPathComponent("capture-voice-review-light.png"))
+
         // Empty state.
         let empty = AppModel(store: try WrenStore(url: nil))
         empty.ai = .noChatModel
