@@ -27,7 +27,7 @@ public final class WrenStore {
     public let storeURL: URL?
 
     public static let models: [any PersistentModel.Type] = [
-        Commitment.self, ActivityEvent.self, DailyRun.self, Goal.self, GoalEvent.self, InsightRecord.self,
+        Commitment.self, ActivityEvent.self, DailyRun.self, Goal.self, GoalEvent.self, InsightRecord.self, DelegationRecord.self,
         AuditRecord.self, PermissionGrantRecord.self, StandingRuleRecord.self, DenialRecord.self,
     ]
 
@@ -61,7 +61,7 @@ public final class WrenStore {
     }
 
     /// Bumped whenever models are added or changed.
-    nonisolated public static let schemaVersion = 3
+    nonisolated public static let schemaVersion = 4
 
     public enum StartupRestore: Equatable, Sendable {
         case none

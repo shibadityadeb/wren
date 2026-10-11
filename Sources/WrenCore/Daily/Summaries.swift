@@ -57,6 +57,18 @@ struct DayView {
     }
 }
 
+/// Read-only highlights from connected services, fetched at briefing time.
+public struct ExternalBriefing: Sendable, Equatable {
+    public var emails: [String]
+    public var events: [String]
+    /// Sources that couldn't be read this time (shown, never hidden).
+    public var problems: [String]
+    public init(emails: [String] = [], events: [String] = [], problems: [String] = []) {
+        self.emails = emails; self.events = events; self.problems = problems
+    }
+    public var isEmpty: Bool { emails.isEmpty && events.isEmpty }
+}
+
 public struct Briefing: Sendable, Equatable {
     public var day: String
     public var overdue: [SummaryItem]
@@ -68,7 +80,12 @@ public struct Briefing: Sendable, Equatable {
     /// Observations that need a decision: repeated postponement, goals coming up, quiet items.
     public var decisions: [Insight] = []
 
-    public var isEmpty: Bool { overdue.isEmpty && dueToday.isEmpty && upcoming.isEmpty && waiting.isEmpty && remindersToday.isEmpty && decisions.isEmpty }
+    public var external: ExternalBriefing?
+
+    public var isEmpty: Bool {
+        overdue.isEmpty && dueToday.isEmpty && upcoming.isEmpty && waiting.isEmpty && remindersToday.isEmpty && decisions.isEmpty
+            && (external?.isEmpty ?? true)
+    }
 
     /// Every insight this briefing shows, for marking as surfaced.
     public var surfacedInsights: [Insight] = []
@@ -87,6 +104,10 @@ public struct Briefing: Sendable, Equatable {
         if !upcoming.isEmpty { counts.append("\(upcoming.count) coming up") }
         if !waiting.isEmpty { counts.append("\(waiting.count) follow-up\(waiting.count == 1 ? "" : "s") due") }
         if !decisions.isEmpty { counts.append("\(decisions.count) need\(decisions.count == 1 ? "s" : "") a decision") }
+        if let e = external {
+            if !e.events.isEmpty { counts.append("\(e.events.count) event\(e.events.count == 1 ? "" : "s") today") }
+            if !e.emails.isEmpty { counts.append("\(e.emails.count) email\(e.emails.count == 1 ? "" : "s") need attention") }
+        }
         if !remindersToday.isEmpty && counts.isEmpty { counts.append("\(remindersToday.count) reminder\(remindersToday.count == 1 ? "" : "s") today") }
         var s = counts.joined(separator: ", ") + "."
         if let first = focus.first ?? upcoming.first { s += " Start with “\(first.title)”." }

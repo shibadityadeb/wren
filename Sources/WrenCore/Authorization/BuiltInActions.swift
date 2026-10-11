@@ -16,6 +16,10 @@ public enum BuiltInAction {
     public static let sendEmail: ActionID = "email.send"
     public static let deleteEmailPermanently: ActionID = "email.deletePermanently"
     public static let delegateToExternalAI: ActionID = "ai.delegate"
+    public static let readCalendar: ActionID = "calendar.read"
+    public static let readNotion: ActionID = "notion.read"
+    public static let createNotionPage: ActionID = "notion.createPage"
+    public static let chatgptHandoff: ActionID = "chatgpt.handoff"
 
     public static let reservedExternal: [ActionDescriptor] = [
         .init(id: readEmail, category: .externalRead, permission: .emailRead, confirmation: .none,
@@ -27,7 +31,15 @@ public enum BuiltInAction {
         .init(id: deleteEmailPermanently, category: .irreversible, permission: .emailModify, confirmation: .always,
               summary: "Permanently delete email", verification: "Message no longer retrievable"),
         .init(id: delegateToExternalAI, category: .externalWrite, permission: .externalAI, confirmation: .always,
-              summary: "Send a task to an external AI service", verification: "Response received and model verified"),
+              summary: "Send a request to the OpenAI API", verification: "Response received; model as reported by the API"),
+        .init(id: readCalendar, category: .externalRead, permission: .calendarRead, confirmation: .none,
+              summary: "Read Google Calendar events", verification: "Provider returned events"),
+        .init(id: readNotion, category: .externalRead, permission: .notionRead, confirmation: .none,
+              summary: "Read Notion pages shared with Wren", verification: "Provider returned pages"),
+        .init(id: createNotionPage, category: .externalWrite, permission: .notionWrite, confirmation: .always,
+              summary: "Create a Notion page", verification: "Notion returned the new page"),
+        .init(id: chatgptHandoff, category: .externalWrite, permission: .chatgptHandoff, confirmation: .always,
+              summary: "Copy a prompt and open ChatGPT", verification: "Prompt copied and ChatGPT opened (not sent: you send it)"),
     ]
 
     /// Registers handlers for every local action.

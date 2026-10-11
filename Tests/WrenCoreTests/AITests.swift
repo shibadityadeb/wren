@@ -13,11 +13,22 @@ final class RouteStub: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var failures: [String: URLError.Code] = [:]
     nonisolated(unsafe) static var delay: TimeInterval = 0
     nonisolated(unsafe) static var hosts: [String] = []
+    /// Per-path queues: each request takes the next response (falls back to `routes`).
+    nonisolated(unsafe) static var sequences: [String: [(Int, Data)]] = [:]
+    nonisolated(unsafe) static var requests: [(URLRequest, Data?)] = []
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
         let path = request.url?.path ?? ""
         Self.hosts.append(request.url?.host ?? "")
+        var body = request.httpBody
+        if body == nil, let stream = request.httpBodyStream {
+            stream.open(); var d = Data(); var buf = [UInt8](repeating: 0, count: 4096)
+            while stream.hasBytesAvailable { let n = stream.read(&buf, maxLength: buf.count); if n <= 0 { break }; d.append(buf, count: n) }
+            stream.close(); body = d
+        }
+        Self.requests.append((request, body))
+        if var q = Self.sequences[path], !q.isEmpty { let next = q.removeFirst(); Self.sequences[path] = q; Self.routes[path] = next }
         let deliver = { [self] in
             if let code = Self.failures[path] { client?.urlProtocol(self, didFailWithError: URLError(code)); return }
             guard let (status, data) = Self.routes[path] else { client?.urlProtocol(self, didFailWithError: URLError(.cannotConnectToHost)); return }
@@ -29,7 +40,8 @@ final class RouteStub: URLProtocol, @unchecked Sendable {
     }
     override func stopLoading() {}
 
-    static func reset() { routes = [:]; failures = [:]; delay = 0; hosts = [] }
+    static func reset() { routes = [:]; failures = [:]; delay = 0; hosts = []; sequences = [:]; requests = [] }
+    static func json(_ s: String, _ status: Int = 200) -> (Int, Data) { (status, Data(s.utf8)) }
     static func session() -> URLSession {
         let c = URLSessionConfiguration.ephemeral; c.protocolClasses = [RouteStub.self]; return URLSession(configuration: c)
     }

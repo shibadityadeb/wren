@@ -31,8 +31,12 @@ public struct AnswerLine: Sendable, Equatable, Identifiable {
     /// The stored item or goal this line describes.
     public var recordID: UUID?
     public var isGoal: Bool
-    public var id: String { (recordID?.uuidString ?? "") + text }
-    public init(_ text: String, recordID: UUID?, isGoal: Bool = false) { self.text = text; self.recordID = recordID; self.isGoal = isGoal }
+    /// For lines from a connected service: where to open it (Gmail thread, calendar event).
+    public var externalURL: URL?
+    public var id: String { (recordID?.uuidString ?? externalURL?.absoluteString ?? "") + text }
+    public init(_ text: String, recordID: UUID?, isGoal: Bool = false, externalURL: URL? = nil) {
+        self.text = text; self.recordID = recordID; self.isGoal = isGoal; self.externalURL = externalURL
+    }
 }
 
 /// An answer built only from stored records. `basis` says what it was computed from.

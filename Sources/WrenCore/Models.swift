@@ -96,6 +96,8 @@ public final class Commitment {
     public var followUpAt: Date?
     /// When the user last acknowledged a due follow-up. A follow-up is due again only for a later followUpAt.
     public var followUpAcknowledgedAt: Date?
+    /// Private items are left out of anything sent outside the Mac unless included each time.
+    public var isPrivate: Bool = false
     var statusRaw: String
     var kindRaw: String
     var priorityRaw: Int
@@ -315,4 +317,68 @@ public final class DailyRun {
         get { DailyEventState(rawValue: checkInRaw) ?? .pending }
         set { checkInRaw = newValue.rawValue }
     }
+}
+
+public enum DelegationDestination: String, Codable, Sendable, CaseIterable {
+    case chatgptHandoff, openaiAPI, localModel, notionSearch, gmailSearch, calendarLookup
+    public var label: String {
+        switch self {
+        case .chatgptHandoff: "ChatGPT (your account)"
+        case .openaiAPI: "OpenAI API"
+        case .localModel: "Local model"
+        case .notionSearch: "Notion search"
+        case .gmailSearch: "Gmail search"
+        case .calendarLookup: "Calendar"
+        }
+    }
+    public var leavesMac: Bool { self == .chatgptHandoff || self == .openaiAPI }
+}
+
+public enum DelegationStatus: String, Codable, Sendable {
+    /// Prompt prepared and shown; nothing has left the Mac.
+    case prepared
+    /// Copied and ChatGPT opened. Not sent: the user sends it.
+    case handedOff
+    case responseImported, completed, cancelled, failed
+    public var label: String {
+        switch self {
+        case .prepared: "Prepared (not sent)"
+        case .handedOff: "Copied and opened ChatGPT — waiting for you to send it and paste the answer"
+        case .responseImported: "Answer imported"
+        case .completed: "Done"
+        case .cancelled: "Cancelled"
+        case .failed: "Failed"
+        }
+    }
+}
+
+/// One delegated task and its result. Never stores credentials.
+@Model
+public final class DelegationRecord {
+    @Attribute(.unique) public var id: UUID
+    public var createdAt: Date
+    public var updatedAt: Date
+    public var task: String
+    var destinationRaw: String
+    var statusRaw: String
+    var depthRaw: String = HandoffDepth.normal.rawValue
+    /// Exactly what left (or would leave) the Mac.
+    public var prompt: String?
+    public var response: String?
+    /// Where the answer came from, as known: "Pasted by you from ChatGPT" or "OpenAI API, model reported: …".
+    public var responseSource: String?
+    public var summary: String?
+    public var error: String?
+    public var linkedItemID: UUID?
+
+    public init(task: String, destination: DelegationDestination, depth: HandoffDepth, now: Date) {
+        id = UUID(); createdAt = now; updatedAt = now; self.task = task
+        destinationRaw = destination.rawValue; statusRaw = DelegationStatus.prepared.rawValue; depthRaw = depth.rawValue
+    }
+    public var destination: DelegationDestination { DelegationDestination(rawValue: destinationRaw) ?? .localModel }
+    public var status: DelegationStatus {
+        get { DelegationStatus(rawValue: statusRaw) ?? .failed }
+        set { statusRaw = newValue.rawValue }
+    }
+    public var depth: HandoffDepth { HandoffDepth(rawValue: depthRaw) ?? .normal }
 }
