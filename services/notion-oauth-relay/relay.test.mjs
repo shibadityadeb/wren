@@ -1,4 +1,4 @@
-// node --test services/notion-oauth-relay
+// node --test services/notion-oauth-relay/relay.test.mjs
 import test from "node:test";
 import assert from "node:assert/strict";
 import { handle } from "./relay.mjs";

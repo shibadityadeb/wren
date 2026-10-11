@@ -289,7 +289,7 @@ WREN_LIVE_OLLAMA=qwen2.5:3b swift test --filter "LiveModelTests|testLiveOllama"
 The Notion sign-in relay has its own tests:
 
 ```bash
-node --test services/notion-oauth-relay
+node --test services/notion-oauth-relay/relay.test.mjs
 ```
 
 ## Brand assets

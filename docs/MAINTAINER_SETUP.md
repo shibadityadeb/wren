@@ -99,7 +99,7 @@ uses. Wren still checks `state` itself.
 4. Put `WREN_NOTION_CLIENT_ID` and `WREN_NOTION_OAUTH_RELAY` (= `PUBLIC_URL`) in
    `config/providers.env` or the repository secrets. The client secret never goes there.
 
-Tests: `node --test services/notion-oauth-relay`.
+Tests: `node --test services/notion-oauth-relay/relay.test.mjs`.
 
 ## Verifying a build
 

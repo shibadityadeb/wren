@@ -36,7 +36,7 @@ jobs:
         run: swift test
       - name: Notion OAuth relay tests
         if: matrix.arch == 'arm64'
-        run: node --test services/notion-oauth-relay
+        run: node --test services/notion-oauth-relay/relay.test.mjs
       - name: Native release build and smoke test
         run: |
           swift build -c release --product Wren
