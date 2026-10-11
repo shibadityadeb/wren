@@ -14,16 +14,16 @@ public struct NotionBlock: Equatable, Sendable {
     public var depth: Int
 }
 
-/// Notion API (version 2026-03-11) with an internal integration token. Sees only pages shared
-/// with the integration. Retries once on rate limiting.
+/// Notion API (version 2026-03-11) with the OAuth access token of Wren's public integration. Sees only
+/// the pages the user picked on Notion's consent screen. Retries once on rate limiting.
 public struct NotionClient: Sendable {
     public static let version = "2026-03-11"
     public var http: ConnectorHTTP
-    public var token: @Sendable () throws -> String
+    public var token: @Sendable () async throws -> String
     public var maxWait: TimeInterval = 10
     static let base = "https://api.notion.com/v1"
 
-    public init(session: URLSession = .shared, token: @escaping @Sendable () throws -> String) {
+    public init(session: URLSession = .shared, token: @escaping @Sendable () async throws -> String) {
         http = ConnectorHTTP(allowedHosts: ["api.notion.com"], session: session)
         self.token = token
     }
@@ -31,7 +31,7 @@ public struct NotionClient: Sendable {
     func call(_ path: String, method: String = "GET", body: JSONValue? = nil, query: [URLQueryItem] = []) async throws -> JSONValue {
         var c = URLComponents(string: Self.base + path)!
         if !query.isEmpty { c.queryItems = query }
-        let headers = ["Authorization": "Bearer \(try token())", "Notion-Version": Self.version]
+        let headers = ["Authorization": "Bearer \(try await token())", "Notion-Version": Self.version]
         do { return try await http.json(c.url!, method: method, headers: headers, body: body) } catch let ConnectorError.rateLimited(r) {
             try await Task.sleep(nanoseconds: UInt64(min(r ?? 1, maxWait) * 1_000_000_000))
             return try await http.json(c.url!, method: method, headers: headers, body: body)

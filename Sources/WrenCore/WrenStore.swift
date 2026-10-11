@@ -34,7 +34,13 @@ public final class WrenStore {
     ]
 
     public static var defaultDirectory: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        #if DEBUG
+        // Debug builds only: test against a throwaway folder instead of the real data.
+        if let dir = ProcessInfo.processInfo.environment["WREN_DEBUG_DATA_DIR"], dir.hasPrefix("/") {
+            return URL(fileURLWithPath: dir, isDirectory: true)
+        }
+        #endif
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Wren", isDirectory: true)
     }
 
