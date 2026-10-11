@@ -41,6 +41,20 @@ public extension WrenStore {
         try save()
     }
 
+    /// Makes a reminder repeat (or stop repeating). Stopping keeps the next occurrence as a one-off.
+    func setRepeat(_ c: Commitment, _ rule: RecurrenceRule?, calendar: Calendar = .current, now: Date = .now) throws {
+        try requirePending(c, "change how often to remind about")
+        c.recurrence = rule
+        c.reminderFromDeadline = false
+        if let rule {
+            c.nextReminderAt = rule.next(after: now, calendar: calendar)
+            log(c, .reminderScheduled, at: now, note: rule.label(calendar: calendar))
+        } else {
+            log(c, .edited, at: now, note: "stopped repeating")
+        }
+        try save()
+    }
+
     /// Recomputes the next occurrence of repeating reminders (after a time zone or clock change).
     @discardableResult
     func refreshRecurrences(calendar: Calendar = .current, now: Date = .now) throws -> Int {

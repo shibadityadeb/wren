@@ -28,7 +28,11 @@ struct CaptureView: View {
                             .foregroundStyle(state.recording ? Color.red : Color.secondary)
                     }
                     .buttonStyle(.borderless).font(.caption)
-                    .help("Or hold the push-to-talk shortcut")
+                    .help("Or press the voice shortcut, or say “Hey Wren”")
+                    if state.recording {
+                        Button("Cancel", role: .cancel) { cancel() }.buttonStyle(.borderless).font(.caption)
+                            .help("Stop listening without doing anything (Escape)")
+                    }
                 }
                 if !state.aiAvailable {
                     Button("Local AI not set up") { openAISetup() }.buttonStyle(.link).font(.caption)

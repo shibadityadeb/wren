@@ -38,10 +38,10 @@ public enum ChatGPTAccountState: Equatable, Sendable {
         switch self {
         case .notConnected: .available
         case .connecting: .connecting
-        case let .accountOnly(r): .partiallyConnected("\(title). \(r)")
+        case let .accountOnly(r): .missingPermissions("\(title). \(r)")
         case .planEnabled: .connected(account: [email, "Using ChatGPT plan"].compactMap { $0 }.joined(separator: " · "))
-        case let .reauthorizationRequired(r): .permissionDenied("\(title). \(r)")
-        case .usageLimitReached: .temporarilyUnavailable("\(title). \(reason ?? "")")
+        case let .reauthorizationRequired(r): .reauthorizationRequired(r)
+        case .usageLimitReached: .usageLimitReached(reason ?? "")
         case let .temporarilyUnavailable(r): .temporarilyUnavailable("\(title). \(r)")
         }
     }

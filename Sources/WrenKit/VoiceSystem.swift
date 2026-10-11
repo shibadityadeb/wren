@@ -28,38 +28,20 @@ final class SystemVoicePermissions: VoicePermissions {
     var hasMicrophone: Bool { AVCaptureDevice.default(for: .audio) != nil }
 }
 
-/// Records to a temporary file while the shortcut is held.
+/// Live microphone audio into Apple's speech recogniser, on-device only (`requiresOnDeviceRecognition`):
+/// audio never leaves the Mac, and Wren refuses to run if the on-device model isn't installed.
+/// Each `start()` is a fresh recognition; `stop()` turns the microphone off.
 @MainActor
-final class SystemRecorder: AudioRecording {
-    private var recorder: AVAudioRecorder?
-    private var url: URL?
-
-    func start() throws {
-        guard AVCaptureDevice.default(for: .audio) != nil else { throw VoiceError.noMicrophone }
-        let u = FileManager.default.temporaryDirectory.appendingPathComponent("wren-voice-\(UUID().uuidString).caf")
-        let settings: [String: Any] = [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 16_000, AVNumberOfChannelsKey: 1,
-                                       AVLinearPCMBitDepthKey: 16, AVLinearPCMIsFloatKey: false]
-        let r = try AVAudioRecorder(url: u, settings: settings)
-        guard r.record() else { throw VoiceError.recordingFailed("the microphone didn't start") }
-        recorder = r; url = u
-    }
-
-    func stop() -> (URL, TimeInterval)? {
-        guard let r = recorder, let u = url else { return nil }
-        let d = r.currentTime
-        r.stop(); recorder = nil; url = nil
-        return (u, d)
-    }
-
-    func cancel() {
-        recorder?.stop()
-        if let url { try? FileManager.default.removeItem(at: url) }
-        recorder = nil; url = nil
-    }
-}
-
-/// Apple Speech, on-device only (`requiresOnDeviceRecognition`). Refuses server recognition.
-struct OnDeviceTranscriber: SpeechTranscribing {
+final class LiveSpeechStream: SpeechStreaming {
+    var onTranscript: ((String) -> Void)?
+    var onEnded: ((VoiceError?) -> Void)?
+    private(set) var isRunning = false
+    private let engine = AVAudioEngine()
+    private var request: SFSpeechAudioBufferRecognitionRequest?
+    private var task: SFSpeechRecognitionTask?
+    private var generation = 0
+    private var startedAt = Date.distantPast
+    private var configObserver: NSObjectProtocol?
     var locale: Locale = .current
 
     static func availability(locale: Locale = .current) -> String? {
@@ -70,47 +52,111 @@ struct OnDeviceTranscriber: SpeechTranscribing {
         return r.isAvailable ? nil : "Speech recognition is temporarily unavailable."
     }
 
-    func transcribe(_ file: URL) async throws -> Transcript {
-        guard let r = SFSpeechRecognizer(locale: locale) else { throw VoiceError.onDeviceUnavailable(locale.identifier) }
-        guard r.supportsOnDeviceRecognition else { throw VoiceError.onDeviceUnavailable(locale.identifier) }
-        let req = SFSpeechURLRecognitionRequest(url: file)
+    func start() throws {
+        stop()
+        guard let r = SFSpeechRecognizer(locale: locale), r.supportsOnDeviceRecognition else { throw VoiceError.onDeviceUnavailable(locale.identifier) }
+        guard AVCaptureDevice.default(for: .audio) != nil else { throw VoiceError.noMicrophone }
+        let req = SFSpeechAudioBufferRecognitionRequest()
         req.requiresOnDeviceRecognition = true
-        req.shouldReportPartialResults = false
+        req.shouldReportPartialResults = true
         req.addsPunctuation = true
-        return try await withCheckedThrowingContinuation { c in
-            var done = false
-            r.recognitionTask(with: req) { result, error in
-                guard !done else { return }
-                if let error { done = true; c.resume(throwing: VoiceError.transcriptionFailed(error.localizedDescription)); return }
-                guard let result, result.isFinal else { return }
-                done = true
-                let segs = result.bestTranscription.segments
-                let conf = segs.isEmpty ? nil : Double(segs.map(\.confidence).reduce(0, +)) / Double(segs.count)
-                c.resume(returning: Transcript(text: result.bestTranscription.formattedString, confidence: conf, onDevice: true))
+        req.taskHint = .dictation
+        req.contextualStrings = ["Hey Wren", "Wren", "remind me", "snooze"]
+        let input = engine.inputNode
+        let format = input.outputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0 else { throw VoiceError.noMicrophone }
+        input.removeTap(onBus: 0)
+        input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in req.append(buffer) }
+        engine.prepare()
+        do { try engine.start() } catch {
+            input.removeTap(onBus: 0)
+            throw VoiceError.recordingFailed(error.localizedDescription)
+        }
+        generation += 1
+        let gen = generation
+        task = r.recognitionTask(with: req) { [weak self] result, error in
+            let text = result?.bestTranscription.formattedString
+            let final = result?.isFinal ?? false
+            let failure = error.map(Self.classify) ?? nil
+            let ended = error != nil || final
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self, gen == self.generation else { return }
+                    if let text, !text.isEmpty { self.onTranscript?(text) }
+                    if ended { self.finishTask(failure) }
+                }
             }
         }
+        request = req
+        startedAt = Date()
+        isRunning = true
+        // A new microphone, AirPods connecting, or a sample-rate change invalidates the engine.
+        configObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { guard let self, self.isRunning else { return }; self.finishTask(nil) }
+        }
+    }
+
+    /// "No speech" and cancellations are normal ends, not failures.
+    nonisolated static func classify(_ error: Error) -> VoiceError? {
+        let ns = error as NSError
+        if ns.domain == "kAFAssistantErrorDomain", [203, 209, 216, 1101, 1107, 1110].contains(ns.code) { return nil }
+        if ns.domain == NSCocoaErrorDomain, ns.code == NSUserCancelledError { return nil }
+        return .recordingFailed(ns.localizedDescription)
+    }
+
+    private func finishTask(_ failure: VoiceError?) {
+        let quick = Date().timeIntervalSince(startedAt) < 1
+        teardown()
+        // Avoid a tight restart loop when the recogniser ends immediately.
+        if quick && failure == nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in MainActor.assumeIsolated { self?.onEnded?(nil) } }
+        } else {
+            onEnded?(failure)
+        }
+    }
+
+    func stop() {
+        generation += 1
+        teardown()
+    }
+
+    private func teardown() {
+        if let o = configObserver { NotificationCenter.default.removeObserver(o) }
+        configObserver = nil
+        task?.cancel(); task = nil
+        request?.endAudio(); request = nil
+        if engine.isRunning { engine.stop() }
+        engine.inputNode.removeTap(onBus: 0)
+        isRunning = false
     }
 }
 
-/// Voice connector state from real macOS permissions and on-device availability.
+/// Voice connector state from real macOS permissions, on-device availability and the live session.
 @MainActor
 final class VoiceConnector: Connector {
     let descriptor = ConnectorCatalog.descriptor(.voice)
     let permissions: SystemVoicePermissions
+    /// The voice shortcut is on.
     var enabled: Bool
+    /// "Hey Wren" is on.
+    var wakeWord: Bool = false
+    /// The live session's phase, set by the app.
+    var phase: VoiceSession.Phase = .off
     init(permissions: SystemVoicePermissions, enabled: Bool) { self.permissions = permissions; self.enabled = enabled }
 
     var state: ConnectorState {
-        guard enabled else { return .available }
+        guard enabled || wakeWord else { return .available }
+        if case let .failed(e) = phase { return e == .microphoneDenied || e == .speechDenied ? .missingPermissions(e.localizedDescription) : .temporarilyUnavailable(e.localizedDescription) }
         if !permissions.hasMicrophone { return .temporarilyUnavailable("No microphone found.") }
-        if permissions.microphone == .denied || permissions.microphone == .restricted { return .permissionDenied(VoiceError.microphoneDenied.localizedDescription) }
-        if permissions.speech == .denied || permissions.speech == .restricted { return .permissionDenied(VoiceError.speechDenied.localizedDescription) }
-        if let problem = OnDeviceTranscriber.availability() { return .setupRequired(problem) }
+        if permissions.microphone == .denied || permissions.microphone == .restricted { return .missingPermissions(VoiceError.microphoneDenied.localizedDescription) }
+        if permissions.speech == .denied || permissions.speech == .restricted { return .missingPermissions(VoiceError.speechDenied.localizedDescription) }
+        if let problem = LiveSpeechStream.availability() { return .setupRequired(problem) }
         if permissions.microphone == .notDetermined || permissions.speech == .notDetermined {
-            return .partiallyConnected("Ready. macOS will ask for Microphone and Speech Recognition the first time you record.")
+            return .partiallyConnected("Ready. macOS will ask for Microphone and Speech Recognition the first time Wren listens.")
         }
-        return .connected(account: "On-device, \(Locale.current.identifier)")
+        let mode = phase == .listening ? "listening for “Hey Wren”" : (wakeWord ? "“Hey Wren” on" : "shortcut only")
+        return .connected(account: "On-device, \(Locale.current.identifier), \(mode)")
     }
     func refresh() async {}
-    func disconnect() async { enabled = false }
+    func disconnect() async { enabled = false; wakeWord = false }
 }

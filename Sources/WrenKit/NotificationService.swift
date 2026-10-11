@@ -6,7 +6,7 @@ import os
 /// Native notifications. Delivery is best effort: Focus modes, Do Not Disturb and
 /// System Settings can suppress banners, and Wren never claims otherwise.
 @MainActor
-final class NotificationService: NSObject, UNUserNotificationCenterDelegate, WrenNotifier {
+final class NotificationService: NSObject, UNUserNotificationCenterDelegate, WrenNotifier, ReminderNotificationCenter {
     enum Category: String { case reminder = "WREN_REMINDER", briefing = "WREN_BRIEFING", checkIn = "WREN_CHECKIN", checkInItem = "WREN_CHECKIN_ITEM" }
     enum Action: String {
         case done = "WREN_DONE", snoozeHour = "WREN_SNOOZE_1H", later = "WREN_LATER", tomorrow = "WREN_TOMORROW"
@@ -118,8 +118,53 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Wre
         return await add("pause-summary-\(Int(Date().timeIntervalSince1970))", content)
     }
 
+    /// Removes shown reminder notifications for an item (the immediate kind and the scheduled kinds).
     func withdrawReminder(id: UUID) {
-        center.removeDeliveredNotifications(withIdentifiers: ["reminder-\(id.uuidString)"])
+        let scheduledPrefix = ReminderScheduler.prefix + id.uuidString
+        center.getDeliveredNotifications { list in
+            let ids = list.map(\.request.identifier).filter { $0 == "reminder-\(id.uuidString)" || $0.hasPrefix(scheduledPrefix) }
+            if !ids.isEmpty { UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids) }
+        }
+    }
+
+    // MARK: ReminderNotificationCenter (requests macOS delivers on its own, even when Wren isn't running)
+
+    func isAuthorized() async -> Bool { await refreshStatus(); return canDeliverNow }
+
+    func pendingReminderIDs() async -> Set<String> {
+        Set(await center.pendingNotificationRequests().map(\.identifier).filter { $0.hasPrefix(ReminderScheduler.prefix) })
+    }
+
+    func schedule(_ r: ReminderRequest) async throws {
+        let content = UNMutableNotificationContent()
+        content.title = r.title
+        content.body = r.body
+        content.sound = .default
+        content.categoryIdentifier = Category.reminder.rawValue
+        content.userInfo = ["commitmentID": r.commitmentID.uuidString]
+        content.threadIdentifier = "reminders"
+        let trigger: UNCalendarNotificationTrigger
+        switch r.trigger {
+        case let .at(date):
+            // An exact instant: full date components in the current zone.
+            var comps = Calendar.current.dateComponents(in: TimeZone.current, from: date)
+            comps.nanosecond = nil
+            trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+        case let .repeating(comps):
+            // Wall-clock components only, so it follows daylight-saving and time-zone changes.
+            trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: true)
+        }
+        try await center.add(UNNotificationRequest(identifier: r.id, content: content, trigger: trigger))
+    }
+
+    func cancel(ids: [String]) {
+        center.removePendingNotificationRequests(withIdentifiers: ids)
+    }
+
+    /// Debug and diagnostics: pending reminder requests with their next fire dates.
+    func pendingReminderSummary() async -> [(String, Date?)] {
+        await center.pendingNotificationRequests().filter { $0.identifier.hasPrefix(ReminderScheduler.prefix) }
+            .map { ($0.identifier, ($0.trigger as? UNCalendarNotificationTrigger)?.nextTriggerDate()) }
     }
 
     func deliverInfo(_ title: String, _ body: String) async {

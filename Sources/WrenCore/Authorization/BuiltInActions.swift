@@ -12,9 +12,14 @@ public enum BuiltInAction {
     public static let applyInterpretation: ActionID = "item.applyInterpretation"
     public static let createReminder: ActionID = "reminder.create"
     public static let completeOccurrence: ActionID = "reminder.completeOccurrence"
+    public static let setRepeat: ActionID = "reminder.setRepeat"
     /// Parameters for `createReminder`.
     public static func createReminderParameters(text: String, title: String, when: ReminderWhen, source: CaptureSource) -> [String: JSONValue] {
         CreateReminderHandler.parameters(text: text, title: title, when: when, source: source)
+    }
+    /// Parameters for `setRepeat` (nil stops repeating).
+    public static func setRepeatParameters(_ rule: RecurrenceRule?) -> [String: JSONValue] {
+        rule.map { ["repeat": CreateReminderHandler.ruleParameter($0)] } ?? [:]
     }
     /// Hour used when a moved deadline has no time ("move it to Friday"). Set by the app from settings.
     @MainActor public static var defaultReminderHour: () -> Int = { 10 }
@@ -113,7 +118,16 @@ public enum BuiltInAction {
                 return c.nextReminderAt.map { "next \(WrenStore.stamp($0))" }
             },
             { c, _ in c.map { $0.status == .pending && ($0.recurrence == nil || ($0.nextReminderAt ?? .distantPast) > clock.now) } ?? false })
-        for (d, body, check) in defs + [occurrence] { broker.register(StoreHandler(descriptor: d, store: store, body: body, check: check)) }
+        let repeatDef: (ActionDescriptor, StoreHandler.Body, StoreHandler.Check) = (
+            .init(id: setRepeat, category: .localReversible, permission: .reminders, confirmation: .none,
+                  summary: "Change how often a reminder repeats", verification: "The stored repeat equals the request"),
+            { s, c, p in
+                let rule = CreateReminderHandler.rule(p)
+                try s.setRepeat(c, rule, calendar: clock.calendar, now: clock.now)
+                return rule.map { $0.label(calendar: clock.calendar) } ?? "no longer repeats"
+            },
+            { c, p in c?.recurrence == CreateReminderHandler.rule(p) })
+        for (d, body, check) in defs + [occurrence, repeatDef] { broker.register(StoreHandler(descriptor: d, store: store, body: body, check: check)) }
         broker.register(DeliverReminderHandler(store: store, notifier: notifier, clock: clock))
         broker.register(CreateReminderHandler(store: store, clock: clock))
         registerContextual(on: broker, store: store, clock: clock)
@@ -208,19 +222,24 @@ final class CreateReminderHandler: ActionHandler {
 
     static func when(_ p: [String: JSONValue]) -> ReminderWhen? {
         if let d = p.date("at") { return .once(d) }
-        if case let .object(o)? = p["repeat"], case let .number(h)? = o["hour"], case let .number(m)? = o["minute"] {
-            let days: [Int] = { if case let .array(a)? = o["weekdays"] { return a.compactMap { if case let .number(n) = $0 { Int(n) } else { nil } } }; return [] }()
-            return .repeating(RecurrenceRule(weekdays: days, hour: Int(h), minute: Int(m)))
-        }
-        return nil
+        return rule(p).map { .repeating($0) }
+    }
+
+    nonisolated static func rule(_ p: [String: JSONValue]) -> RecurrenceRule? {
+        guard case let .object(o)? = p["repeat"], case let .number(h)? = o["hour"], case let .number(m)? = o["minute"] else { return nil }
+        let days: [Int] = { if case let .array(a)? = o["weekdays"] { return a.compactMap { if case let .number(n) = $0 { Int(n) } else { nil } } }; return [] }()
+        return RecurrenceRule(weekdays: days, hour: Int(h), minute: Int(m))
+    }
+
+    nonisolated static func ruleParameter(_ r: RecurrenceRule) -> JSONValue {
+        .object(["weekdays": .array(r.weekdays.map { .number(Double($0)) }), "hour": .number(Double(r.hour)), "minute": .number(Double(r.minute))])
     }
 
     nonisolated static func parameters(text: String, title: String, when: ReminderWhen, source: CaptureSource) -> [String: JSONValue] {
         var p: [String: JSONValue] = ["text": .string(text), "title": .string(title), "source": .string(source.rawValue)]
         switch when {
         case let .once(d): p["at"] = .number(d.timeIntervalSince1970)
-        case let .repeating(r):
-            p["repeat"] = .object(["weekdays": .array(r.weekdays.map { .number(Double($0)) }), "hour": .number(Double(r.hour)), "minute": .number(Double(r.minute))])
+        case let .repeating(r): p["repeat"] = ruleParameter(r)
         }
         return p
     }

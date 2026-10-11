@@ -32,7 +32,7 @@ public enum Priority: Int, Codable, CaseIterable, Sendable, Comparable {
 }
 
 public enum CaptureSource: String, Codable, Sendable {
-    case hotkey, popover, manual, notificationReply, urlScheme
+    case hotkey, popover, manual, notificationReply, urlScheme, voice
 }
 
 /// Where the language model is in understanding a capture.

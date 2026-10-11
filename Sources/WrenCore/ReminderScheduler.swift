@@ -32,6 +32,7 @@ public struct ReconcileReport: Equatable, Sendable {
     public var unchanged = 0
     public var failed: [String] = []
     public var paused = false
+    public init() {}
 }
 
 /// Keeps macOS's pending notifications equal to what Wren's stored reminders say, so reminders

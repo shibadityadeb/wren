@@ -57,7 +57,8 @@ struct SettingsView: View {
                             Spacer()
                             Button("Login Items…") { SystemLoginItemService.openSystemSettings() }.controlSize(.small)
                         }
-                        Text("Reminders and daily summaries only arrive while Wren is running.").font(.caption).foregroundStyle(.secondary)
+                        Text("Closing Wren's window keeps it running in the menu bar, so “Hey Wren”, the shortcuts, the briefing and the check-in keep working. Quit with ⌘Q or Wren › Quit Wren to stop everything, including the microphone. Reminders are scheduled with macOS, so they still arrive after you quit.")
+                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
 
                     section("Permissions") {
@@ -167,14 +168,15 @@ struct SettingsView: View {
                                 Button("Allow…") { model.requestNotificationPermission() }
                             } else {
                                 Button("Open System Settings") {
-                                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!)
+                                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(AppIdentity.bundleID)")!)
                                 }
                             }
                         }
                         Stepper("Date-only deadlines remind at \(reminderHour):00", value: $reminderHour, in: 6...21)
                             .onChange(of: reminderHour) { model.settings.dateOnlyReminderHour = reminderHour }
-                        Text("macOS may hide banners during Focus or Do Not Disturb. Reminders only fire while Wren is running.")
-                            .font(.caption).foregroundStyle(.secondary)
+                        Text(reminderSyncText).font(.caption).foregroundStyle(model.reminderSync.authorized && model.reminderSync.failed.isEmpty ? Color.secondary : Color.orange)
+                        Text("Reminders are handed to macOS ahead of time, so they arrive even when Wren isn't running. macOS may hide banners during Focus or Do Not Disturb. Briefings and check-ins need Wren running.")
+                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
 
                     section("Your data") {
@@ -200,6 +202,14 @@ struct SettingsView: View {
         }
         .onAppear { reminderHour = model.settings.dateOnlyReminderHour; model.refreshLoginStatus(); model.refreshBackups() }
         .onDisappear(perform: stopRecording)
+    }
+
+    var reminderSyncText: String {
+        let r = model.reminderSync
+        if !r.authorized { return "Notifications are off, so reminders can only show inside Wren." }
+        if !r.failed.isEmpty { return "macOS didn't accept \(r.failed.count) reminder notification\(r.failed.count == 1 ? "" : "s"). Wren will retry." }
+        let n = model.pending.filter { !$0.scheduledNotificationIDs.isEmpty }.count
+        return n == 0 ? "No reminders scheduled." : "\(n) reminder\(n == 1 ? "" : "s") scheduled with macOS."
     }
 
     var notificationText: String {
