@@ -264,7 +264,7 @@ final class ChatGPTConnectorTests: XCTestCase {
 
     func testSignInAuthorizesPlanAndDiscoversModels() async throws {
         let c = make()
-        XCTAssertEqual(c.account, .notConnected); XCTAssertEqual(c.state.label, "Not connected")
+        XCTAssertEqual(c.account, .notConnected); XCTAssertEqual(c.state.label, "Available to connect")
         let opened = await signIn(c) { q in
             RouteStub.routes[SIWCFixture.tokenPath] = SIWCFixture.tokens(self.signer, nonce: q["nonce"]!)
             return "code=C1&state=\(q["state"]!)&client_id=oaiapp_123&scope=x"
@@ -296,7 +296,8 @@ final class ChatGPTConnectorTests: XCTestCase {
             return "code=C1&state=\(q["state"]!)&client_id=oaiapp_123"
         }
         XCTAssertEqual(c.account.title, "Account connected, plan usage not authorized")
-        guard case .partiallyConnected = c.state else { return XCTFail("\(c.state)") }
+        guard case .missingPermissions = c.state else { return XCTFail("\(c.state)") }
+        XCTAssertEqual(c.state.label, "Missing permissions")
         XCTAssertNotEqual(grants[.externalAI], true)
         XCTAssertFalse(RouteStub.requests.contains { $0.0.url?.path == "/v1/models" }, "no plan calls without the plan permission")
         do { _ = try await c.respond(model: "gpt-fast", input: "x", origin: .user(.popover)); XCTFail() }
@@ -352,8 +353,8 @@ final class ChatGPTConnectorTests: XCTestCase {
         do { _ = try await c.respond(model: "gpt-fast", input: "x", origin: .user(.popover)); XCTFail() }
         catch { XCTAssertEqual(error as? ChatGPTError, .usageLimitReached) }
         XCTAssertEqual(c.account, .usageLimitReached)
-        XCTAssertEqual(c.state.label, "Temporarily unavailable")
-        XCTAssertTrue(c.state.detail!.hasPrefix("Usage limit reached"))
+        XCTAssertEqual(c.state.label, "Usage limit reached")
+        XCTAssertTrue(c.state.detail!.contains("Manage usage"))
         // Never falls back to anything else: exactly one request was made.
         XCTAssertEqual(RouteStub.requests.filter { $0.0.url?.path == "/v1/responses" }.count, 1)
 
@@ -408,7 +409,7 @@ final class ChatGPTConnectorTests: XCTestCase {
         RouteStub.routes[SIWCFixture.tokenPath] = RouteStub.json(#"{"error":"refresh_token_reused"}"#, 400)
         await c.refresh()
         XCTAssertEqual(c.account.title, "Reauthorization required")
-        guard case .permissionDenied = c.state else { return XCTFail() }
+        guard case .reauthorizationRequired = c.state else { return XCTFail() }
         XCTAssertNil(c.connection?.accessToken); XCTAssertNil(c.connection?.refreshToken)
         XCTAssertEqual(c.email, "me@example.com", "who to reconnect is kept, not the tokens")
         XCTAssertEqual(grants[.externalAI], false)
@@ -526,10 +527,10 @@ final class NotionOAuthTests: XCTestCase {
     func testDeniedAndRejectedCodeStoreNothing() async {
         let c = make()
         await connect(c) { "error=access_denied&state=\($0)" }
-        guard case .permissionDenied = c.state else { return XCTFail("\(c.state)") }
+        guard case .missingPermissions = c.state else { return XCTFail("\(c.state)") }
         RouteStub.routes["/notion/token"] = RouteStub.json(#"{"error":"invalid_grant","error_description":"bad code"}"#, 400)
         await connect(c) { "code=old&state=\($0)" }
-        guard case .permissionDenied = c.state else { return XCTFail("\(c.state)") }
+        guard case .reauthorizationRequired = c.state else { return XCTFail("\(c.state)") }
         XCTAssertNil(c.notion.tokens)
         XCTAssertFalse(RouteStub.requests.contains { $0.0.url?.path == "/v1/users/me" })
     }
@@ -565,12 +566,12 @@ final class NotionOAuthTests: XCTestCase {
         try c.notion.save(NotionTokens(accessToken: "x", refreshToken: "NR2", expiresAt: Date().addingTimeInterval(-5)))
         RouteStub.routes["/notion/refresh"] = RouteStub.json(#"{"error":"invalid_grant"}"#, 400)
         await c.refresh()
-        guard case .permissionDenied = c.state else { return XCTFail("refresh failure → reconnect: \(c.state)") }
+        guard case .reauthorizationRequired = c.state else { return XCTFail("refresh failure → reconnect: \(c.state)") }
 
         try c.notion.save(NotionTokens(accessToken: "x"))
         RouteStub.routes["/v1/users/me"] = RouteStub.json(#"{"object":"error","code":"unauthorized"}"#, 401)
         await c.refresh()
-        guard case .permissionDenied = c.state else { return XCTFail("revoked in Notion → reconnect") }
+        guard case .reauthorizationRequired = c.state else { return XCTFail("revoked in Notion → reconnect") }
 
         RouteStub.failures["/v1/users/me"] = .networkConnectionLost
         await c.refresh()
@@ -588,13 +589,13 @@ final class NotionOAuthTests: XCTestCase {
 @MainActor
 final class ProviderConfigTests: XCTestCase {
     override func setUp() { RouteStub.reset() }
-    let google = GoogleOAuthConfig(clientID: "1234567890-abcdefghijklmnopqrstuvwxyz.apps.googleusercontent.com", clientSecret: "s")
+    let google = GoogleOAuthConfig(clientID: "1234567890-abcdefghijklmnopqrstuvwxyz.apps.googleusercontent.com")
 
     func testReadsOnlyValidInjectedValues() {
         XCTAssertEqual(ProviderConfig.from([:]), ProviderConfig())
         XCTAssertNil(ProviderConfig.from(["WrenGoogleClientID": "$(WREN_GOOGLE_CLIENT_ID)"]).google, "unsubstituted placeholder")
         XCTAssertNil(ProviderConfig.from(["WrenGoogleClientID": "nonsense"]).google)
-        let full = ProviderConfig.from(["WrenGoogleClientID": google.clientID, "WrenGoogleClientSecret": "s",
+        let full = ProviderConfig.from(["WrenGoogleClientID": google.clientID,
                                         "WrenNotionClientID": "1f2d3c4b-0000-4000-8000-123456789abc", "WrenNotionOAuthRelay": "https://relay.wren.example"])
         XCTAssertEqual(full.google, google)
         XCTAssertEqual(full.notion?.relay.host, "relay.wren.example")
@@ -607,7 +608,7 @@ final class ProviderConfigTests: XCTestCase {
         let n = NotionConnector(config: nil, store: store, statusStore: MemoryStatusStore(), session: stub())
         for s in [g.state, n.state] {
             guard case .notAvailableInBuild = s else { return XCTFail("\(s)") }
-            XCTAssertEqual(s.label, "Not available in this build"); XCTAssertEqual(s.bucket, .unavailable)
+            XCTAssertEqual(s.label, "Maintainer setup required"); XCTAssertEqual(s.bucket, .unavailable)
             let text = s.detail!.lowercased()
             XCTAssertTrue(text.contains("nothing for you to set up"))
             for forbidden in ["client id", "secret", "api key", "token", "google cloud", "environment"] { XCTAssertFalse(text.contains(forbidden), forbidden) }
@@ -641,13 +642,13 @@ final class ProviderConfigTests: XCTestCase {
 
         try g.google.save(OAuthTokens(accessToken: "A", refreshToken: "R", expiresAt: far, scope: ConnectorCatalog.calendarScope, account: nil))
         await g.refresh()
-        guard case let .permissionDenied(m) = g.state else { return XCTFail("\(g.state)") }
+        guard case let .missingPermissions(m) = g.state else { return XCTFail("\(g.state)") }
         XCTAssertTrue(m.contains("Missing permission"), m)
 
         try g.google.save(OAuthTokens(accessToken: "A", refreshToken: "R", expiresAt: Date().addingTimeInterval(-5), scope: ConnectorCatalog.gmailScope, account: nil))
         RouteStub.routes["/token"] = RouteStub.json(#"{"error":"invalid_grant","error_description":"Token has been expired or revoked."}"#, 400)
         await g.refresh()
-        guard case .permissionDenied = g.state else { return XCTFail("revoked/expired refresh → reconnect") }
+        guard case .reauthorizationRequired = g.state else { return XCTFail("revoked/expired refresh → reconnect") }
 
         try g.google.save(OAuthTokens(accessToken: "A", refreshToken: "R", expiresAt: far, scope: ConnectorCatalog.gmailScope, account: nil))
         RouteStub.failures["/gmail/v1/users/me/profile"] = .notConnectedToInternet

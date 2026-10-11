@@ -10,6 +10,19 @@ public enum BuiltInAction {
     public static let scheduleReminder: ActionID = "reminder.schedule"
     public static let deliverReminder: ActionID = "reminder.deliver"
     public static let applyInterpretation: ActionID = "item.applyInterpretation"
+    public static let createReminder: ActionID = "reminder.create"
+    public static let completeOccurrence: ActionID = "reminder.completeOccurrence"
+    public static let setRepeat: ActionID = "reminder.setRepeat"
+    /// Parameters for `createReminder`.
+    public static func createReminderParameters(text: String, title: String, when: ReminderWhen, source: CaptureSource) -> [String: JSONValue] {
+        CreateReminderHandler.parameters(text: text, title: title, when: when, source: source)
+    }
+    /// Parameters for `setRepeat` (nil stops repeating).
+    public static func setRepeatParameters(_ rule: RecurrenceRule?) -> [String: JSONValue] {
+        rule.map { ["repeat": CreateReminderHandler.ruleParameter($0)] } ?? [:]
+    }
+    /// Hour used when a moved deadline has no time ("move it to Friday"). Set by the app from settings.
+    @MainActor public static var defaultReminderHour: () -> Int = { 10 }
     // Reserved for later phases: declared so policy and tests cover them, no handlers yet.
     public static let readEmail: ActionID = "email.read"
     public static let archiveEmail: ActionID = "email.archive"
@@ -96,8 +109,27 @@ public enum BuiltInAction {
              },
              { c, p in (try? p.interpretation()).map { c?.kind == $0.kind && c?.title == $0.title } ?? false }),
         ]
-        for (d, body, check) in defs { broker.register(StoreHandler(descriptor: d, store: store, body: body, check: check)) }
+        let occurrence: (ActionDescriptor, StoreHandler.Body, StoreHandler.Check) = (
+            .init(id: completeOccurrence, category: .localReversible, permission: .manageItems, confirmation: .none,
+                  summary: "Mark this time done (the reminder keeps repeating)", verification: "The next occurrence is later than now"),
+            { s, c, _ in
+                try s.completeOccurrence(c, calendar: clock.calendar, now: clock.now)
+                notifier?.withdrawReminder(id: c.id)
+                return c.nextReminderAt.map { "next \(WrenStore.stamp($0))" }
+            },
+            { c, _ in c.map { $0.status == .pending && ($0.recurrence == nil || ($0.nextReminderAt ?? .distantPast) > clock.now) } ?? false })
+        let repeatDef: (ActionDescriptor, StoreHandler.Body, StoreHandler.Check) = (
+            .init(id: setRepeat, category: .localReversible, permission: .reminders, confirmation: .none,
+                  summary: "Change how often a reminder repeats", verification: "The stored repeat equals the request"),
+            { s, c, p in
+                let rule = CreateReminderHandler.rule(p)
+                try s.setRepeat(c, rule, calendar: clock.calendar, now: clock.now)
+                return rule.map { $0.label(calendar: clock.calendar) } ?? "no longer repeats"
+            },
+            { c, p in c?.recurrence == CreateReminderHandler.rule(p) })
+        for (d, body, check) in defs + [occurrence, repeatDef] { broker.register(StoreHandler(descriptor: d, store: store, body: body, check: check)) }
         broker.register(DeliverReminderHandler(store: store, notifier: notifier, clock: clock))
+        broker.register(CreateReminderHandler(store: store, clock: clock))
         registerContextual(on: broker, store: store, clock: clock)
     }
 }
@@ -155,18 +187,82 @@ final class DeliverReminderHandler: ActionHandler {
     func execute(_ r: ActionRequest) async throws -> HandlerOutcome {
         guard let id = UUID(uuidString: r.target.id), let c = try store.item(id: id) else { throw BrokerError.targetMissing }
         guard ReminderPolicy.isDue(c, now: clock.now) else { throw BrokerError.refused("Not due.") }
+        // macOS already held a scheduled notification for exactly this time: record it, don't repeat it.
+        if r.parameters.bool("byMacOS") == true {
+            let at = c.nextReminderAt ?? clock.now
+            try store.markReminderSent(c, now: clock.now, note: "shown by macOS at \(WrenStore.stamp(at))", calendar: clock.calendar)
+            return HandlerOutcome(detail: "scheduled notification shown by macOS")
+        }
         guard let notifier else { throw BrokerError.notificationsUnavailable }
         let late = (c.nextReminderAt.map { clock.now.timeIntervalSince($0) } ?? 0) > 5 * 60
         guard await notifier.deliverReminder(ReminderPayload(id: c.id, title: c.title, body: ReminderPayload.body(for: c), late: late)) else {
             throw BrokerError.notificationsUnavailable
         }
-        try store.markReminderSent(c, now: clock.now)
+        try store.markReminderSent(c, now: clock.now, calendar: clock.calendar)
         return HandlerOutcome(detail: late ? "late delivery" : nil)
     }
 
     func verify(_ r: ActionRequest) async -> Verification {
-        guard let id = UUID(uuidString: r.target.id), let c = try? store.item(id: id) else { return .mismatch }
-        return c.lastReminderAt != nil && c.nextReminderAt == nil ? .verified : .mismatch
+        guard let id = UUID(uuidString: r.target.id), let c = try? store.item(id: id), let last = c.lastReminderAt else { return .mismatch }
+        // One-off: nothing left to send. Repeating: moved on to a later occurrence.
+        return c.nextReminderAt == nil || c.nextReminderAt! > last ? .verified : .mismatch
+    }
+}
+
+/// Creates a reminder the user asked for in so many words ("remind me to … tomorrow at 10").
+/// The target id is the new item's id, chosen before it exists, so the audit entry points at it.
+@MainActor
+final class CreateReminderHandler: ActionHandler {
+    let descriptor = ActionDescriptor(id: BuiltInAction.createReminder, category: .localReversible, permission: .reminders,
+                                      confirmation: .none, summary: "Create a reminder",
+                                      verification: "The item exists and its next reminder equals the requested time")
+    let store: WrenStore
+    let clock: WrenClock
+    init(store: WrenStore, clock: WrenClock) { self.store = store; self.clock = clock }
+
+    static func when(_ p: [String: JSONValue]) -> ReminderWhen? {
+        if let d = p.date("at") { return .once(d) }
+        return rule(p).map { .repeating($0) }
+    }
+
+    nonisolated static func rule(_ p: [String: JSONValue]) -> RecurrenceRule? {
+        guard case let .object(o)? = p["repeat"], case let .number(h)? = o["hour"], case let .number(m)? = o["minute"] else { return nil }
+        let days: [Int] = { if case let .array(a)? = o["weekdays"] { return a.compactMap { if case let .number(n) = $0 { Int(n) } else { nil } } }; return [] }()
+        return RecurrenceRule(weekdays: days, hour: Int(h), minute: Int(m))
+    }
+
+    nonisolated static func ruleParameter(_ r: RecurrenceRule) -> JSONValue {
+        .object(["weekdays": .array(r.weekdays.map { .number(Double($0)) }), "hour": .number(Double(r.hour)), "minute": .number(Double(r.minute))])
+    }
+
+    nonisolated static func parameters(text: String, title: String, when: ReminderWhen, source: CaptureSource) -> [String: JSONValue] {
+        var p: [String: JSONValue] = ["text": .string(text), "title": .string(title), "source": .string(source.rawValue)]
+        switch when {
+        case let .once(d): p["at"] = .number(d.timeIntervalSince1970)
+        case let .repeating(r): p["repeat"] = ruleParameter(r)
+        }
+        return p
+    }
+
+    func execute(_ r: ActionRequest) async throws -> HandlerOutcome {
+        guard r.target.kind == "commitment", let id = UUID(uuidString: r.target.id) else { throw BrokerError.badParameter("target") }
+        guard try store.item(id: id) == nil else { throw BrokerError.refused("That reminder already exists.") }
+        guard let text = r.parameters.string("text"), let title = r.parameters.string("title"), !title.isEmpty else { throw BrokerError.badParameter("title") }
+        guard let when = Self.when(r.parameters) else { throw BrokerError.badParameter("when") }
+        let source = r.parameters.string("source").flatMap(CaptureSource.init(rawValue:)) ?? .hotkey
+        let c = try store.createReminder(text: text, title: title, when: when, source: source, id: id, calendar: clock.calendar, now: clock.now)
+        switch when {
+        case let .once(d): return HandlerOutcome(detail: "for \(WrenStore.stamp(d))")
+        case let .repeating(rule): return HandlerOutcome(detail: rule.label(calendar: clock.calendar) + (c.nextReminderAt.map { ", first \(WrenStore.stamp($0))" } ?? ""))
+        }
+    }
+
+    func verify(_ r: ActionRequest) async -> Verification {
+        guard let id = UUID(uuidString: r.target.id), let c = try? store.item(id: id), let when = Self.when(r.parameters) else { return .mismatch }
+        switch when {
+        case let .once(d): return c.nextReminderAt == d && c.status == .pending ? .verified : .mismatch
+        case let .repeating(rule): return c.recurrence == rule && c.nextReminderAt != nil ? .verified : .mismatch
+        }
     }
 }
 

@@ -21,8 +21,12 @@ public enum ConnectorState: Equatable, Sendable {
     case partiallyConnected(String)
     /// Was working; the last check failed for a reason that may pass.
     case temporarilyUnavailable(String)
-    /// The provider or macOS refused access (revoked, denied).
-    case permissionDenied(String)
+    /// A permission Wren needs wasn't granted (unticked on a consent screen, or refused in macOS).
+    case missingPermissions(String)
+    /// The sign-in expired or was revoked; connecting again fixes it.
+    case reauthorizationRequired(String)
+    /// The provider's allowance for this account is used up for now.
+    case usageLimitReached(String)
     /// You disconnected it; credentials and cached data were removed.
     case disconnected
     /// Not implemented yet.
@@ -30,22 +34,25 @@ public enum ConnectorState: Equatable, Sendable {
 
     public var label: String {
         switch self {
-        case .available: "Not connected"
+        case .available: "Available to connect"
         case .setupRequired: "Setup required"
-        case .notAvailableInBuild: "Not available in this build"
+        case .notAvailableInBuild: "Maintainer setup required"
         case .connecting: "Connecting"
         case .connected: "Connected"
         case .partiallyConnected: "Partially connected"
         case .temporarilyUnavailable: "Temporarily unavailable"
-        case .permissionDenied: "Permission denied"
+        case .missingPermissions: "Missing permissions"
+        case .reauthorizationRequired: "Reauthorization required"
+        case .usageLimitReached: "Usage limit reached"
         case .disconnected: "Disconnected"
-        case .planned: "Planned"
+        case .planned: "Not implemented"
         }
     }
 
     public var detail: String? {
         switch self {
-        case let .setupRequired(s), let .notAvailableInBuild(s), let .partiallyConnected(s), let .temporarilyUnavailable(s), let .permissionDenied(s): s
+        case let .setupRequired(s), let .notAvailableInBuild(s), let .partiallyConnected(s), let .temporarilyUnavailable(s), let .missingPermissions(s),
+             let .reauthorizationRequired(s), let .usageLimitReached(s): s
         case let .connected(a): a
         default: nil
         }
@@ -61,8 +68,8 @@ public enum ConnectorState: Equatable, Sendable {
     public var bucket: Bucket {
         switch self {
         case .connected, .partiallyConnected: .connected
-        case .setupRequired, .connecting: .needsSetup
-        case .temporarilyUnavailable, .permissionDenied, .notAvailableInBuild: .unavailable
+        case .setupRequired, .connecting, .missingPermissions, .reauthorizationRequired: .needsSetup
+        case .temporarilyUnavailable, .usageLimitReached, .notAvailableInBuild: .unavailable
         case .available, .disconnected: .notConnected
         case .planned: .planned
         }
@@ -153,14 +160,15 @@ public enum ConnectorCatalog {
               cleanup: "Disconnecting revokes the sign-in with OpenAI and deletes the tokens from the Keychain. You can also remove Wren under ChatGPT Settings.",
               hosts: ["auth.openai.com", "api.openai.com", "chatgpt.com"], isPlanned: false),
         .init(id: .voice, name: "Voice", systemImage: "mic",
-              summary: "Hold a shortcut and speak. Apple's on-device speech recognition turns it into text, which goes through the same preview as typing.",
+              summary: "Say “Hey Wren” or press the voice shortcut, then say what you need, for example “remind me to call Sam tomorrow at 10 AM”. Wren shows what it heard and what it did.",
               auth: .macOSPermission(["Microphone", "Speech Recognition"]),
-              capabilities: [.init(name: "Push-to-talk recording", implemented: true, external: false),
+              capabilities: [.init(name: "“Hey Wren” wake phrase (opt-in)", implemented: true, external: false),
+                             .init(name: "Voice shortcut (default ⌥⇧ Space)", implemented: true, external: false),
                              .init(name: "On-device transcription", implemented: true, external: false),
-                             .init(name: "Always listening", implemented: false, external: false)],
+                             .init(name: "Run the spoken command (reminders, snooze, questions)", implemented: true, external: false)],
               permissions: [.microphone],
-              privacy: "Audio is recorded only while you hold the key, transcribed on this Mac (on-device mode is required; Wren refuses server recognition), and the temporary recording is deleted right after.",
-              cleanup: "Turning it off stops recording. Revoke the macOS permissions in System Settings › Privacy & Security.",
+              privacy: "Speech is recognised on this Mac (on-device mode is required; Wren refuses server recognition) and no audio is stored or sent anywhere. With “Hey Wren” on, the microphone stays open in the background and only the wake phrase starts a command; recording stops when the command ends.",
+              cleanup: "Turning it off stops listening. Quitting Wren stops the microphone. Revoke the macOS permissions in System Settings › Privacy & Security.",
               hosts: [], isPlanned: false),
         .init(id: .gmail, name: "Gmail", systemImage: "envelope",
               summary: "Read-only: search mail, flag what needs attention (requests, deadlines, bills, interviews, security alerts), summarise it, add it to the morning briefing, and suggest tasks you review first.",

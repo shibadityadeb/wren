@@ -11,6 +11,8 @@ struct CaptureView: View {
     var saveAsNew: (String) -> Void = { _ in }
     var openAISetup: () -> Void = {}
     var toggleVoice: () -> Void = {}
+    /// Actions on the Ask card (run, connect, retry, copy…).
+    var askAction: (AskAction) -> Void = { _ in }
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -28,7 +30,11 @@ struct CaptureView: View {
                             .foregroundStyle(state.recording ? Color.red : Color.secondary)
                     }
                     .buttonStyle(.borderless).font(.caption)
-                    .help("Or hold the push-to-talk shortcut")
+                    .help("Or press the voice shortcut, or say “Hey Wren”")
+                    if state.recording {
+                        Button("Cancel", role: .cancel) { cancel() }.buttonStyle(.borderless).font(.caption)
+                            .help("Stop listening without doing anything (Escape)")
+                    }
                 }
                 if !state.aiAvailable {
                     Button("Local AI not set up") { openAISetup() }.buttonStyle(.link).font(.caption)
@@ -40,18 +46,29 @@ struct CaptureView: View {
                 .font(.system(size: 20))
                 .focused($focused)
                 .onSubmit {
-                    if case let .proposal(p)? = state.reply { confirm(p) } else { submit(state.text) }
+                    // Return does what the card on screen says, once. While a request is running it does nothing.
+                    if let card = state.ask {
+                        if let a = card.primary { askAction(a) }
+                    } else if case let .proposal(p)? = state.reply { confirm(p) } else { submit(state.text) }
                 }
-                .onChange(of: state.text) { if state.reply != nil && !state.busy { state.reply = nil } }
+                .onChange(of: state.text) {
+                    guard !state.busy else { return }
+                    if state.reply != nil { state.reply = nil }
+                    // Editing the text after a card was shown starts a new request.
+                    if let card = state.ask, card.phase != .sending, state.text != card.request.original { state.ask = nil }
+                }
             if let v = state.voiceStatus {
                 HStack(spacing: 6) {
                     if state.recording { Circle().fill(Color.red).frame(width: 8, height: 8) }
                     Text(v).font(.caption).foregroundStyle(state.recording ? Color.red : Color.secondary)
                 }
             }
-            if let reply = state.reply { replyView(reply) }
+            if let card = state.ask { AskCardView(card: card, aiAvailable: state.aiAvailable, act: askAction) }
+            else if let reply = state.reply { replyView(reply) }
             HStack(spacing: 14) {
-                if case .proposal? = state.reply { hint("return", "Confirm") } else { hint("return", "Save") }
+                if let card = state.ask {
+                    if let p = card.primary { hint("return", p.title(card)) }
+                } else if case .proposal? = state.reply { hint("return", "Confirm") } else { hint("return", "Save") }
                 hint("esc", "Close")
                 Spacer()
                 if state.busy { ProgressView().controlSize(.small) }
@@ -131,4 +148,86 @@ final class CaptureState {
     var recording = false
     var voiceStatus: String?
     var busy = false
+    /// The Ask card, when the input is a request for an assistant. Shown instead of `reply`.
+    var ask: AskCard?
+}
+
+/// "Ask ChatGPT · Question: …" with its state and only the actions that make sense right now.
+struct AskCardView: View {
+    let card: AskCard
+    let aiAvailable: Bool
+    let act: (AskAction) -> Void
+
+    var heading: String {
+        switch card.destination {
+        case .chatgpt: "Ask ChatGPT"
+        case .local: "Ask local AI"
+        case .choose: "Question for an assistant"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(heading, systemImage: card.destination == .local ? "cpu" : "bubble.left.and.text.bubble.right").font(.callout.weight(.semibold))
+            Text("\(card.request.prompt.hasSuffix("?") ? "Question" : "Request"): \(card.request.prompt)").font(.callout).textSelection(.enabled)
+            if let note = card.note { Text(note).font(.caption).foregroundStyle(.secondary) }
+            switch card.phase {
+            case .ready:
+                if card.destination == .choose {
+                    Text("You didn't name an assistant. Choose who answers, or keep it as a note.").font(.caption).foregroundStyle(.secondary)
+                    HStack {
+                        if aiAvailable { Button("Ask local AI (on this Mac)") { act(.run(.local)) } }
+                        Button("Ask ChatGPT") { act(.run(.chatgpt)) }
+                        Button("Save as a note") { act(.saveAsNote) }
+                    }.controlSize(.small)
+                } else {
+                    Text("Sends only this text, using your ChatGPT plan.").font(.caption).foregroundStyle(.secondary)
+                    HStack { Button("Ask ChatGPT") { act(.run(.chatgpt)) }; Button("Save as a note instead") { act(.saveAsNote) } }.controlSize(.small)
+                }
+            case .sending:
+                HStack(spacing: 6) { ProgressView().controlSize(.small); Text(card.destination == .local ? "Asking the local model…" : "Asking ChatGPT…").font(.caption) }
+                if !card.streamed.isEmpty { answerText(card.streamed) }
+            case let .answered(text, source, _):
+                answerText(text)
+                Text(source).font(.caption2).foregroundStyle(.tertiary)
+                HStack { Button("Copy answer") { act(.copyAnswer) }; Button("Open in Wren") { act(.openAnswer) } }.controlSize(.small)
+            case let .partial(text, source, _, message):
+                answerText(text)
+                Text(message).font(.caption).foregroundStyle(.orange)
+                Text(source).font(.caption2).foregroundStyle(.tertiary)
+                HStack { Button("Try again") { act(.run(card.destination == .choose ? .chatgpt : card.destination)) }; Button("Copy answer") { act(.copyAnswer) } }.controlSize(.small)
+            case .notConnected:
+                Text("ChatGPT isn't connected. Connect your account, then ask; your question stays here.").font(.caption).foregroundStyle(.orange)
+                HStack { Button("Connect ChatGPT") { act(.connect) }; Button("Save as a note instead") { act(.saveAsNote) } }.controlSize(.small)
+            case .connecting:
+                HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Finish signing in to ChatGPT in your browser…").font(.caption) }
+            case let .reconnect(m):
+                Text(m).font(.caption).foregroundStyle(.orange)
+                Button("Reconnect ChatGPT") { act(.connect) }.controlSize(.small)
+            case let .needsPermission(m):
+                Text(m).font(.caption).foregroundStyle(.orange)
+                Button("Allow plan usage…") { act(.allowPlan) }.controlSize(.small)
+            case let .usageLimit(m):
+                Text(m).font(.caption).foregroundStyle(.orange)
+                HStack { Button("Manage usage") { act(.manageUsage) }; Button("Try again") { act(.run(.chatgpt)) } }.controlSize(.small)
+            case let .needsReview(m):
+                Text(m).font(.caption).foregroundStyle(.orange)
+                Button("Review in Delegate") { act(.openDelegate) }.controlSize(.small)
+            case let .failed(m, retryable):
+                Text(m).font(.caption).foregroundStyle(.orange)
+                HStack {
+                    if retryable { Button("Try again") { act(.run(card.destination == .choose ? .chatgpt : card.destination)) } }
+                    Button("Save as a note instead") { act(.saveAsNote) }
+                }.controlSize(.small)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    func answerText(_ t: String) -> some View {
+        ScrollView { Text(t).font(.callout).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
+            .frame(maxHeight: 260)
+    }
 }

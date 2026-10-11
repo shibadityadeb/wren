@@ -13,7 +13,6 @@ public struct ProviderConfig: Equatable, Sendable {
 
     public enum Key {
         public static let googleClientID = "WrenGoogleClientID"
-        public static let googleClientSecret = "WrenGoogleClientSecret"
         public static let notionClientID = "WrenNotionClientID"
         public static let notionRelay = "WrenNotionOAuthRelay"
     }
@@ -26,7 +25,7 @@ public struct ProviderConfig: Equatable, Sendable {
         }
         var out = ProviderConfig()
         if let id = value(Key.googleClientID) {
-            let c = GoogleOAuthConfig(clientID: id, clientSecret: value(Key.googleClientSecret))
+            let c = GoogleOAuthConfig(clientID: id)
             if c.isPlausible { out.google = c }
         }
         if let id = value(Key.notionClientID), let relay = value(Key.notionRelay).flatMap(URL.init(string:)) {
