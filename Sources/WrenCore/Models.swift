@@ -320,18 +320,20 @@ public final class DailyRun {
 }
 
 public enum DelegationDestination: String, Codable, Sendable, CaseIterable {
-    case chatgptHandoff, openaiAPI, localModel, notionSearch, gmailSearch, calendarLookup
+    /// `openaiAPI` is kept only so older history records still read; it's never offered.
+    case chatgptPlan, chatgptHandoff, openaiAPI, localModel, notionSearch, gmailSearch, calendarLookup
     public var label: String {
         switch self {
-        case .chatgptHandoff: "ChatGPT (your account)"
-        case .openaiAPI: "OpenAI API"
+        case .chatgptPlan: "ChatGPT (your plan)"
+        case .chatgptHandoff: "ChatGPT (copy and open)"
+        case .openaiAPI: "OpenAI API (no longer available)"
         case .localModel: "Local model"
         case .notionSearch: "Notion search"
         case .gmailSearch: "Gmail search"
         case .calendarLookup: "Calendar"
         }
     }
-    public var leavesMac: Bool { self == .chatgptHandoff || self == .openaiAPI }
+    public var leavesMac: Bool { self == .chatgptPlan || self == .chatgptHandoff || self == .openaiAPI }
 }
 
 public enum DelegationStatus: String, Codable, Sendable {
@@ -365,7 +367,7 @@ public final class DelegationRecord {
     /// Exactly what left (or would leave) the Mac.
     public var prompt: String?
     public var response: String?
-    /// Where the answer came from, as known: "Pasted by you from ChatGPT" or "OpenAI API, model reported: …".
+    /// Where the answer came from, as known: "Pasted by you from ChatGPT" or "ChatGPT plan · requested model …".
     public var responseSource: String?
     public var summary: String?
     public var error: String?

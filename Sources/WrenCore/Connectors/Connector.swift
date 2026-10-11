@@ -1,16 +1,19 @@
 import Foundation
 
 public enum ConnectorID: String, Codable, Sendable, CaseIterable, Identifiable {
-    case chatgpt, openaiAPI, voice, gmail, notion, googleCalendar, localFiles, shortcuts
+    case chatgpt, voice, gmail, notion, googleCalendar, localFiles, shortcuts
     public var id: String { rawValue }
 }
 
 /// Honest connection states. `.connected` is only ever set after a real check succeeded.
 public enum ConnectorState: Equatable, Sendable {
-    /// Implemented and ready to set up; nothing configured yet.
+    /// Implemented and ready to connect; not connected.
     case available
-    /// Needs something from you first (credentials, an app, a permission).
+    /// Needs something from you first (an app or a macOS permission). Never developer credentials.
     case setupRequired(String)
+    /// This build of Wren doesn't include the provider's app registration. A blocker for Wren's
+    /// maintainers, not a task for the user.
+    case notAvailableInBuild(String)
     case connecting
     /// Verified against the provider. `account` is what the provider reported (email, workspace).
     case connected(account: String?)
@@ -27,8 +30,9 @@ public enum ConnectorState: Equatable, Sendable {
 
     public var label: String {
         switch self {
-        case .available: "Available"
+        case .available: "Not connected"
         case .setupRequired: "Setup required"
+        case .notAvailableInBuild: "Not available in this build"
         case .connecting: "Connecting"
         case .connected: "Connected"
         case .partiallyConnected: "Partially connected"
@@ -41,7 +45,7 @@ public enum ConnectorState: Equatable, Sendable {
 
     public var detail: String? {
         switch self {
-        case let .setupRequired(s), let .partiallyConnected(s), let .temporarilyUnavailable(s), let .permissionDenied(s): s
+        case let .setupRequired(s), let .notAvailableInBuild(s), let .partiallyConnected(s), let .temporarilyUnavailable(s), let .permissionDenied(s): s
         case let .connected(a): a
         default: nil
         }
@@ -58,7 +62,7 @@ public enum ConnectorState: Equatable, Sendable {
         switch self {
         case .connected, .partiallyConnected: .connected
         case .setupRequired, .connecting: .needsSetup
-        case .temporarilyUnavailable, .permissionDenied: .unavailable
+        case .temporarilyUnavailable, .permissionDenied, .notAvailableInBuild: .unavailable
         case .available, .disconnected: .notConnected
         case .planned: .planned
         }
@@ -68,20 +72,18 @@ public enum ConnectorState: Equatable, Sendable {
 public enum ConnectorAuth: Equatable, Sendable {
     case none
     case macOSPermission([String])
-    case userHandoff
+    case chatgptSignIn
     case googleOAuth(scopes: [String])
-    case integrationToken
-    case apiKey
+    case notionOAuth
     case planned
 
     public var label: String {
         switch self {
         case .none: "None"
         case let .macOSPermission(p): "macOS permission: \(p.joined(separator: ", "))"
-        case .userHandoff: "Your own ChatGPT sign-in (no key; you send the message)"
-        case let .googleOAuth(s): "Google sign-in (OAuth with PKCE), scope: \(s.joined(separator: " "))"
-        case .integrationToken: "Notion internal integration token (only pages you share with it)"
-        case .apiKey: "OpenAI API key (billed by OpenAI)"
+        case .chatgptSignIn: "Sign in with ChatGPT in your browser. No API key; uses your ChatGPT plan, not API billing."
+        case let .googleOAuth(s): "Sign in with Google in your browser. Read-only: \(s.map(OAuthError.plain).joined(separator: ", "))."
+        case .notionOAuth: "Connect Notion in your browser and choose the pages Wren may use."
         case .planned: "Not decided yet"
         }
     }
@@ -138,25 +140,18 @@ public enum ConnectorCatalog {
 
     public static let all: [ConnectorDescriptor] = [
         .init(id: .chatgpt, name: "ChatGPT", systemImage: "bubble.left.and.text.bubble.right",
-              summary: "Hand a task to ChatGPT using your own account in the browser or the ChatGPT app. Wren prepares the prompt, you review it, Wren copies it and opens ChatGPT; you paste the answer back.",
-              auth: .userHandoff,
-              capabilities: [.init(name: "Prepare and preview a prompt", implemented: true, external: false),
-                             .init(name: "Copy it and open ChatGPT (browser or app)", implemented: true, external: true),
-                             .init(name: "Import the answer, summarise it locally, propose follow-ups", implemented: true, external: false),
-                             .init(name: "Send automatically without you", implemented: false, external: true)],
-              permissions: [.chatgptHandoff],
-              privacy: "Only the prompt you approve leaves your Mac, and only when you paste it into ChatGPT. Private items and detected secrets are left out unless you include them. Answers you paste back are stored in Wren's local history.",
-              cleanup: "Turning it off stops new handoffs. History stays until you delete it or remove all data.",
-              hosts: ["chatgpt.com"], isPlanned: false),
-        .init(id: .openaiAPI, name: "OpenAI API", systemImage: "key",
-              summary: "Optional. Send a request to the OpenAI API and get the answer back automatically. Separate from a ChatGPT subscription and billed by OpenAI per use.",
-              auth: .apiKey,
-              capabilities: [.init(name: "Send an approved request and receive the answer", implemented: true, external: true),
-                             .init(name: "List models your key can use", implemented: true, external: true)],
-              permissions: [.externalAI],
-              privacy: "Each request shows the exact text first and needs your confirmation. The key is stored in the macOS Keychain, never in Wren's database, exports or logs.",
-              cleanup: "Disconnecting deletes the key from the Keychain.",
-              hosts: ["api.openai.com"], isPlanned: false),
+              summary: "Sign in with your ChatGPT account so Wren can send requests you approve and bring the answer back, using your ChatGPT plan (Plus or Pro). Copy-and-open handoff stays available as an optional fallback.",
+              auth: .chatgptSignIn,
+              capabilities: [.init(name: "Sign in with ChatGPT", implemented: true, external: true),
+                             .init(name: "Send a request you approve and stream the answer back", implemented: true, external: true),
+                             .init(name: "List the models your plan offers", implemented: true, external: true),
+                             .init(name: "Copy the prompt and open ChatGPT (optional fallback)", implemented: true, external: true),
+                             .init(name: "Import an answer, summarise it locally, propose follow-ups", implemented: true, external: false),
+                             .init(name: "Use your plan from background tasks", implemented: false, external: true)],
+              permissions: [.externalAI, .chatgptHandoff],
+              privacy: "You sign in on OpenAI's page in your browser; Wren never sees your password. Wren keeps your account email and the sign-in tokens in the macOS Keychain, never in its database, exports, backups, logs or on screen. Each request shows the exact text first and is sent only after you confirm. It counts against your ChatGPT plan's allowance and never switches to paid API billing. Requests are sent with storage off. Wren can't see your ChatGPT conversations, memories or custom instructions.",
+              cleanup: "Disconnecting revokes the sign-in with OpenAI and deletes the tokens from the Keychain. You can also remove Wren under ChatGPT Settings.",
+              hosts: ["auth.openai.com", "api.openai.com", "chatgpt.com"], isPlanned: false),
         .init(id: .voice, name: "Voice", systemImage: "mic",
               summary: "Hold a shortcut and speak. Apple's on-device speech recognition turns it into text, which goes through the same preview as typing.",
               auth: .macOSPermission(["Microphone", "Speech Recognition"]),
@@ -177,17 +172,17 @@ public enum ConnectorCatalog {
                              .init(name: "Send, archive, delete, mark read", implemented: false, external: true)],
               permissions: [.emailRead],
               privacy: "Read-only access. Messages are fetched on demand; by default nothing is stored on disk. Optional 7-day local cache of headers and snippets. Tokens are in the Keychain. Instructions inside emails are treated as text, never as commands.",
-              cleanup: "Disconnecting revokes the token with Google, deletes it from the Keychain and deletes any cached mail.",
+              cleanup: "Disconnecting revokes Wren's access with Google, deletes the token from the Keychain and deletes any cached mail.",
               hosts: ["gmail.googleapis.com", "oauth2.googleapis.com", "accounts.google.com"], isPlanned: false),
         .init(id: .notion, name: "Notion", systemImage: "doc.text",
-              summary: "Search pages you've shared with your Wren integration, read their content, pick pages to include in an AI request, and create a page after you confirm.",
-              auth: .integrationToken,
-              capabilities: [.init(name: "Search shared pages", implemented: true, external: true),
+              summary: "Connect your Notion workspace and choose, on Notion's own screen, which pages Wren may use. Search and read those pages, include them in a request, and create a page after you confirm.",
+              auth: .notionOAuth,
+              capabilities: [.init(name: "Search the pages you chose", implemented: true, external: true),
                              .init(name: "Read page content", implemented: true, external: true),
                              .init(name: "Create a page (asks first)", implemented: true, external: true)],
               permissions: [.notionRead, .notionWrite],
-              privacy: "Wren can only see pages you explicitly share with your integration in Notion. Page content is fetched when you ask and not stored. The token is in the Keychain.",
-              cleanup: "Disconnecting deletes the token. Also remove the integration in Notion › Settings › Connections.",
+              privacy: "Wren sees only the pages you pick when you connect. Page content is fetched when you ask and not stored. Sign-in finishes through a small Wren service that holds Wren's Notion app secret; it passes the token to Wren and keeps nothing. The token is stored in the Keychain.",
+              cleanup: "Disconnecting revokes the token with Notion and deletes it from the Keychain.",
               hosts: ["api.notion.com"], isPlanned: false),
         .init(id: .googleCalendar, name: "Google Calendar", systemImage: "calendar",
               summary: "Read-only: today's schedule, upcoming events, search, questions like “what meetings do I have tomorrow?”, events in the morning briefing, and reminders from events.",

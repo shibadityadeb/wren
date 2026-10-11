@@ -55,7 +55,7 @@ public class BaseConnector {
         switch e {
         case ConnectorError.unauthorized, OAuthError.invalidClient: onPermissions(false); return .permissionDenied(m)
         case ConnectorError.forbidden: return .permissionDenied(m)
-        case OAuthError.denied: return .permissionDenied(m)
+        case OAuthError.denied, OAuthError.scopeNotGranted: onPermissions(false); return .permissionDenied(m)
         default: return .temporarilyUnavailable(m)
         }
     }
@@ -66,34 +66,36 @@ public class BaseConnector {
     }
 }
 
-/// Gmail or Google Calendar: Google OAuth (PKCE + loopback), read-only scope.
+/// Gmail or Google Calendar: Google sign-in (PKCE + loopback) with Wren's maintainer-registered client,
+/// read-only scope. Each connector verifies that Google granted its scope and is enabled only then.
 @MainActor
 public final class GoogleConnector: BaseConnector, Connector {
     let store: CredentialStore
     let session: URLSession
+    let config: GoogleOAuthConfig?
     public let google: GoogleSession
     public var emailCache: EmailCache?
-    var scope: String { descriptor.id == .gmail ? ConnectorCatalog.gmailScope : ConnectorCatalog.calendarScope }
+    public var scope: String { descriptor.id == .gmail ? ConnectorCatalog.gmailScope : ConnectorCatalog.calendarScope }
 
-    public init(_ id: ConnectorID, store: CredentialStore, statusStore: ConnectorStatusStoring, session: URLSession = .shared,
-                now: @escaping @Sendable () -> Date = { Date() }) {
+    public init(_ id: ConnectorID, config: GoogleOAuthConfig?, store: CredentialStore, statusStore: ConnectorStatusStoring,
+                session: URLSession = .shared, now: @escaping @Sendable () -> Date = { Date() }) {
         precondition(id == .gmail || id == .googleCalendar)
-        self.store = store; self.session = session
+        self.store = store; self.session = session; self.config = config
         google = GoogleSession(connector: id, store: store)
         super.init(id, statusStore: statusStore, now: now)
         state = initialState
     }
 
-    var config: GoogleOAuthConfig? { GoogleSession.config(store) }
+    public var isConfigured: Bool { config != nil }
     var oauth: GoogleOAuth? { config.map { GoogleOAuth(config: $0, session: session, now: now) } }
 
     var initialState: ConnectorState {
-        guard config != nil else { return .setupRequired("Add your Google OAuth client ID (Connectors › Google setup).") }
+        guard config != nil else { return .notAvailableInBuild(ProviderConfig.notInBuild("Google", feature: descriptor.name)) }
         return google.tokens == nil ? .available : .temporarilyUnavailable("Not checked yet.")
     }
 
     public func token() async throws -> String {
-        guard let oauth else { throw ConnectorError.notConfigured("Google isn't set up.") }
+        guard let oauth else { throw ConnectorError.notConfigured(ProviderConfig.notInBuild("Google", feature: descriptor.name)) }
         return try await google.accessToken(oauth: oauth)
     }
 
@@ -104,15 +106,21 @@ public final class GoogleConnector: BaseConnector, Connector {
         descriptor.id == .gmail ? try await gmail.profileEmail() : try await calendar.accountID()
     }
 
+    func checkScope() throws {
+        guard let t = google.tokens else { return }
+        if !t.scope.split(separator: " ").map(String.init).contains(scope) { throw OAuthError.scopeNotGranted(scope) }
+    }
+
     /// Full sign-in: opens Google's consent page in the browser and waits for the loopback redirect.
+    /// Reports connected only after a real read with the new token succeeded.
     public func connect(open: (URL) -> Void) async {
         guard let oauth else { state = initialState; return }
         state = .connecting
-        let receiver = LoopbackReceiver()
+        let stateToken = UUID().uuidString
+        let receiver = LoopbackReceiver(path: "/", expectedState: stateToken)
         do {
             try await receiver.start()
             let pkce = PKCE.make()
-            let stateToken = UUID().uuidString
             open(oauth.authorizationURL(scopes: [scope], redirect: receiver.redirectURL, state: stateToken, pkce: pkce))
             let callback = try await receiver.waitForRedirect()
             let code = try GoogleOAuth.parseCallback(callback, expectedState: stateToken)
@@ -134,7 +142,9 @@ public final class GoogleConnector: BaseConnector, Connector {
         guard config != nil else { state = initialState; return }
         guard google.tokens != nil else { state = .available; return }
         do {
+            try checkScope()
             let account = try await fetchAccount()
+            try checkScope()   // a refresh may have narrowed the grant
             succeeded(account: account)
             state = .connected(account: account)
         } catch { state = stateFor(error) }
@@ -148,115 +158,84 @@ public final class GoogleConnector: BaseConnector, Connector {
     }
 }
 
-/// Notion with an internal integration token. Only pages shared with the integration are visible.
+/// Notion through Wren's public integration (OAuth). The user picks pages on Notion's consent screen.
 @MainActor
 public final class NotionConnector: BaseConnector, Connector {
     let store: CredentialStore
     let session: URLSession
-    nonisolated static let key = "notion.token"
+    let config: NotionOAuthConfig?
+    public let notion: NotionSession
+    /// Set when the last disconnect couldn't confirm revocation with Notion.
+    public private(set) var disconnectNote: String?
 
-    public init(store: CredentialStore, statusStore: ConnectorStatusStoring, session: URLSession = .shared, now: @escaping @Sendable () -> Date = { Date() }) {
-        self.store = store; self.session = session
+    public init(config: NotionOAuthConfig?, store: CredentialStore, statusStore: ConnectorStatusStoring, session: URLSession = .shared,
+                now: @escaping @Sendable () -> Date = { Date() }) {
+        self.store = store; self.session = session; self.config = config
+        notion = NotionSession(store: store)
         super.init(.notion, statusStore: statusStore, now: now)
-        state = store.readString(Self.key) == nil ? .available : .temporarilyUnavailable("Not checked yet.")
+        state = initialState
     }
+
+    public var isConfigured: Bool { config != nil }
+    var oauth: NotionOAuth? { config.map { NotionOAuth(config: $0, session: session, now: now) } }
+
+    var initialState: ConnectorState {
+        guard config != nil else { return .notAvailableInBuild(ProviderConfig.notInBuild("Notion", feature: "Notion")) }
+        return notion.tokens == nil ? .available : .temporarilyUnavailable("Not checked yet.")
+    }
+
+    public var workspace: String? { notion.tokens?.workspaceName }
 
     public var client: NotionClient {
-        let s = store
-        return NotionClient(session: session) { guard let t = s.readString(NotionConnector.key) else { throw ConnectorError.notConfigured("Notion isn't connected.") }; return t }
+        let s = notion, o = oauth
+        return NotionClient(session: session) { try await s.accessToken(oauth: o) }
     }
 
-    /// Saves the token only after Notion accepted it.
-    public func connect(token raw: String) async {
-        let token = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard token.hasPrefix("ntn_") || token.hasPrefix("secret_") else {
-            state = .setupRequired("That doesn't look like a Notion integration token (it starts with ntn_ or secret_)."); return
+    /// Opens Notion's consent page; Notion redirects to Wren's relay, which bounces to 127.0.0.1.
+    public func connect(open: (URL) -> Void) async {
+        guard let oauth else { state = initialState; return }
+        state = .connecting
+        disconnectNote = nil
+        let receiver = LoopbackReceiver(path: NotionOAuth.callbackPath)
+        do {
+            try await receiver.start()
+            let stateToken = NotionOAuth.makeState(port: receiver.port)
+            receiver.expectedState = stateToken
+            open(oauth.authorizationURL(state: stateToken))
+            let callback = try await receiver.waitForRedirect()
+            let code = try GoogleOAuth.parseCallback(callback, expectedState: stateToken)
+            let tokens = try await oauth.exchange(code: code)
+            try notion.save(tokens)
+            try await verify()
+        } catch {
+            receiver.stop()
+            if (error as? OAuthError) != nil { try? notion.clear() }
+            state = stateFor(error)
         }
-        state = .connecting
-        let probe = NotionClient(session: session) { token }
-        do {
-            let who = try await probe.identity()
-            try store.writeString(Self.key, token)
-            succeeded(account: who)
-            state = .connected(account: who)
-        } catch { state = stateFor(error) }
+    }
+
+    /// A real authorized call: who Notion says this connection is.
+    func verify() async throws {
+        let who = try await client.identity()
+        let account = notion.tokens?.workspaceName ?? who
+        succeeded(account: account)
+        state = .connected(account: account)
     }
 
     public func refresh() async {
-        guard store.readString(Self.key) != nil else { state = .available; return }
-        do { let who = try await client.identity(); succeeded(account: who); state = .connected(account: who) } catch { state = stateFor(error) }
+        guard config != nil else { state = initialState; return }
+        guard notion.tokens != nil else { state = .available; return }
+        do { try await verify() } catch { state = stateFor(error) }
     }
 
-    public func disconnect() async { try? store.delete(Self.key); cleared() }
-}
-
-/// Optional OpenAI API key connector.
-@MainActor
-public final class OpenAIConnector: BaseConnector, Connector {
-    let store: CredentialStore
-    let session: URLSession
-    nonisolated static let key = "openai.apiKey"
-    public var selectedModel: String? { didSet { modelChanged?(selectedModel) } }
-    public var modelChanged: ((String?) -> Void)?
-    public private(set) var models: [String] = []
-
-    public init(store: CredentialStore, statusStore: ConnectorStatusStoring, session: URLSession = .shared, selectedModel: String?, now: @escaping @Sendable () -> Date = { Date() }) {
-        self.store = store; self.session = session; self.selectedModel = selectedModel
-        super.init(.openaiAPI, statusStore: statusStore, now: now)
-        state = store.readString(Self.key) == nil ? .available : .temporarilyUnavailable("Not checked yet.")
+    public func disconnect() async {
+        disconnectNote = nil
+        if let t = notion.tokens, let oauth {
+            do { try await oauth.revoke(t.accessToken) } catch {
+                disconnectNote = "Wren removed its copy of the Notion token, but Notion didn't confirm the revocation. You can also remove Wren in Notion › Settings › Connections."
+            }
+        }
+        try? notion.clear()
+        cleared()
     }
-
-    public var client: OpenAIClient {
-        let s = store
-        return OpenAIClient(session: session) { guard let k = s.readString(OpenAIConnector.key) else { throw ConnectorError.notConfigured("No API key.") }; return k }
-    }
-
-    public func connect(key raw: String) async {
-        let key = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard key.hasPrefix("sk-"), key.count > 20 else { state = .setupRequired("That doesn't look like an OpenAI API key (sk-…)."); return }
-        state = .connecting
-        do {
-            models = try await OpenAIClient(session: session) { key }.models()
-            try store.writeString(Self.key, key)
-            settle()
-        } catch { state = stateFor(error) }
-    }
-
-    func settle() {
-        succeeded(account: selectedModel)
-        if let m = selectedModel, models.isEmpty || models.contains(m) { state = .connected(account: "Model: \(m)") }
-        else { state = .partiallyConnected("Key accepted. Choose a model to use.") }
-    }
-
-    public func refresh() async {
-        guard store.readString(Self.key) != nil else { state = .available; return }
-        do { models = try await client.models(); settle() } catch { state = stateFor(error) }
-    }
-
-    public func disconnect() async { try? store.delete(Self.key); models = []; selectedModel = nil; cleared() }
-}
-
-/// ChatGPT handoff: no credentials. "Ready" means a destination exists; Wren can't see your sign-in.
-@MainActor
-public final class ChatGPTConnector: BaseConnector, Connector {
-    public var enabled: Bool { didSet { enabledChanged?(enabled); evaluate() } }
-    public var enabledChanged: ((Bool) -> Void)?
-    /// Name of the app or browser that opens chatgpt.com (resolved by the app via NSWorkspace).
-    public var destination: () -> String?
-
-    public init(enabled: Bool, statusStore: ConnectorStatusStoring, destination: @escaping () -> String?, now: @escaping @Sendable () -> Date = { Date() }) {
-        self.enabled = enabled; self.destination = destination
-        super.init(.chatgpt, statusStore: statusStore, now: now)
-        evaluate()
-    }
-
-    func evaluate() {
-        guard enabled else { state = .available; return }
-        guard let d = destination() else { state = .setupRequired("No browser or ChatGPT app was found to open chatgpt.com."); return }
-        onPermissions(true)
-        state = .partiallyConnected("Ready for handoff via \(d). Wren can't check your ChatGPT sign-in, and you send each message yourself.")
-    }
-
-    public func refresh() async { evaluate() }
-    public func disconnect() async { enabled = false; cleared(); state = .available }
 }

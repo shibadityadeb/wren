@@ -92,8 +92,6 @@ struct ConnectorRow: View {
 struct ConnectorDetailView: View {
     @Bindable var model: AppModel
     let id: ConnectorID
-    @State private var secret = ""
-    @State private var clientID = ""
     @State private var working = false
 
     var descriptor: ConnectorDescriptor { ConnectorCatalog.descriptor(id) }
@@ -178,16 +176,11 @@ struct ConnectorDetailView: View {
     @ViewBuilder func setup(_ state: ConnectorState) -> some View {
         switch id {
         case .gmail, .googleCalendar: googleSetup(state)
-        case .notion: tokenSetup(state, placeholder: "ntn_…", help: notionHelp) { await model.hub.notion.connect(token: $0) }
-        case .openaiAPI: openaiSetup(state)
+        case .notion: notionSetup(state)
         case .chatgpt: chatgptSetup(state)
         case .voice: voiceSetup(state)
         case .localFiles, .shortcuts: EmptyView()
         }
-    }
-
-    var notionHelp: String {
-        "1. In Notion open Settings › Connections › Develop or manage integrations, create an internal integration (read content, insert content), and copy its token.\n2. On each page Wren may use, open ••• › Connections and add the integration. Wren can't see anything else.\n3. Paste the token here. Wren checks it with Notion before saving it in the Keychain."
     }
 
     func connectedActions(_ state: ConnectorState) -> some View {
@@ -199,16 +192,17 @@ struct ConnectorDetailView: View {
         .controlSize(.small)
     }
 
+    /// A provider this build doesn't include: say so plainly, with nothing for the user to configure.
+    func notInBuild(_ state: ConnectorState) -> some View {
+        Notice(text: state.detail ?? "Not available in this build.", systemImage: "shippingbox")
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
     @ViewBuilder func googleSetup(_ state: ConnectorState) -> some View {
         let c = id == .gmail ? model.hub.gmail : model.hub.calendar
         VStack(alignment: .leading, spacing: 8) {
-            if !model.googleConfigured {
-                Text("Google setup (once, shared by Gmail and Calendar)").font(.callout.weight(.medium))
-                Text("Google requires your own OAuth client. In Google Cloud Console: create a project, enable the Gmail API and/or Google Calendar API, set up the OAuth consent screen (add yourself as a test user), then Credentials › Create OAuth client ID › Desktop app. Paste the client ID (and the client secret Google shows for desktop clients; it isn't confidential for desktop apps, but Google's token endpoint asks for it). Both go to the Keychain, never into Wren's source or exports.")
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                TextField("Client ID (…apps.googleusercontent.com)", text: $clientID).textFieldStyle(.roundedBorder)
-                SecureField("Client secret", text: $secret).textFieldStyle(.roundedBorder)
-                Button("Save") { model.saveGoogleConfig(clientID: clientID, secret: secret); secret = "" }.disabled(clientID.isEmpty)
+            if !c.isConfigured {
+                notInBuild(state)
             } else if state.isUsable {
                 connectedActions(state)
                 if id == .gmail {
@@ -224,74 +218,101 @@ struct ConnectorDetailView: View {
                                                                       set: { model.setRule(.includeConnectedSourcesInBriefing, $0) })).font(.callout)
                 if id == .googleCalendar { CalendarPeek(model: model) }
             } else {
-                Text("Wren will open Google's consent page in your browser. Requested permission: \(id == .gmail ? "read your email (read-only)" : "see your calendars (read-only)"). Wren never sees your password.")
+                Text("Wren opens Google's sign-in page in your browser. You choose the account and approve one permission: \(id == .gmail ? "read your email" : "see your calendars"), read-only. Wren can't send, delete or change anything, and never sees your password.")
                     .font(.callout).fixedSize(horizontal: false, vertical: true)
                 HStack {
                     Button(state == .connecting ? "Waiting for Google…" : (c.google.tokens == nil ? "Connect with Google" : "Reconnect")) { model.connectGoogle(c) }
                         .disabled(state == .connecting).buttonStyle(.borderedProminent).tint(WrenTheme.accent)
                     if case .permissionDenied = state { Button("Disconnect", role: .destructive) { model.disconnect(id) } }
                 }
-                Text("If your OAuth consent screen is in Testing status, Google lists you as a test user and may expire access after 7 days, so you'd reconnect. Publishing the app (or an internal Workspace app, if your admin allows) avoids that; Google decides.")
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                Button("Change Google client…") { try? model.hub.credentials.delete(GoogleSession.configKey); model.connectorsChanged() }.buttonStyle(.link).font(.caption)
             }
         }
     }
 
-    func tokenSetup(_ state: ConnectorState, placeholder: String, help: String, connect: @escaping (String) async -> Void) -> some View {
+    @ViewBuilder func notionSetup(_ state: ConnectorState) -> some View {
+        let n = model.hub.notion
         VStack(alignment: .leading, spacing: 8) {
-            if state.isUsable {
+            if !n.isConfigured {
+                notInBuild(state)
+            } else if state.isUsable {
+                if let w = n.workspace { Text("Workspace: \(w)").font(.callout) }
                 connectedActions(state)
+                Button("Change which pages Wren can use…") { model.connectNotion() }.buttonStyle(.link).font(.caption)
                 NotionPeek(model: model)
             } else {
-                Text(help).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                SecureField(placeholder, text: $secret).textFieldStyle(.roundedBorder)
+                Text("Wren opens Notion in your browser. Pick the workspace and the pages Wren may use; Wren can't see anything else. You can change the pages later.")
+                    .font(.callout).fixedSize(horizontal: false, vertical: true)
                 HStack {
-                    Button("Connect") { working = true; let t = secret; secret = ""; Task { await connect(t); model.connectorsChanged(); working = false } }
-                        .disabled(secret.isEmpty || working).buttonStyle(.borderedProminent).tint(WrenTheme.accent)
-                    if working { ProgressView().controlSize(.small) }
+                    Button(state == .connecting ? "Waiting for Notion…" : (n.notion.tokens == nil ? "Connect Notion" : "Reconnect")) { model.connectNotion() }
+                        .disabled(state == .connecting).buttonStyle(.borderedProminent).tint(WrenTheme.accent)
+                    if case .permissionDenied = state { Button("Disconnect", role: .destructive) { model.disconnect(id) } }
                 }
             }
-        }
-    }
-
-    @ViewBuilder func openaiSetup(_ state: ConnectorState) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Optional. API use is billed by OpenAI per request and is separate from any ChatGPT subscription; a ChatGPT plan doesn't include API access. Every request shows the exact text and asks first.")
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            if state.isUsable || !model.hub.openai.models.isEmpty {
-                Picker("Model", selection: Binding(get: { model.hub.openai.selectedModel ?? "" }, set: { model.hub.openai.selectedModel = $0.isEmpty ? nil : $0; Task { await model.hub.openai.refresh(); model.connectorsChanged() } })) {
-                    Text("Choose…").tag("")
-                    ForEach(model.hub.openai.models, id: \.self) { Text($0).tag($0) }
-                }
-                Text("Models listed by your key. Wren doesn't assume what any model can do.").font(.caption2).foregroundStyle(.tertiary)
-                connectedActions(state)
-            } else {
-                SecureField("sk-…", text: $secret).textFieldStyle(.roundedBorder)
-                HStack {
-                    Button("Connect") { working = true; let k = secret; secret = ""; Task { await model.hub.openai.connect(key: k); model.connectorsChanged(); working = false } }
-                        .disabled(secret.isEmpty || working)
-                    if working { ProgressView().controlSize(.small) }
-                }
-            }
+            if let note = n.disconnectNote { Text(note).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
         }
     }
 
     @ViewBuilder func chatgptSetup(_ state: ConnectorState) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Toggle("Allow handing tasks to ChatGPT", isOn: Binding(get: { model.hub.chatgpt.enabled }, set: {
-                model.hub.chatgpt.enabled = $0
-                if !$0 { try? model.policyStore?.setGrant(.chatgptHandoff, granted: false) }
-                model.connectorsChanged()
-            }))
-            Picker("Open in", selection: Binding(get: { model.settings.chatgptDestination }, set: { model.settings.chatgptDestination = $0; Task { await model.hub.chatgpt.refresh(); model.connectorsChanged() } })) {
-                Text("Default browser (chatgpt.com)").tag("browser")
-                Text(ConnectorHub.chatGPTAppURL == nil ? "ChatGPT for Mac (not installed)" : "ChatGPT for Mac").tag("app")
+        let c = model.hub.chatgpt
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(c.account.title).font(.callout.weight(.semibold))
+                if let r = c.account.reason, c.account != .planEnabled { Text(r).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+                if let e = c.email, c.account != .notConnected {
+                    Text("Account: \(e)\(c.planType.map { " · plan reported by ChatGPT: \($0.capitalized)" } ?? "")").font(.caption)
+                }
+                if c.isUsingPlan {
+                    HStack(spacing: 10) {
+                        Label("Using ChatGPT plan", systemImage: "checkmark.seal.fill").font(.caption.weight(.medium)).foregroundStyle(WrenTheme.accent)
+                        Link("Manage usage", destination: SIWC.manageUsageURL).font(.caption)
+                    }
+                }
             }
-            Text("How it works: Wren prepares a prompt and shows exactly what will leave your Mac. When you approve, Wren copies it and opens ChatGPT. You paste it and press send there. Wren never sends it for you and can't see which model or mode you pick. Paste the answer back in Delegate to save, summarise it locally and turn parts into tasks.")
+            switch c.account {
+            case .notConnected, .connecting:
+                Button(c.account == .connecting ? "Waiting for ChatGPT…" : "Continue with ChatGPT") { model.connectChatGPT() }
+                    .disabled(c.account == .connecting).buttonStyle(.borderedProminent).tint(WrenTheme.accent)
+                Text("Opens OpenAI's sign-in page in your browser. Approve Wren there, including use of your ChatGPT plan. No API key, no setup.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            case .accountOnly:
+                HStack {
+                    Button("Allow plan usage…") { model.connectChatGPT(reconsent: true) }.buttonStyle(.borderedProminent).tint(WrenTheme.accent)
+                    Button("Disconnect", role: .destructive) { model.disconnect(id) }
+                }.controlSize(.small)
+            case .reauthorizationRequired:
+                HStack {
+                    Button("Reconnect") { model.connectChatGPT() }.buttonStyle(.borderedProminent).tint(WrenTheme.accent)
+                    Button("Disconnect", role: .destructive) { model.disconnect(id) }
+                }.controlSize(.small)
+            case .usageLimitReached:
+                Link("Manage usage in ChatGPT", destination: SIWC.manageUsageURL).font(.callout)
+                connectedActions(state)
+            case .planEnabled, .temporarilyUnavailable:
+                if !c.models.isEmpty {
+                    Picker("Model", selection: Binding(get: { c.selectedModel ?? "" }, set: { c.selectedModel = $0.isEmpty ? nil : $0; model.connectorsChanged() })) {
+                        ForEach(c.models) { Text($0.displayName).tag($0.slug) }
+                    }
+                    .frame(maxWidth: 360)
+                    Text("Models ChatGPT lists for your account.").font(.caption2).foregroundStyle(.tertiary)
+                }
+                connectedActions(state)
+            }
+            Text("Each request shows the exact text first and is sent only after you confirm. It uses your ChatGPT plan's allowance; Wren never switches to paid API billing. Background tasks never use your plan. Wren can't see your ChatGPT conversations or memories.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Text("OpenAI doesn't document a supported way to prefill or submit a prompt by link, so Wren uses the clipboard.")
-                .font(.caption2).foregroundStyle(.tertiary)
+            if let note = c.disconnectNote { Text(note).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
+            Divider()
+            Text("Optional fallback: copy and open").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            Toggle("Allow copying a prompt and opening ChatGPT", isOn: Binding(get: { c.handoffEnabled }, set: { c.handoffEnabled = $0; model.connectorsChanged() }))
+                .font(.callout)
+            if c.handoffEnabled {
+                Picker("Open in", selection: Binding(get: { model.settings.chatgptDestination }, set: { model.settings.chatgptDestination = $0; model.connectorsChanged() })) {
+                    Text("Default browser (chatgpt.com)").tag("browser")
+                    Text(ConnectorHub.chatGPTAppURL == nil ? "ChatGPT for Mac (not installed)" : "ChatGPT for Mac").tag("app")
+                }
+                .frame(maxWidth: 360)
+            }
+            Text("Works without signing in: Wren copies the prompt and opens ChatGPT, and you paste and send it yourself, then paste the answer back in Delegate.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Button("Open Delegate") { model.route = .delegate }.controlSize(.small)
         }
     }
@@ -358,7 +379,7 @@ struct NotionPeek: View {
     @State private var error: String?
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            TextField("Search pages shared with Wren", text: $q).textFieldStyle(.roundedBorder).controlSize(.small)
+            TextField("Search the pages you chose", text: $q).textFieldStyle(.roundedBorder).controlSize(.small)
                 .onSubmit { Task { do { pages = try await model.notionSearch(q); error = nil } catch { self.error = model.errorText(error) } } }
             if let error { Text(error).font(.caption).foregroundStyle(.orange) }
             ForEach(pages) { p in
@@ -368,7 +389,7 @@ struct NotionPeek: View {
                     if let u = p.url { Link("Open", destination: u).font(.caption) }
                 }
             }
-            Text("Only pages shared with your integration appear here.").font(.caption2).foregroundStyle(.tertiary)
+            Text("Only pages you chose in Notion appear here.").font(.caption2).foregroundStyle(.tertiary)
         }
     }
 }

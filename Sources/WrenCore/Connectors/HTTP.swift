@@ -46,22 +46,49 @@ public struct ConnectorHTTP: Sendable {
         }
     }
 
-    public func request(_ url: URL, method: String = "GET", headers: [String: String] = [:], body: Data? = nil,
-                        timeout: TimeInterval? = nil) async throws -> Data {
+    /// Sends the request and returns the body and status without interpreting the status.
+    public func raw(_ url: URL, method: String = "GET", headers: [String: String] = [:], body: Data? = nil,
+                    timeout: TimeInterval? = nil) async throws -> (Data, HTTPURLResponse) {
+        let r = try makeRequest(url, method: method, headers: headers, body: body, timeout: timeout)
+        let data: Data, resp: URLResponse
+        do { (data, resp) = try await session.data(for: r) } catch { throw Self.mapTransport(error) }
+        guard let http = resp as? HTTPURLResponse else { throw ConnectorError.badResponse("no HTTP response") }
+        return (data, http)
+    }
+
+    /// Opens a streamed response. The caller reads the bytes and checks the status.
+    public func stream(_ url: URL, method: String = "POST", headers: [String: String] = [:], body: Data? = nil,
+                       timeout: TimeInterval? = nil) async throws -> (URLSession.AsyncBytes, HTTPURLResponse) {
+        let r = try makeRequest(url, method: method, headers: headers, body: body, timeout: timeout)
+        let bytes: URLSession.AsyncBytes, resp: URLResponse
+        do { (bytes, resp) = try await session.bytes(for: r) } catch { throw Self.mapTransport(error) }
+        guard let http = resp as? HTTPURLResponse else { throw ConnectorError.badResponse("no HTTP response") }
+        return (bytes, http)
+    }
+
+    func makeRequest(_ url: URL, method: String, headers: [String: String], body: Data?, timeout: TimeInterval?) throws -> URLRequest {
         try check(url)
         var r = URLRequest(url: url, timeoutInterval: timeout ?? self.timeout)
         r.httpMethod = method
         for (k, v) in headers { r.setValue(v, forHTTPHeaderField: k) }
         r.httpBody = body
-        let data: Data, resp: URLResponse
-        do { (data, resp) = try await session.data(for: r) } catch let e as URLError {
-            switch e.code {
-            case .cancelled: throw ConnectorError.cancelled
-            case .timedOut: throw ConnectorError.timedOut
-            default: throw ConnectorError.network("error \(e.code.rawValue)")
-            }
-        } catch is CancellationError { throw ConnectorError.cancelled }
-        guard let http = resp as? HTTPURLResponse else { throw ConnectorError.badResponse("no HTTP response") }
+        return r
+    }
+
+    public static func mapTransport(_ error: Error) -> ConnectorError {
+        if let e = error as? ConnectorError { return e }
+        if error is CancellationError { return .cancelled }
+        guard let e = error as? URLError else { return .network("unknown") }
+        switch e.code {
+        case .cancelled: return .cancelled
+        case .timedOut: return .timedOut
+        default: return .network("error \(e.code.rawValue)")
+        }
+    }
+
+    public func request(_ url: URL, method: String = "GET", headers: [String: String] = [:], body: Data? = nil,
+                        timeout: TimeInterval? = nil) async throws -> Data {
+        let (data, http) = try await raw(url, method: method, headers: headers, body: body, timeout: timeout)
         switch http.statusCode {
         case 200..<300: return data
         case 401: throw ConnectorError.unauthorized

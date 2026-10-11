@@ -11,26 +11,39 @@ final class ConnectorHub {
     let gmail: GoogleConnector
     let calendar: GoogleConnector
     let notion: NotionConnector
-    let openai: OpenAIConnector
     let chatgpt: ChatGPTConnector
+    /// Provider registrations injected into this build by Wren's maintainers.
+    let providers = ProviderConfig.bundled
     let voice: VoiceConnector
     let voicePermissions = SystemVoicePermissions()
 
     init(settings: WrenSettings, policy: PolicyStoring?) {
-        gmail = GoogleConnector(.gmail, store: credentials, statusStore: statusStore)
+        Self.removeLegacyCredentials(credentials, settings: settings)
+        gmail = GoogleConnector(.gmail, config: providers.google, store: credentials, statusStore: statusStore)
         gmail.emailCache = settings.gmailCacheEnabled ? EmailCache(directory: WrenStore.defaultDirectory) : nil
-        calendar = GoogleConnector(.googleCalendar, store: credentials, statusStore: statusStore)
-        notion = NotionConnector(store: credentials, statusStore: statusStore)
-        openai = OpenAIConnector(store: credentials, statusStore: statusStore, selectedModel: settings.openaiModel)
-        openai.modelChanged = { settings.openaiModel = $0 }
-        chatgpt = ChatGPTConnector(enabled: settings.chatgptEnabled, statusStore: statusStore, destination: { ConnectorHub.destinationName(settings) })
-        chatgpt.enabledChanged = { settings.chatgptEnabled = $0 }
+        calendar = GoogleConnector(.googleCalendar, config: providers.google, store: credentials, statusStore: statusStore)
+        notion = NotionConnector(config: providers.notion, store: credentials, statusStore: statusStore)
+        chatgpt = ChatGPTConnector(store: credentials, statusStore: statusStore, handoffEnabled: settings.chatgptHandoffEnabled,
+                                   selectedModel: settings.chatgptModel, destination: { ConnectorHub.destinationName(settings) })
+        chatgpt.handoffChanged = { settings.chatgptHandoffEnabled = $0 }
+        chatgpt.modelChanged = { settings.chatgptModel = $0 }
+        chatgpt.grant = { p, on in try? policy?.setGrant(p, granted: on) }
+        chatgpt.onPermissions = { on in if !on { try? policy?.setGrant(.externalAI, granted: false) } }
         voice = VoiceConnector(permissions: voicePermissions, enabled: settings.voiceEnabled)
-        for c in [gmail, calendar, notion, openai, chatgpt] as [BaseConnector] {
+        for c in [gmail, calendar, notion] as [BaseConnector] {
             let perms = c.descriptor.permissions
             c.onPermissions = { on in perms.forEach { try? policy?.setGrant($0, granted: on) } }
         }
-        [gmail, calendar, notion, openai, chatgpt, voice, PlannedConnector(.localFiles), PlannedConnector(.shortcuts)].forEach(registry.register)
+        try? policy?.setGrant(.chatgptHandoff, granted: chatgpt.handoffAvailable)
+        [chatgpt, voice, gmail, calendar, notion, PlannedConnector(.localFiles), PlannedConnector(.shortcuts)].forEach(registry.register)
+    }
+
+    /// Earlier development builds asked users for a Google client, a Notion integration token or an
+    /// OpenAI API key. Wren no longer uses any of them, so they're deleted rather than left behind.
+    static func removeLegacyCredentials(_ store: CredentialStore, settings: WrenSettings) {
+        for k in [GoogleSession.legacyConfigKey, NotionSession.legacyTokenKey, "openai.apiKey"] { try? store.delete(k) }
+        UserDefaults.standard.removeObject(forKey: "openaiModel")
+        UserDefaults.standard.removeObject(forKey: "connector.openaiAPI")
     }
 
     static let chatGPTAppID = "com.openai.chat"
@@ -148,15 +161,22 @@ extension AppModel {
         }
     }
 
-    func saveGoogleConfig(clientID: String, secret: String) {
-        let cfg = GoogleOAuthConfig(clientID: clientID.trimmingCharacters(in: .whitespacesAndNewlines),
-                                    clientSecret: secret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : secret.trimmingCharacters(in: .whitespacesAndNewlines))
-        guard cfg.isPlausible else { banner = "That doesn't look like a Google OAuth client ID (…apps.googleusercontent.com)."; return }
-        do { try GoogleSession.saveConfig(cfg, hub.credentials); banner = "Google client saved in the Keychain." } catch { banner = errorText(error) }
-        Task { await hub.gmail.refresh(); await hub.calendar.refresh(); connectorsChanged() }
+    func connectNotion() {
+        Task {
+            await hub.notion.connect { NSWorkspace.shared.open($0) }
+            NSApp.activate(ignoringOtherApps: true)
+            connectorsChanged()
+        }
     }
 
-    var googleConfigured: Bool { GoogleSession.config(hub.credentials) != nil }
+    /// Sign in with ChatGPT. `reconsent` shows OpenAI's permission screen again (to allow plan usage).
+    func connectChatGPT(reconsent: Bool = false) {
+        Task {
+            await hub.chatgpt.connect(reconsent: reconsent) { NSWorkspace.shared.open($0) }
+            NSApp.activate(ignoringOtherApps: true)
+            connectorsChanged()
+        }
+    }
 
     func disconnect(_ id: ConnectorID) {
         Task {
@@ -237,24 +257,42 @@ extension AppModel {
         saveDelegation(r)
     }
 
-    /// OpenAI API: one request per confirmation; attribution is what the API reports.
-    func sendToAPI(_ draft: HandoffDraft, record: DelegationRecord) async {
-        guard let broker, let model = hub.openai.selectedModel else { record.status = .failed; record.error = "Choose a model in Connectors › OpenAI API."; saveDelegation(record); return }
+    /// ChatGPT plan: one request per confirmation, streamed back. Uses the signed-in user's plan
+    /// allowance only; there is no API-billing fallback. Attribution names the model Wren requested
+    /// and the one the response reports.
+    func sendToChatGPT(_ draft: HandoffDraft, record: DelegationRecord, onDelta: @escaping @MainActor (String) -> Void) async {
+        let c = hub.chatgpt
+        guard let broker, let model = c.selectedModel, c.account.canSend else {
+            record.status = .failed
+            record.error = c.account.canSend ? "Choose a model in Connectors › ChatGPT." : (c.account.reason ?? "ChatGPT isn't connected. Open Connectors › ChatGPT.")
+            saveDelegation(record); return
+        }
         let prompt = draft.prompt
+        let origin: ActionOrigin = .user(.popover)
         let req = ActionRequest(action: BuiltInAction.delegateToExternalAI, target: TargetRef(kind: "prompt", id: record.id.uuidString, label: draft.task),
-                                parameters: ["prompt": .string(prompt), "model": .string(model)], origin: .user(.popover), createdAt: clock.now,
-                                containsPrivateContent: draft.containsPrivate)
+                                parameters: ["prompt": .string(prompt), "model": .string(model), "allowance": .string("ChatGPT plan")],
+                                origin: origin, createdAt: clock.now, containsPrivateContent: draft.containsPrivate)
         record.prompt = prompt
-        let client = hub.openai.client
         do {
             let r = try await broker.performExternal(req, confirmation: broker.confirm(req, includingPrivate: draft.containsPrivate),
-                                                     detail: { "model reported: \($0.reportedModel ?? "unknown")" }) {
-                try await client.respond(model: model, input: prompt, instructions: nil)
+                                                     detail: { "ChatGPT plan · requested \($0.requestedModel) · reported \($0.reportedModel ?? "not reported")" }) {
+                try await c.respond(model: model, input: prompt, origin: origin) { d in Task { @MainActor in onDelta(d) } }
             }
             record.response = r.text
-            record.responseSource = "OpenAI API · model reported by the API: \(r.reportedModel ?? "not reported")\(r.outputTokens.map { " · \($0) output tokens" } ?? "")"
+            record.responseSource = "ChatGPT plan\(c.email.map { " (\($0))" } ?? "") · requested model \(r.requestedModel)\(r.reportedModel.map { $0 == r.requestedModel ? "" : " · response reports \($0)" } ?? "")"
             record.status = .responseImported
+        } catch let e as ChatGPTError {
+            switch e {
+            case let .incomplete(partial), let .interrupted(partial) where !partial.isEmpty:
+                record.response = partial
+                record.responseSource = "ChatGPT plan · incomplete answer (\(model))"
+                record.status = .responseImported
+                record.error = e.errorDescription
+            default:
+                record.status = .failed; record.error = e.errorDescription
+            }
         } catch { record.status = .failed; record.error = errorText(error) }
+        connectorVersion += 1
         saveDelegation(record)
     }
 

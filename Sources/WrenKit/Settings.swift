@@ -69,7 +69,8 @@ final class WrenSettings {
         get { (d.data(forKey: "voiceHotKey")).flatMap { try? JSONDecoder().decode(HotKeySpec.self, from: $0) } ?? .optionShiftSpace }
         set { d.set(try? JSONEncoder().encode(newValue), forKey: "voiceHotKey") }
     }
-    var chatgptEnabled: Bool {
+    /// The optional copy-and-open handoff fallback (key kept from earlier versions).
+    var chatgptHandoffEnabled: Bool {
         get { d.bool(forKey: "chatgptEnabled") }
         set { d.set(newValue, forKey: "chatgptEnabled") }
     }
@@ -78,9 +79,10 @@ final class WrenSettings {
         get { d.string(forKey: "chatgptDestination") ?? "browser" }
         set { d.set(newValue, forKey: "chatgptDestination") }
     }
-    var openaiModel: String? {
-        get { d.string(forKey: "openaiModel") }
-        set { d.set(newValue, forKey: "openaiModel") }
+    /// The model slug chosen from the list ChatGPT returned for this account.
+    var chatgptModel: String? {
+        get { d.string(forKey: "chatgptModel") }
+        set { d.set(newValue, forKey: "chatgptModel") }
     }
     var gmailCacheEnabled: Bool {
         get { d.bool(forKey: "gmailCacheEnabled") }
@@ -93,7 +95,7 @@ final class WrenSettings {
     /// Every preference key Wren writes. "Reset preferences" removes exactly these.
     static let allKeys = ["hotKeyEnabled", "hotKey", "ollamaModel", "useModel", "dateOnlyReminderHour", "captureDraft",
                           "dailySettings", "launchAtLogin", "insightSettings", "notificationPause", "lastAutomaticBackup",
-                          "voiceEnabled", "voiceHotKey", "chatgptEnabled", "chatgptDestination", "openaiModel", "gmailCacheEnabled", "importantSenders"]
+                          "voiceEnabled", "voiceHotKey", "chatgptEnabled", "chatgptDestination", "chatgptModel", "openaiModel", "gmailCacheEnabled", "importantSenders"]
 
     func resetAll() { Self.allKeys.forEach(d.removeObject(forKey:)) }
 

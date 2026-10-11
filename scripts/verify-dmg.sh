@@ -34,6 +34,8 @@ plist() { /usr/libexec/PlistBuddy -c "Print :$1" "$APP/Contents/Info.plist"; }
 [[ "$(plist LSMinimumSystemVersion)" == "14.0" ]] || fail "minimum macOS changed"
 [[ -f "$APP/Contents/Resources/Wren.icns" ]] || fail "icon missing"
 echo "✓ bundle: com.shibadityadeb.wren $VERSION, menu-bar only, macOS 14+"
+has() { /usr/libexec/PlistBuddy -c "Print :$1" "$APP/Contents/Info.plist" >/dev/null 2>&1 && echo "included" || echo "not included"; }
+echo "• provider sign-in: Google $(has WrenGoogleClientID), Notion $(has WrenNotionOAuthRelay) (values not shown)"
 
 ARCHS="$(lipo -archs "$APP/Contents/MacOS/Wren")"
 [[ "$ARCHS" == *arm64* && "$ARCHS" == *x86_64* ]] || fail "expected arm64 and x86_64, got: $ARCHS"
@@ -42,7 +44,7 @@ NESTED="$(find "$APP" -type f -perm +111 ! -path "*/MacOS/Wren" | wc -l | tr -d 
 echo "✓ architectures: $ARCHS (no nested executables)"
 
 if find "$APP" \( -name "*.store" -o -name "Fixtures" -o -name "*.p12" -o -name "*.p8" \) | grep -q .; then fail "test data or secrets in bundle"; fi
-if strings "$APP/Contents/MacOS/Wren" | grep -qE "debug capture saved|debug command proposal|debug ai step|debug restore|debug paused|debug handoff|debug connector|debug transcript"; then fail "debug hooks present"; fi
+if strings "$APP/Contents/MacOS/Wren" | grep -qE "debug capture saved|debug command proposal|debug ai step|debug restore|debug paused|debug handoff|debug connector|debug transcript|debug chatgpt|WREN_DEBUG_DATA_DIR"; then fail "debug hooks present"; fi
 echo "✓ no debug hooks, fixtures or secrets"
 
 codesign --verify --deep --strict "$APP" || fail "signature invalid"

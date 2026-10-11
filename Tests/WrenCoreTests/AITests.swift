@@ -16,6 +16,8 @@ final class RouteStub: URLProtocol, @unchecked Sendable {
     /// Per-path queues: each request takes the next response (falls back to `routes`).
     nonisolated(unsafe) static var sequences: [String: [(Int, Data)]] = [:]
     nonisolated(unsafe) static var requests: [(URLRequest, Data?)] = []
+    /// Response headers per path.
+    nonisolated(unsafe) static var headers: [String: [String: String]] = [:]
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
@@ -32,7 +34,7 @@ final class RouteStub: URLProtocol, @unchecked Sendable {
         let deliver = { [self] in
             if let code = Self.failures[path] { client?.urlProtocol(self, didFailWithError: URLError(code)); return }
             guard let (status, data) = Self.routes[path] else { client?.urlProtocol(self, didFailWithError: URLError(.cannotConnectToHost)); return }
-            client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: Self.headers[path])!, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: data)
             client?.urlProtocolDidFinishLoading(self)
         }
@@ -40,7 +42,7 @@ final class RouteStub: URLProtocol, @unchecked Sendable {
     }
     override func stopLoading() {}
 
-    static func reset() { routes = [:]; failures = [:]; delay = 0; hosts = []; sequences = [:]; requests = [] }
+    static func reset() { routes = [:]; failures = [:]; delay = 0; hosts = []; sequences = [:]; requests = []; headers = [:] }
     static func json(_ s: String, _ status: Int = 200) -> (Int, Data) { (status, Data(s.utf8)) }
     static func session() -> URLSession {
         let c = URLSessionConfiguration.ephemeral; c.protocolClasses = [RouteStub.self]; return URLSession(configuration: c)

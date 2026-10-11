@@ -2,9 +2,10 @@ import CryptoKit
 import Foundation
 import Network
 
-/// Your own Google Cloud OAuth client (type "Desktop app"). Entered in Wren and stored in the
-/// Keychain; never in source. Google treats a desktop client's secret as non-confidential, but
-/// its token endpoint still expects it for that client type, so it's optional here.
+/// Wren's Google OAuth client (type "Desktop app"), registered by Wren's maintainers and injected into
+/// the app bundle at build time (see `ProviderConfig`). Never entered by a user and never committed.
+/// Google treats a desktop client's secret as non-confidential, but its token endpoint still expects
+/// it for that client type.
 public struct GoogleOAuthConfig: Codable, Equatable, Sendable {
     public var clientID: String
     public var clientSecret: String?
@@ -48,14 +49,22 @@ public enum OAuthError: Error, Equatable, LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .denied: "You declined access in Google's consent screen."
+        case .denied: "Access wasn't granted on the consent screen. You can connect again whenever you're ready."
         case .stateMismatch: "The sign-in response didn't match this request, so it was ignored."
-        case .missingCode: "Google didn't return an authorization code."
-        case let .providerError(e): "Google returned an error: \(e)"
-        case let .scopeNotGranted(s): "Google didn't grant the needed permission (\(s)). Tick it on the consent screen."
+        case .missingCode: "The sign-in page didn't return an authorization code. Try connecting again."
+        case let .providerError(e): "Sign-in failed (\(e)). Try connecting again."
+        case let .scopeNotGranted(s): "Missing permission: Google didn't grant \(Self.plain(s)). Connect again and leave that box ticked on Google's consent screen."
         case .noRefreshToken: "Google didn't return a refresh token. Remove Wren's access in your Google account and connect again."
-        case .invalidClient: "Google rejected the OAuth client. Check the client ID (and secret) in Connectors › Google setup."
+        case .invalidClient: "Google rejected this copy of Wren's sign-in configuration. That's a problem with how Wren was built, not with your account; it needs a fix from Wren's maintainers."
         case .timedOut: "Sign-in wasn't completed within 5 minutes."
+        }
+    }
+
+    static func plain(_ scope: String) -> String {
+        switch scope {
+        case ConnectorCatalog.gmailScope: "read-only access to your email"
+        case ConnectorCatalog.calendarScope: "read-only access to your calendars"
+        default: scope
         }
     }
 }
@@ -162,7 +171,8 @@ public final class GoogleSession: @unchecked Sendable {
     public let key: String
     let store: CredentialStore
     let lock = NSLock()
-    public static let configKey = "google.oauth.client"
+    /// Where an earlier development build kept a user-entered client. Only read to delete it.
+    public static let legacyConfigKey = "google.oauth.client"
 
     public init(connector: ConnectorID, store: CredentialStore) { key = "google.\(connector.rawValue).tokens"; self.store = store }
 
@@ -170,8 +180,6 @@ public final class GoogleSession: @unchecked Sendable {
     public func save(_ t: OAuthTokens) throws { try store.writeJSON(key, t) }
     public func clear() throws { try store.delete(key) }
 
-    public static func config(_ store: CredentialStore) -> GoogleOAuthConfig? { store.readJSON(configKey, as: GoogleOAuthConfig.self) }
-    public static func saveConfig(_ c: GoogleOAuthConfig, _ store: CredentialStore) throws { try store.writeJSON(configKey, c) }
 
     /// A token valid for at least a minute, refreshing (and saving) when needed.
     public func accessToken(oauth: GoogleOAuth) async throws -> String {
@@ -184,16 +192,25 @@ public final class GoogleSession: @unchecked Sendable {
     }
 }
 
-/// One-shot HTTP listener on 127.0.0.1 for the OAuth redirect (Google's supported desktop flow).
+/// One-shot HTTP listener on 127.0.0.1 for an OAuth redirect (the supported desktop flow for Google,
+/// Sign in with ChatGPT and Wren's Notion relay). Only a GET to `path` carrying exactly the expected
+/// `state` completes the wait; anything else gets an error page and is ignored, so an unrelated local
+/// request can't consume or spoof the sign-in.
 public final class LoopbackReceiver: @unchecked Sendable {
     private var listener: NWListener?
     private let queue = DispatchQueue(label: "wren.oauth.loopback")
     private var continuation: CheckedContinuation<URL, Error>?
+    private var settled = false
+    /// A callback that arrived before `waitForRedirect` started waiting.
+    private var early: URL?
     public private(set) var port: UInt16 = 0
+    public let path: String
+    /// When set, the callback must carry exactly this `state`.
+    public var expectedState: String?
 
-    public init() {}
+    public init(path: String = "/", expectedState: String? = nil) { self.path = path; self.expectedState = expectedState }
 
-    public var redirectURL: URL { URL(string: "http://127.0.0.1:\(port)/")! }
+    public var redirectURL: URL { URL(string: "http://127.0.0.1:\(port)\(path)")! }
 
     /// Starts listening on a random free port bound to loopback only.
     public func start() async throws {
@@ -220,10 +237,12 @@ public final class LoopbackReceiver: @unchecked Sendable {
         }
     }
 
-    /// Waits for Google's redirect (or times out).
+    /// Waits for the provider's redirect (or times out).
     public func waitForRedirect(timeout: TimeInterval = 300) async throws -> URL {
         try await withThrowingTaskGroup(of: URL.self) { g in
-            g.addTask { try await withCheckedThrowingContinuation { c in self.queue.async { self.continuation = c } } }
+            g.addTask { try await withCheckedThrowingContinuation { c in self.queue.async {
+                if let u = self.early { self.early = nil; c.resume(returning: u) } else { self.continuation = c }
+            } } }
             g.addTask { try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000)); throw OAuthError.timedOut }
             defer { g.cancelAll(); stop() }
             return try await g.next()!
@@ -232,15 +251,37 @@ public final class LoopbackReceiver: @unchecked Sendable {
 
     public func stop() { listener?.cancel(); listener = nil }
 
+    public enum Verdict: Equatable { case accept, notFound, badState }
+
+    /// Pure check used by the listener (and tests).
+    public static func verdict(_ url: URL?, path: String, expectedState: String?) -> Verdict {
+        guard let url, let c = URLComponents(url: url, resolvingAgainstBaseURL: false), c.path == path,
+              let items = c.queryItems, !items.isEmpty else { return .notFound }
+        if let expectedState {
+            let states = items.filter { $0.name == "state" }
+            guard states.count == 1, states[0].value == expectedState else { return .badState }
+        }
+        return .accept
+    }
+
     private func handle(_ conn: NWConnection) {
         conn.start(queue: queue)
         conn.receive(minimumIncompleteLength: 1, maximumLength: 16 * 1024) { [weak self] data, _, _, _ in
             guard let self, let data, let req = String(data: data, encoding: .utf8) else { conn.cancel(); return }
             let url = Self.parseRequestLine(req, port: self.port)
-            let body = "<html><body style='font-family:-apple-system;padding:40px'><h2>Done</h2><p>You can close this tab and return to Wren.</p></body></html>"
-            let resp = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)"
+            let verdict = self.settled ? .notFound : Self.verdict(url, path: self.path, expectedState: self.expectedState)
+            let (status, text): (String, String) = switch verdict {
+            case .accept: ("200 OK", "<h2>Done</h2><p>You can close this tab and return to Wren.</p>")
+            case .badState: ("400 Bad Request", "<h2>This sign-in link doesn't match</h2><p>Return to the browser tab that Wren opened, or start again in Wren.</p>")
+            case .notFound: ("404 Not Found", "<h2>Not found</h2>")
+            }
+            let body = "<!doctype html><html><head><meta charset='utf-8'><title>Wren</title></head><body style='font-family:-apple-system;padding:40px'>\(text)</body></html>"
+            let resp = "HTTP/1.1 \(status)\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nReferrer-Policy: no-referrer\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)"
             conn.send(content: Data(resp.utf8), completion: .contentProcessed { _ in conn.cancel() })
-            if let url, url.query != nil, let c = self.continuation { self.continuation = nil; c.resume(returning: url) }
+            if verdict == .accept, let url {
+                self.settled = true
+                if let c = self.continuation { self.continuation = nil; c.resume(returning: url) } else { self.early = url }
+            }
         }
     }
 

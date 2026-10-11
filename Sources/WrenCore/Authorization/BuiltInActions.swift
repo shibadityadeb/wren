@@ -31,7 +31,7 @@ public enum BuiltInAction {
         .init(id: deleteEmailPermanently, category: .irreversible, permission: .emailModify, confirmation: .always,
               summary: "Permanently delete email", verification: "Message no longer retrievable"),
         .init(id: delegateToExternalAI, category: .externalWrite, permission: .externalAI, confirmation: .always,
-              summary: "Send a request to the OpenAI API", verification: "Response received; model as reported by the API"),
+              summary: "Send a request to ChatGPT using your plan", verification: "Complete response received; model requested and model reported"),
         .init(id: readCalendar, category: .externalRead, permission: .calendarRead, confirmation: .none,
               summary: "Read Google Calendar events", verification: "Provider returned events"),
         .init(id: readNotion, category: .externalRead, permission: .notionRead, confirmation: .none,

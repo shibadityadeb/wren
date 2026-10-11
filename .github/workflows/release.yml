@@ -56,6 +56,12 @@ jobs:
           MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
         run: scripts/ci-import-certificate.sh
       - name: Build universal app and DMG
+        env:
+          # Maintainer-registered provider apps; empty values build without that provider.
+          WREN_GOOGLE_CLIENT_ID: ${{ secrets.WREN_GOOGLE_CLIENT_ID }}
+          WREN_GOOGLE_CLIENT_SECRET: ${{ secrets.WREN_GOOGLE_CLIENT_SECRET }}
+          WREN_NOTION_CLIENT_ID: ${{ secrets.WREN_NOTION_CLIENT_ID }}
+          WREN_NOTION_OAUTH_RELAY: ${{ secrets.WREN_NOTION_OAUTH_RELAY }}
         run: scripts/package-dmg.sh --skip-tests
       - name: Notarize and staple
         if: env.HAS_CERT == 'true' && env.HAS_NOTARY == 'true'

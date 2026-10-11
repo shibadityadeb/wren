@@ -6,6 +6,32 @@ Each phase ends with: a green build, tests passing (commands recorded), a git co
 Deliverables: PROJECT_SPEC.md, ARCHITECTURE.md, ROADMAP.md, TEST_PLAN.md, git repository initialised in `Wren/`.
 Acceptance: architecture documented, MVP scope unambiguous, every dependency justified, core vs. later clearly split.
 
+## Milestone 7 status (2026-10-11): account-based sign-in (0.7.0)
+
+Users connect accounts by signing in on each provider's page. All end-user credential entry (Google client ID and secret, Notion token, OpenAI API key) is removed.
+
+### Verified live
+
+| What | How |
+|---|---|
+| Sign in with ChatGPT discovery and keys | OpenAI's live OpenID metadata matches the endpoints Wren uses (including revocation); Wren's Swift code builds all of OpenAI's published RS256 keys (opt-in live test) |
+| Wren's registration request is accepted | The exact authorize request Wren sends (dynamic registration, plan scope, PKCE) reaches OpenAI's sign-in page in a browser; the same request with a made-up client ID is rejected with `invalid_client` |
+| Honest connector states in the app | Debug build on a throwaway data folder: ChatGPT "Not connected", Gmail, Calendar and Notion "Not available in this build" with no setup steps for the user |
+| No silent sending | A ChatGPT request without sign-in fails with a plain message and nothing is sent |
+| Provider injection | `build-app.sh` writes Google and Notion registrations into Info.plist only when provided, XML-escaped, never printed |
+
+### Implemented, verified with mocked providers only
+
+- Completing Sign in with ChatGPT, model listing and a streamed answer with a real account: needs a person to sign in with a Plus or Pro account.
+- Google and Notion connections: need the maintainers' Google OAuth client and Notion public integration plus the deployed relay (docs/MAINTAINER_SETUP.md). Until then those connectors report "Not available in this build".
+
+Covered by tests: sign-in success, denial, forged identity, missing plan permission, expiry and refresh with rotation, 401 retry, refresh failure, revocation (confirmed and unconfirmed), usage limit (stream and status), interrupted and incomplete streams, network errors, Google scope checks, Notion relay exchange and refresh, and the relay itself.
+
+### Blockers for the maintainers
+
+- Google: `gmail.readonly` is a restricted scope. Public use needs Google's verification and a security assessment; until then only listed test users can connect and their access expires after 7 days.
+- Notion: a public integration and a deployed relay are needed before Notion can be offered.
+
 ## Milestone 6 status (2026-10-11): connectors, voice and ChatGPT handoff (0.6.0)
 
 Developed on `feat/connectors-voice-and-chatgpt` and submitted as a pull request.

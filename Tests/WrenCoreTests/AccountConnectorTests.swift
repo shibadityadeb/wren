@@ -1,0 +1,700 @@
+import Security
+import XCTest
+@testable import WrenCore
+
+private func stub() -> URLSession { RouteStub.session() }
+
+/// Simulates the browser: after the app opens the provider's page, "the provider" redirects the
+/// browser to Wren's loopback listener with the given query.
+private func redirect(to base: URL, _ query: String) {
+    let url = URL(string: base.absoluteString + "?" + query)!
+    Task.detached {
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        _ = try? await URLSession(configuration: .ephemeral).data(from: url)
+    }
+}
+
+private func query(_ url: URL) -> [String: String] {
+    Dictionary((URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []).map { ($0.name, $0.value ?? "") }) { a, _ in a }
+}
+
+private func form(_ body: Data?) -> [String: String] {
+    var c = URLComponents(); c.percentEncodedQuery = String(decoding: body ?? Data(), as: UTF8.self)
+    return Dictionary((c.queryItems ?? []).map { ($0.name, $0.value ?? "") }) { a, _ in a }
+}
+
+// MARK: - Test signing key and ID tokens
+
+final class TestSigner {
+    let key: SecKey
+    let kid = "test-key-1"
+    init() {
+        let attrs: [String: Any] = [kSecAttrKeyType as String: kSecAttrKeyTypeRSA, kSecAttrKeySizeInBits as String: 2048]
+        key = SecKeyCreateRandomKey(attrs as CFDictionary, nil)!
+    }
+
+    static func b64(_ d: Data) -> String { PKCE.base64url(d) }
+
+    /// JWKS for the public key (parses the PKCS#1 DER that Security exports).
+    var jwks: String {
+        let der = [UInt8](SecKeyCopyExternalRepresentation(SecKeyCopyPublicKey(key)!, nil)! as Data)
+        var i = 0
+        func len() -> Int {
+            let first = Int(der[i]); i += 1
+            if first < 0x80 { return first }
+            var l = 0; for _ in 0..<(first & 0x7f) { l = (l << 8) | Int(der[i]); i += 1 }; return l
+        }
+        precondition(der[i] == 0x30); i += 1; _ = len()
+        func integer() -> Data { precondition(der[i] == 0x02); i += 1; let l = len(); defer { i += l }; var b = Array(der[i..<(i + l)]); while b.first == 0 { b.removeFirst() }; return Data(b) }
+        let n = integer(), e = integer()
+        return #"{"keys":[{"kty":"RSA","kid":"\#(kid)","use":"sig","alg":"RS256","n":"\#(Self.b64(n))","e":"\#(Self.b64(e))"}]}"#
+    }
+
+    func token(_ claims: [String: Any], kid: String? = nil, alg: String = "RS256", tamper: Bool = false) -> String {
+        let h = Self.b64(try! JSONSerialization.data(withJSONObject: ["alg": alg, "kid": kid ?? self.kid, "typ": "JWT"]))
+        var p = Self.b64(try! JSONSerialization.data(withJSONObject: claims))
+        let sig = SecKeyCreateSignature(key, .rsaSignatureMessagePKCS1v15SHA256, Data((h + "." + p).utf8) as CFData, nil)! as Data
+        if tamper { p = Self.b64(try! JSONSerialization.data(withJSONObject: claims.merging(["email": "attacker@example.com"]) { $1 })) }
+        return h + "." + p + "." + Self.b64(sig)
+    }
+}
+
+enum SIWCFixture {
+    static let discovery = #"{"issuer":"https://auth.openai.com","authorization_endpoint":"https://auth.openai.com/api/accounts/authorize","token_endpoint":"https://auth.openai.com/api/accounts/oauth/token","jwks_uri":"https://auth.openai.com/.well-known/jwks.json","revocation_endpoint":"https://auth.openai.com/api/accounts/oauth/revoke"}"#
+    static let tokenPath = "/api/accounts/oauth/token"
+    static let revokePath = "/api/accounts/oauth/revoke"
+    static let allScopes = SIWC.scopes.joined(separator: " ")
+    static let models = #"{"models":[{"slug":"gpt-fast","display_name":"Fast","visibility":"list"},{"slug":"gpt-hidden","display_name":"Hidden","visibility":"hide"},{"slug":"gpt-deep","display_name":"Deep","visibility":"list"}]}"#
+
+    static func claims(aud: Any = "oaiapp_123", nonce: String? = nil, exp: TimeInterval = Date().timeIntervalSince1970 + 3600,
+                       iss: String = "https://auth.openai.com", sub: String = "user-1") -> [String: Any] {
+        var c: [String: Any] = ["iss": iss, "aud": aud, "sub": sub, "exp": exp, "iat": Date().timeIntervalSince1970,
+                                "email": "me@example.com", "https://api.openai.com/auth": ["chatgpt_plan_type": "plus"]]
+        if let nonce { c["nonce"] = nonce }
+        return c
+    }
+
+    static func tokens(_ signer: TestSigner, nonce: String?, scope: String = allScopes, access: String = "AT1", refresh: String = "RT1", idToken: Bool = true) -> (Int, Data) {
+        var o: [String: Any] = ["access_token": access, "refresh_token": refresh, "token_type": "Bearer", "expires_in": 3600, "scope": scope]
+        if idToken { o["id_token"] = signer.token(claims(nonce: nonce)) }
+        return (200, try! JSONSerialization.data(withJSONObject: o))
+    }
+
+    static func install(_ signer: TestSigner) {
+        RouteStub.routes["/.well-known/openid-configuration"] = RouteStub.json(discovery)
+        RouteStub.routes["/.well-known/jwks.json"] = RouteStub.json(signer.jwks)
+        RouteStub.routes["/v1/models"] = RouteStub.json(models)
+    }
+
+    static func sse(_ events: [String]) -> (Int, Data) {
+        (200, Data(events.map { "event: x\ndata: \($0)\n\n" }.joined().utf8))
+    }
+}
+
+// MARK: - Sign in with ChatGPT protocol
+
+final class SIWCProtocolTests: XCTestCase {
+    override func setUp() { RouteStub.reset() }
+
+    func testAuthorizationURLRegistersOnceThenReuses() throws {
+        let d = try SIWCDiscovery.parse(try JSONDecoder().decode(JSONValue.self, from: Data(SIWCFixture.discovery.utf8)))
+        let pkce = PKCE.make()
+        let first = ChatGPTAuth.authorizationURL(d, registeredClientID: nil, hostID: "urn:uuid:abc", redirect: URL(string: "http://127.0.0.1:5555/auth/callback")!,
+                                                 state: "S", nonce: "N", pkce: pkce, loginHint: nil, reconsent: false)
+        let q = query(first)
+        XCTAssertEqual(first.host, "auth.openai.com")
+        XCTAssertEqual(q["client_id"], "dynamic_agent_client")
+        XCTAssertEqual(q["agent_name_hint"], "Wren")
+        XCTAssertEqual(q["ext_agent_host_id"], "urn:uuid:abc")
+        XCTAssertEqual(q["scope"], "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct")
+        XCTAssertEqual(q["resource"], "https://api.openai.com/v1")
+        XCTAssertEqual(q["code_challenge_method"], "S256")
+        XCTAssertEqual(q["code_challenge"], pkce.challenge)
+        XCTAssertEqual(q["redirect_uri"], "http://127.0.0.1:5555/auth/callback")
+        XCTAssertNil(q["client_secret"]); XCTAssertNil(q["api_key"])
+        let again = query(ChatGPTAuth.authorizationURL(d, registeredClientID: "oaiapp_123", hostID: "urn:uuid:abc", redirect: URL(string: "http://127.0.0.1:1/auth/callback")!,
+                                                       state: "S", nonce: "N", pkce: pkce, loginHint: "me@example.com", reconsent: true))
+        XCTAssertEqual(again["client_id"], "oaiapp_123")
+        XCTAssertNil(again["agent_name_hint"], "no second registration")
+        XCTAssertEqual(again["login_hint"], "me@example.com")
+        XCTAssertEqual(again["prompt"], "consent")
+    }
+
+    func testDiscoveryMustBelongToIssuer() {
+        let bad = #"{"issuer":"https://auth.openai.com","authorization_endpoint":"https://evil.example/authorize","token_endpoint":"https://auth.openai.com/t","jwks_uri":"https://auth.openai.com/j"}"#
+        XCTAssertThrowsError(try SIWCDiscovery.parse(try JSONDecoder().decode(JSONValue.self, from: Data(bad.utf8))))
+        XCTAssertThrowsError(try SIWCDiscovery.parse(.object(["issuer": .string("https://evil.example")])))
+    }
+
+    func testCallbackValidation() {
+        let u: (String) -> URL = { URL(string: "http://127.0.0.1:1/auth/callback?" + $0)! }
+        XCTAssertEqual(try ChatGPTAuth.parseCallback(u("code=C&state=S&client_id=oaiapp_1"), expectedState: "S", registeredClientID: nil).clientID, "oaiapp_1")
+        XCTAssertEqual(try ChatGPTAuth.parseCallback(u("code=C&state=S"), expectedState: "S", registeredClientID: "oaiapp_9").clientID, "oaiapp_9")
+        XCTAssertThrowsError(try ChatGPTAuth.parseCallback(u("code=C&state=X&client_id=oaiapp_1"), expectedState: "S", registeredClientID: nil)) { XCTAssertEqual($0 as? OAuthError, .stateMismatch) }
+        XCTAssertThrowsError(try ChatGPTAuth.parseCallback(u("state=S&error=access_denied"), expectedState: "S", registeredClientID: nil)) { XCTAssertEqual($0 as? ChatGPTError, .signInCancelled) }
+        XCTAssertThrowsError(try ChatGPTAuth.parseCallback(u("code=C&state=S"), expectedState: "S", registeredClientID: nil)) { XCTAssertEqual($0 as? ChatGPTError, .registrationIncomplete) }
+        XCTAssertThrowsError(try ChatGPTAuth.parseCallback(u("code=C&state=S&client_id=dynamic_agent_client"), expectedState: "S", registeredClientID: nil))
+        XCTAssertThrowsError(try ChatGPTAuth.parseCallback(u("code=C&state=S&client_id=oaiapp_other"), expectedState: "S", registeredClientID: "oaiapp_1"))
+        XCTAssertThrowsError(try ChatGPTAuth.parseCallback(u("code=C&state=S&state=S&client_id=oaiapp_1"), expectedState: "S", registeredClientID: nil))
+    }
+
+    func testIDTokenVerification() async throws {
+        let signer = TestSigner()
+        SIWCFixture.install(signer)
+        let auth = ChatGPTAuth(session: stub())
+        let ok = try await auth.verifyIDToken(signer.token(SIWCFixture.claims(nonce: "N")), clientID: "oaiapp_123", nonce: "N")
+        XCTAssertEqual(ok.subject, "user-1"); XCTAssertEqual(ok.email, "me@example.com"); XCTAssertEqual(ok.planType, "plus")
+        let bad: [(String, String)] = [
+            (signer.token(SIWCFixture.claims(aud: "oaiapp_other", nonce: "N")), "wrong audience"),
+            (signer.token(SIWCFixture.claims(nonce: "N", iss: "https://evil.example")), "wrong issuer"),
+            (signer.token(SIWCFixture.claims(nonce: "N", exp: Date().timeIntervalSince1970 - 3600)), "expired"),
+            (signer.token(SIWCFixture.claims(nonce: "other")), "nonce mismatch"),
+            (signer.token(SIWCFixture.claims(nonce: "N"), tamper: true), "tampered payload"),
+            (signer.token(SIWCFixture.claims(nonce: "N"), kid: "unknown"), "unknown key"),
+            (signer.token(SIWCFixture.claims(nonce: "N"), alg: "none"), "alg none"),
+            (signer.token(SIWCFixture.claims(aud: ["oaiapp_123", "x"], nonce: "N")), "multiple audiences without azp"),
+            ("not.a.jwt", "garbage"),
+        ]
+        for (t, why) in bad {
+            do { _ = try await auth.verifyIDToken(t, clientID: "oaiapp_123", nonce: "N"); XCTFail(why) }
+            catch { XCTAssertEqual(error as? ChatGPTError, .identityNotVerified, why) }
+        }
+    }
+
+    func testErrorMapping() {
+        func e(_ status: Int?, _ code: String?, refresh: Bool = false) -> ChatGPTError {
+            ChatGPTError.from(status: status, body: code.map { Data(#"{"error":{"code":"\#($0)","message":"m"}}"#.utf8) }, duringRefresh: refresh)
+        }
+        XCTAssertEqual(e(429, "subscription_sharing_usage_limit_exceeded"), .usageLimitReached)
+        XCTAssertEqual(e(403, "subscription_sharing_user_not_eligible"), .notEligible)
+        XCTAssertEqual(e(403, "chatpass_v2_scope_not_authorized"), .planNotAuthorized)
+        XCTAssertEqual(e(403, nil), .planNotAuthorized, "missing scope")
+        guard case .temporarilyUnavailable = e(503, "subscription_sharing_usage_unavailable") else { return XCTFail() }
+        guard case .temporarilyUnavailable = e(503, "subscription_sharing_user_unavailable") else { return XCTFail() }
+        guard case .reauthorizationRequired = e(401, "subscription_sharing_invalid_user") else { return XCTFail() }
+        guard case .reauthorizationRequired = e(401, nil) else { return XCTFail() }
+        guard case .unsupportedRequest = e(400, "subscription_sharing_unsupported_capability") else { return XCTFail() }
+        guard case .reauthorizationRequired = ChatGPTError.from(status: 400, body: Data(#"{"error":"refresh_token_reused"}"#.utf8), duringRefresh: true) else { return XCTFail() }
+        XCTAssertEqual(ChatGPTError.from(status: 401, body: Data(#"{"error":"invalid_client"}"#.utf8)), .clientRejected)
+        guard case .temporarilyUnavailable = e(500, nil) else { return XCTFail() }
+        // Error codes from untrusted bodies are bounded.
+        XCTAssertNil(ChatGPTError.errorCode(Data(#"{"error":"<script>"}"#.utf8)))
+        // States the user sees.
+        XCTAssertEqual(ChatGPTAccountState.from(.usageLimitReached), .usageLimitReached)
+        XCTAssertEqual(ChatGPTAccountState.from(.planNotAuthorized).title, "Account connected, plan usage not authorized")
+        XCTAssertEqual(ChatGPTAccountState.from(.reauthorizationRequired("x")).title, "Reauthorization required")
+        XCTAssertEqual(ChatGPTAccountState.from(.temporarilyUnavailable("x")).title, "Temporarily unavailable")
+        XCTAssertEqual(ChatGPTAccountState.notConnected.title, "Not connected")
+        XCTAssertEqual(ChatGPTAccountState.planEnabled.title, "Connected and ChatGPT plan usage enabled")
+        XCTAssertEqual(ChatGPTAccountState.planEnabled.connectorState(email: "me@example.com"), .connected(account: "me@example.com · Using ChatGPT plan"))
+    }
+
+    func testSSEParsingAndStreamState() throws {
+        var p = SSEParser()
+        XCTAssertNil(p.feed(": keep-alive"))
+        XCTAssertNil(p.feed("event: response.output_text.delta\r"))
+        XCTAssertNil(p.feed(#"data: {"type":"response.output_text.delta","#))
+        XCTAssertNil(p.feed(#"data: "delta":"Hi"}"#))
+        XCTAssertEqual(p.feed(""), "{\"type\":\"response.output_text.delta\",\n\"delta\":\"Hi\"}")
+        var s = ResponseStreamState()
+        XCTAssertEqual(try s.apply(#"{"type":"response.output_text.delta","delta":"Hel"}"#), "Hel")
+        XCTAssertEqual(try s.apply(#"{"type":"response.output_text.delta","delta":"lo"}"#), "lo")
+        XCTAssertNil(try s.apply(#"{"type":"response.created"}"#))
+        XCTAssertFalse(s.completed, "deltas alone are not success")
+        _ = try s.apply(#"{"type":"response.completed","response":{"model":"gpt-fast-2026"}}"#)
+        XCTAssertTrue(s.completed); XCTAssertEqual(s.text, "Hello"); XCTAssertEqual(s.reportedModel, "gpt-fast-2026")
+        var f = ResponseStreamState()
+        XCTAssertThrowsError(try f.apply(#"{"type":"response.failed","response":{"error":{"code":"subscription_sharing_usage_limit_exceeded"}}}"#)) { XCTAssertEqual($0 as? ChatGPTError, .usageLimitReached) }
+        XCTAssertThrowsError(try f.apply(#"{"type":"response.incomplete"}"#)) { XCTAssertEqual($0 as? ChatGPTError, .incomplete(partial: "")) }
+        XCTAssertThrowsError(try f.apply("{not json"))
+    }
+
+    func testModelParsingAndRequestBody() throws {
+        XCTAssertEqual(try ChatGPTPlanClient.parseModels(Data(SIWCFixture.models.utf8)).map(\.slug), ["gpt-fast", "gpt-deep"], "only listed models, never hardcoded")
+        XCTAssertThrowsError(try ChatGPTPlanClient.parseModels(Data(#"{"data":[]}"#.utf8)))
+        XCTAssertThrowsError(try ChatGPTPlanClient.parseModels(Data(#"{"models":[{"slug":"","display_name":"x","visibility":"list"}]}"#.utf8)))
+        let body = try JSONDecoder().decode(JSONValue.self, from: ChatGPTPlanClient.requestBody(model: "gpt-fast", input: "Hi", instructions: nil))
+        XCTAssertEqual(body["store"], .bool(false)); XCTAssertEqual(body["stream"], .bool(true))
+        XCTAssertEqual(body["model"]?.string, "gpt-fast")
+        XCTAssertEqual(body["input"]?.array.first?["role"]?.string, "user")
+    }
+}
+
+// MARK: - ChatGPT connector, end to end through the loopback redirect
+
+@MainActor
+final class ChatGPTConnectorTests: XCTestCase {
+    var signer: TestSigner!
+    var store: InMemoryCredentialStore!
+    var grants: [Permission: Bool] = [:]
+    override func setUp() async throws {
+        RouteStub.reset(); signer = TestSigner(); store = InMemoryCredentialStore(); grants = [:]
+        SIWCFixture.install(signer)
+    }
+
+    func make(now: @escaping @Sendable () -> Date = { Date() }) -> ChatGPTConnector {
+        let c = ChatGPTConnector(store: store, statusStore: MemoryStatusStore(), session: stub(), handoffEnabled: false, selectedModel: nil,
+                                 destination: { "Safari" }, now: now)
+        c.grant = { [weak self] p, on in self?.grants[p] = on }
+        return c
+    }
+
+    /// Runs a full sign-in; `callback` builds the provider's redirect query from the authorize URL.
+    func signIn(_ c: ChatGPTConnector, reconsent: Bool = false, callback: @escaping ([String: String]) -> String) async -> URL? {
+        var opened: URL?
+        await c.connect(reconsent: reconsent) { url in
+            opened = url
+            let q = query(url)
+            redirect(to: URL(string: q["redirect_uri"]!)!, callback(q))
+        }
+        return opened
+    }
+
+    func connected() async -> ChatGPTConnector {
+        let c = make()
+        var nonce = ""
+        RouteStub.routes[SIWCFixture.tokenPath] = (0, Data())
+        _ = await signIn(c) { q in
+            nonce = q["nonce"]!
+            RouteStub.routes[SIWCFixture.tokenPath] = SIWCFixture.tokens(self.signer, nonce: nonce)
+            return "code=C1&state=\(q["state"]!)&client_id=oaiapp_123"
+        }
+        return c
+    }
+
+    func testSignInAuthorizesPlanAndDiscoversModels() async throws {
+        let c = make()
+        XCTAssertEqual(c.account, .notConnected); XCTAssertEqual(c.state.label, "Not connected")
+        let opened = await signIn(c) { q in
+            RouteStub.routes[SIWCFixture.tokenPath] = SIWCFixture.tokens(self.signer, nonce: q["nonce"]!)
+            return "code=C1&state=\(q["state"]!)&client_id=oaiapp_123&scope=x"
+        }
+        XCTAssertEqual(opened?.path, "/api/accounts/authorize")
+        XCTAssertEqual(c.account, .planEnabled, "\(c.account)")
+        XCTAssertEqual(c.state, .connected(account: "me@example.com · Using ChatGPT plan"))
+        XCTAssertEqual(c.models.map(\.slug), ["gpt-fast", "gpt-deep"])
+        XCTAssertEqual(c.selectedModel, "gpt-fast")
+        XCTAssertEqual(c.planType, "plus")
+        XCTAssertEqual(grants[.externalAI], true)
+        XCTAssertEqual(store.readString(ChatGPTConnector.registrationKey), "oaiapp_123")
+        XCTAssertTrue(store.readString(ChatGPTConnector.hostKey)!.hasPrefix("urn:uuid:"))
+        let exchange = RouteStub.requests.first { $0.0.url?.path == SIWCFixture.tokenPath }!
+        let f = form(exchange.1)
+        XCTAssertEqual(f["grant_type"], "authorization_code")
+        XCTAssertEqual(f["client_id"], "oaiapp_123")
+        XCTAssertEqual(f["resource"], "https://api.openai.com/v1")
+        XCTAssertNotNil(f["code_verifier"]); XCTAssertNil(f["client_secret"])
+        let models = RouteStub.requests.first { $0.0.url?.path == "/v1/models" }!
+        XCTAssertEqual(models.0.value(forHTTPHeaderField: "Authorization"), "Bearer AT1")
+        XCTAssertEqual(Set(RouteStub.hosts), ["auth.openai.com", "api.openai.com"], "no other hosts contacted")
+    }
+
+    func testPlanUsageNotGranted() async {
+        let c = make()
+        _ = await signIn(c) { q in
+            RouteStub.routes[SIWCFixture.tokenPath] = SIWCFixture.tokens(self.signer, nonce: q["nonce"]!, scope: "openid profile email offline_access")
+            return "code=C1&state=\(q["state"]!)&client_id=oaiapp_123"
+        }
+        XCTAssertEqual(c.account.title, "Account connected, plan usage not authorized")
+        guard case .partiallyConnected = c.state else { return XCTFail("\(c.state)") }
+        XCTAssertNotEqual(grants[.externalAI], true)
+        XCTAssertFalse(RouteStub.requests.contains { $0.0.url?.path == "/v1/models" }, "no plan calls without the plan permission")
+        do { _ = try await c.respond(model: "gpt-fast", input: "x", origin: .user(.popover)); XCTFail() }
+        catch { XCTAssertEqual(error as? ChatGPTError, .planNotAuthorized) }
+    }
+
+    func testDeniedSignInStoresNothing() async {
+        let c = make()
+        _ = await signIn(c) { q in "error=access_denied&state=\(q["state"]!)" }
+        XCTAssertEqual(c.account, .notConnected)
+        XCTAssertNil(c.connection)
+        XCTAssertEqual(c.status.lastError, ChatGPTError.signInCancelled.errorDescription)
+    }
+
+    func testForgedIdentityIsRejected() async {
+        let c = make()
+        _ = await signIn(c) { q in
+            RouteStub.routes[SIWCFixture.tokenPath] = SIWCFixture.tokens(self.signer, nonce: "not-the-nonce")
+            return "code=C1&state=\(q["state"]!)&client_id=oaiapp_123"
+        }
+        XCTAssertNil(c.connection, "tokens kept only after the identity verifies")
+        XCTAssertEqual(c.account, .notConnected)
+    }
+
+    func testStreamedInferenceAndAttribution() async throws {
+        let c = await connected()
+        RouteStub.routes["/v1/responses"] = SIWCFixture.sse([
+            #"{"type":"response.created"}"#,
+            #"{"type":"response.output_text.delta","delta":"Ten "}"#,
+            #"{"type":"response.output_text.delta","delta":"names"}"#,
+            #"{"type":"response.completed","response":{"model":"gpt-fast-2026"}}"#])
+        RouteStub.headers["/v1/responses"] = ["Content-Type": "text/event-stream; charset=utf-8"]
+        let r = try await c.respond(model: "gpt-fast", input: "Brainstorm", origin: .user(.popover))
+        XCTAssertEqual(r.text, "Ten names")
+        XCTAssertEqual(r.requestedModel, "gpt-fast"); XCTAssertEqual(r.reportedModel, "gpt-fast-2026")
+        let sent = RouteStub.requests.last!
+        XCTAssertEqual(sent.0.value(forHTTPHeaderField: "Authorization"), "Bearer AT1")
+        let body = try JSONDecoder().decode(JSONValue.self, from: sent.1!)
+        XCTAssertEqual(body["store"], .bool(false)); XCTAssertEqual(body["model"]?.string, "gpt-fast")
+    }
+
+    func testBackgroundUseIsRefused() async {
+        let c = await connected()
+        let before = RouteStub.requests.count
+        do { _ = try await c.respond(model: "gpt-fast", input: "x", origin: .system("briefing")); XCTFail() }
+        catch { XCTAssertEqual(error as? ChatGPTError, .backgroundUseNotAllowed) }
+        XCTAssertEqual(RouteStub.requests.count, before, "nothing sent")
+    }
+
+    func testUsageLimitFromStreamAndFromStatus() async throws {
+        let c = await connected()
+        RouteStub.routes["/v1/responses"] = SIWCFixture.sse([#"{"type":"response.failed","response":{"error":{"code":"subscription_sharing_usage_limit_exceeded"}}}"#])
+        do { _ = try await c.respond(model: "gpt-fast", input: "x", origin: .user(.popover)); XCTFail() }
+        catch { XCTAssertEqual(error as? ChatGPTError, .usageLimitReached) }
+        XCTAssertEqual(c.account, .usageLimitReached)
+        XCTAssertEqual(c.state.label, "Temporarily unavailable")
+        XCTAssertTrue(c.state.detail!.hasPrefix("Usage limit reached"))
+        // Never falls back to anything else: exactly one request was made.
+        XCTAssertEqual(RouteStub.requests.filter { $0.0.url?.path == "/v1/responses" }.count, 1)
+
+        RouteStub.routes["/v1/responses"] = RouteStub.json(#"{"error":{"code":"subscription_sharing_usage_limit_exceeded","message":"limit"}}"#, 429)
+        do { _ = try await c.respond(model: "gpt-fast", input: "x", origin: .user(.popover)); XCTFail() }
+        catch { XCTAssertEqual(error as? ChatGPTError, .usageLimitReached) }
+
+        RouteStub.routes["/v1/responses"] = SIWCFixture.sse([#"{"type":"response.output_text.delta","delta":"ok"}"#, #"{"type":"response.completed","response":{}}"#])
+        _ = try await c.respond(model: "gpt-fast", input: "x", origin: .user(.popover))
+        XCTAssertEqual(c.account, .planEnabled, "a successful request clears the limit")
+    }
+
+    func testInterruptedAndIncompleteKeepPartialText() async {
+        let c = await connected()
+        RouteStub.routes["/v1/responses"] = SIWCFixture.sse([#"{"type":"response.output_text.delta","delta":"Part"}"#])
+        do { _ = try await c.respond(model: "gpt-fast", input: "x", origin: .user(.popover)); XCTFail() }
+        catch { XCTAssertEqual(error as? ChatGPTError, .interrupted(partial: "Part"), "no response.completed means not a success") }
+        RouteStub.routes["/v1/responses"] = SIWCFixture.sse([#"{"type":"response.output_text.delta","delta":"Half"}"#, #"{"type":"response.incomplete"}"#])
+        do { _ = try await c.respond(model: "gpt-fast", input: "x", origin: .user(.popover)); XCTFail() }
+        catch { XCTAssertEqual(error as? ChatGPTError, .incomplete(partial: "Half")) }
+        XCTAssertEqual(c.account, .planEnabled, "a cut-off answer doesn't change the account state")
+    }
+
+    func testExpiredTokenRefreshesAndRotates() async throws {
+        let c = await connected()
+        var conn = c.connection!; conn.expiresAt = Date().addingTimeInterval(-10)
+        try store.writeJSON(ChatGPTConnector.connectionKey, conn)
+        RouteStub.routes[SIWCFixture.tokenPath] = SIWCFixture.tokens(signer, nonce: nil, access: "AT2", refresh: "RT2")
+        RouteStub.routes["/v1/responses"] = SIWCFixture.sse([#"{"type":"response.completed","response":{}}"#])
+        _ = try await c.respond(model: "gpt-fast", input: "x", origin: .user(.popover))
+        let refresh = form(RouteStub.requests.last { $0.0.url?.path == SIWCFixture.tokenPath }!.1)
+        XCTAssertEqual(refresh["grant_type"], "refresh_token"); XCTAssertEqual(refresh["refresh_token"], "RT1"); XCTAssertEqual(refresh["client_id"], "oaiapp_123")
+        XCTAssertEqual(RouteStub.requests.last!.0.value(forHTTPHeaderField: "Authorization"), "Bearer AT2")
+        XCTAssertEqual(c.connection?.refreshToken, "RT2", "rotated refresh token saved")
+    }
+
+    func testUnauthorizedRetriesOnceAfterRefresh() async throws {
+        let c = await connected()
+        RouteStub.routes[SIWCFixture.tokenPath] = SIWCFixture.tokens(signer, nonce: nil, access: "AT2", refresh: "RT2", idToken: false)
+        RouteStub.sequences["/v1/responses"] = [RouteStub.json(#"{"error":{"code":"invalid_token"}}"#, 401),
+                                               SIWCFixture.sse([#"{"type":"response.output_text.delta","delta":"ok"}"#, #"{"type":"response.completed","response":{}}"#])]
+        let r = try await c.respond(model: "gpt-fast", input: "x", origin: .user(.popover))
+        XCTAssertEqual(r.text, "ok")
+        let calls = RouteStub.requests.filter { $0.0.url?.path == "/v1/responses" }
+        XCTAssertEqual(calls.map { $0.0.value(forHTTPHeaderField: "Authorization") }, ["Bearer AT1", "Bearer AT2"])
+    }
+
+    func testRefreshFailureRequiresReauthorization() async throws {
+        let c = await connected()
+        var conn = c.connection!; conn.expiresAt = Date().addingTimeInterval(-10)
+        try store.writeJSON(ChatGPTConnector.connectionKey, conn)
+        RouteStub.routes[SIWCFixture.tokenPath] = RouteStub.json(#"{"error":"refresh_token_reused"}"#, 400)
+        await c.refresh()
+        XCTAssertEqual(c.account.title, "Reauthorization required")
+        guard case .permissionDenied = c.state else { return XCTFail() }
+        XCTAssertNil(c.connection?.accessToken); XCTAssertNil(c.connection?.refreshToken)
+        XCTAssertEqual(c.email, "me@example.com", "who to reconnect is kept, not the tokens")
+        XCTAssertEqual(grants[.externalAI], false)
+    }
+
+    func testReconnectWithSameAccount() async throws {
+        let c = await connected()
+        RouteStub.routes[SIWCFixture.tokenPath] = RouteStub.json(#"{"error":"invalid_grant"}"#, 400)
+        var conn = c.connection!; conn.expiresAt = Date().addingTimeInterval(-10)
+        try store.writeJSON(ChatGPTConnector.connectionKey, conn)
+        await c.refresh()
+        guard case .reauthorizationRequired = c.account else { return XCTFail("\(c.account)") }
+        let opened = await signIn(c) { q in
+            RouteStub.routes[SIWCFixture.tokenPath] = SIWCFixture.tokens(self.signer, nonce: q["nonce"]!, access: "AT9")
+            return "code=C2&state=\(q["state"]!)"
+        }
+        let q = query(opened!)
+        XCTAssertEqual(q["client_id"], "oaiapp_123", "reuses the registration"); XCTAssertNil(q["agent_name_hint"])
+        XCTAssertEqual(q["login_hint"], "me@example.com")
+        XCTAssertEqual(c.account, .planEnabled)
+        XCTAssertEqual(c.connection?.accessToken, "AT9")
+    }
+
+    func testNetworkErrorIsTemporary() async {
+        let c = await connected()
+        RouteStub.failures["/v1/models"] = .notConnectedToInternet
+        await c.refresh()
+        guard case .temporarilyUnavailable = c.account else { return XCTFail("\(c.account)") }
+        XCTAssertNotNil(c.connection?.accessToken, "a network error never deletes the connection")
+    }
+
+    func testDisconnectRevokesAndRemovesTokens() async throws {
+        let c = await connected()
+        c.handoffEnabled = true
+        RouteStub.routes[SIWCFixture.revokePath] = (200, Data())
+        await c.disconnect()
+        let f = form(RouteStub.requests.last { $0.0.url?.path == SIWCFixture.revokePath }!.1)
+        XCTAssertEqual(f["token"], "RT1"); XCTAssertEqual(f["token_type_hint"], "refresh_token"); XCTAssertEqual(f["client_id"], "oaiapp_123")
+        XCTAssertNil(c.connection); XCTAssertNil(c.disconnectNote)
+        XCTAssertEqual(c.account, .notConnected); XCTAssertTrue(c.models.isEmpty)
+        XCTAssertFalse(c.handoffEnabled)
+        XCTAssertEqual(grants[.externalAI], false); XCTAssertEqual(grants[.chatgptHandoff], false)
+        XCTAssertEqual(store.readString(ChatGPTConnector.registrationKey), "oaiapp_123", "registration kept for a later reconnect")
+
+        let c2 = await connected()
+        RouteStub.routes[SIWCFixture.revokePath] = (503, Data())
+        await c2.disconnect()
+        XCTAssertNil(c2.connection, "local tokens removed even when OpenAI can't confirm")
+        XCTAssertNotNil(c2.disconnectNote)
+    }
+
+    func testTokensNeverReachStatusOrState() async throws {
+        let c = await connected()
+        let status = String(decoding: try JSONEncoder().encode(c.status), as: UTF8.self)
+        for secret in ["AT1", "RT1", c.connection!.idToken] {
+            XCTAssertFalse(status.contains(secret)); XCTAssertFalse("\(c.state)".contains(secret)); XCTAssertFalse(c.account.title.contains(secret))
+        }
+    }
+}
+
+// MARK: - Notion public OAuth through the maintainers' relay
+
+@MainActor
+final class NotionOAuthTests: XCTestCase {
+    let config = NotionOAuthConfig(clientID: "1f2d3c4b-0000-4000-8000-123456789abc", relay: URL(string: "https://relay.wren.example")!)
+    var store: InMemoryCredentialStore!
+    override func setUp() async throws { RouteStub.reset(); store = InMemoryCredentialStore() }
+
+    func testAuthorizationURLAndState() {
+        let o = NotionOAuth(config: config, session: stub())
+        let s = NotionOAuth.makeState(port: 54321)
+        XCTAssertTrue(s.hasPrefix("54321.")); XCTAssertGreaterThan(s.count, 30)
+        let q = query(o.authorizationURL(state: s))
+        XCTAssertEqual(q["owner"], "user"); XCTAssertEqual(q["response_type"], "code")
+        XCTAssertEqual(q["client_id"], config.clientID)
+        XCTAssertEqual(q["redirect_uri"], "https://relay.wren.example/notion/callback")
+        XCTAssertNil(q["client_secret"])
+        XCTAssertTrue(config.isPlausible)
+        XCTAssertFalse(NotionOAuthConfig(clientID: "x", relay: URL(string: "http://relay.example")!).isPlausible, "relay must be HTTPS")
+    }
+
+    func make() -> NotionConnector { NotionConnector(config: config, store: store, statusStore: MemoryStatusStore(), session: stub()) }
+
+    func connect(_ c: NotionConnector, _ callback: @escaping (String) -> String) async {
+        await c.connect { url in
+            let state = query(url)["state"]!
+            let port = state.split(separator: ".").first!
+            redirect(to: URL(string: "http://127.0.0.1:\(port)/notion/callback")!, callback(state))
+        }
+    }
+
+    func testConnectVerifiesBeforeReportingAndDisconnectRevokes() async throws {
+        let c = make()
+        var granted: [Bool] = []
+        c.onPermissions = { granted.append($0) }
+        XCTAssertEqual(c.state, .available)
+        RouteStub.routes["/notion/token"] = RouteStub.json(#"{"access_token":"NT1","refresh_token":"NR1","bot_id":"b1","workspace_id":"w1","workspace_name":"Acme Notes","owner_name":"Sam"}"#)
+        RouteStub.routes["/v1/users/me"] = RouteStub.json(#"{"object":"user","type":"bot","bot":{"workspace_name":"Acme Notes"}}"#)
+        await connect(c) { "code=NC&state=\($0)" }
+        XCTAssertEqual(c.state, .connected(account: "Acme Notes"))
+        XCTAssertEqual(c.workspace, "Acme Notes")
+        let ex = try JSONDecoder().decode(JSONValue.self, from: RouteStub.requests.first { $0.0.url?.path == "/notion/token" }!.1!)
+        XCTAssertEqual(ex["code"]?.string, "NC")
+        XCTAssertEqual(RouteStub.requests.first { $0.0.url?.path == "/v1/users/me" }!.0.value(forHTTPHeaderField: "Authorization"), "Bearer NT1")
+        XCTAssertEqual(granted.last, true)
+
+        RouteStub.routes["/notion/revoke"] = RouteStub.json(#"{"request_id":"r"}"#)
+        await c.disconnect()
+        let rv = try JSONDecoder().decode(JSONValue.self, from: RouteStub.requests.last!.1!)
+        XCTAssertEqual(rv["token"]?.string, "NT1")
+        XCTAssertNil(c.notion.tokens); XCTAssertEqual(c.state, .disconnected); XCTAssertEqual(granted.last, false)
+        XCTAssertNil(c.disconnectNote)
+    }
+
+    func testDeniedAndRejectedCodeStoreNothing() async {
+        let c = make()
+        await connect(c) { "error=access_denied&state=\($0)" }
+        guard case .permissionDenied = c.state else { return XCTFail("\(c.state)") }
+        RouteStub.routes["/notion/token"] = RouteStub.json(#"{"error":"invalid_grant","error_description":"bad code"}"#, 400)
+        await connect(c) { "code=old&state=\($0)" }
+        guard case .permissionDenied = c.state else { return XCTFail("\(c.state)") }
+        XCTAssertNil(c.notion.tokens)
+        XCTAssertFalse(RouteStub.requests.contains { $0.0.url?.path == "/v1/users/me" })
+    }
+
+    func testWrongStateIsIgnored() async {
+        // A request with someone else's state doesn't complete sign-in; the right one still does.
+        let c = make()
+        RouteStub.routes["/notion/token"] = RouteStub.json(#"{"access_token":"NT1","workspace_name":"W"}"#)
+        RouteStub.routes["/v1/users/me"] = RouteStub.json(#"{"object":"user","type":"bot","bot":{}}"#)
+        await c.connect { url in
+            let state = query(url)["state"]!
+            let base = URL(string: "http://127.0.0.1:\(state.split(separator: ".").first!)/notion/callback")!
+            redirect(to: base, "code=EVIL&state=forged")
+            Task.detached {
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                _ = try? await URLSession(configuration: .ephemeral).data(from: URL(string: base.absoluteString + "?code=GOOD&state=\(state)")!)
+            }
+        }
+        XCTAssertEqual(c.state, .connected(account: "W"))
+        let ex = try? JSONDecoder().decode(JSONValue.self, from: RouteStub.requests.first { $0.0.url?.path == "/notion/token" }!.1!)
+        XCTAssertEqual(ex?["code"]?.string, "GOOD")
+    }
+
+    func testExpiringTokenRefreshesThroughRelayAndFailuresAreHonest() async throws {
+        let c = make()
+        try c.notion.save(NotionTokens(accessToken: "old", refreshToken: "NR1", expiresAt: Date().addingTimeInterval(-5), workspaceName: "W"))
+        RouteStub.routes["/notion/refresh"] = RouteStub.json(#"{"access_token":"new","refresh_token":"NR2","expires_in":3600}"#)
+        RouteStub.routes["/v1/users/me"] = RouteStub.json(#"{"object":"user","type":"bot","bot":{}}"#)
+        await c.refresh()
+        XCTAssertEqual(c.state, .connected(account: "W"))
+        XCTAssertEqual(c.notion.tokens?.accessToken, "new"); XCTAssertEqual(c.notion.tokens?.refreshToken, "NR2")
+
+        try c.notion.save(NotionTokens(accessToken: "x", refreshToken: "NR2", expiresAt: Date().addingTimeInterval(-5)))
+        RouteStub.routes["/notion/refresh"] = RouteStub.json(#"{"error":"invalid_grant"}"#, 400)
+        await c.refresh()
+        guard case .permissionDenied = c.state else { return XCTFail("refresh failure → reconnect: \(c.state)") }
+
+        try c.notion.save(NotionTokens(accessToken: "x"))
+        RouteStub.routes["/v1/users/me"] = RouteStub.json(#"{"object":"error","code":"unauthorized"}"#, 401)
+        await c.refresh()
+        guard case .permissionDenied = c.state else { return XCTFail("revoked in Notion → reconnect") }
+
+        RouteStub.failures["/v1/users/me"] = .networkConnectionLost
+        await c.refresh()
+        guard case .temporarilyUnavailable = c.state else { return XCTFail() }
+        XCTAssertNotNil(c.notion.tokens, "network errors keep the connection")
+
+        RouteStub.failures["/notion/revoke"] = .timedOut
+        await c.disconnect()
+        XCTAssertNil(c.notion.tokens); XCTAssertNotNil(c.disconnectNote)
+    }
+}
+
+// MARK: - Maintainer configuration and Google scopes
+
+@MainActor
+final class ProviderConfigTests: XCTestCase {
+    override func setUp() { RouteStub.reset() }
+    let google = GoogleOAuthConfig(clientID: "1234567890-abcdefghijklmnopqrstuvwxyz.apps.googleusercontent.com", clientSecret: "s")
+
+    func testReadsOnlyValidInjectedValues() {
+        XCTAssertEqual(ProviderConfig.from([:]), ProviderConfig())
+        XCTAssertNil(ProviderConfig.from(["WrenGoogleClientID": "$(WREN_GOOGLE_CLIENT_ID)"]).google, "unsubstituted placeholder")
+        XCTAssertNil(ProviderConfig.from(["WrenGoogleClientID": "nonsense"]).google)
+        let full = ProviderConfig.from(["WrenGoogleClientID": google.clientID, "WrenGoogleClientSecret": "s",
+                                        "WrenNotionClientID": "1f2d3c4b-0000-4000-8000-123456789abc", "WrenNotionOAuthRelay": "https://relay.wren.example"])
+        XCTAssertEqual(full.google, google)
+        XCTAssertEqual(full.notion?.relay.host, "relay.wren.example")
+        XCTAssertNil(ProviderConfig.from(["WrenNotionClientID": "1f2d3c4b-0000-4000-8000-123456789abc", "WrenNotionOAuthRelay": "http://insecure.example"]).notion)
+    }
+
+    func testMissingProviderIsAMaintainerBlockerNotAUserTask() async {
+        let store = InMemoryCredentialStore()
+        let g = GoogleConnector(.gmail, config: nil, store: store, statusStore: MemoryStatusStore(), session: stub())
+        let n = NotionConnector(config: nil, store: store, statusStore: MemoryStatusStore(), session: stub())
+        for s in [g.state, n.state] {
+            guard case .notAvailableInBuild = s else { return XCTFail("\(s)") }
+            XCTAssertEqual(s.label, "Not available in this build"); XCTAssertEqual(s.bucket, .unavailable)
+            let text = s.detail!.lowercased()
+            XCTAssertTrue(text.contains("nothing for you to set up"))
+            for forbidden in ["client id", "secret", "api key", "token", "google cloud", "environment"] { XCTAssertFalse(text.contains(forbidden), forbidden) }
+        }
+        var opened = false
+        await g.connect { _ in opened = true }
+        await n.connect { _ in opened = true }
+        XCTAssertFalse(opened); XCTAssertTrue(RouteStub.requests.isEmpty)
+    }
+
+    func testCatalogNeverAsksForDeveloperCredentials() {
+        for d in ConnectorCatalog.all {
+            let text = [d.summary, d.privacy, d.cleanup, d.auth.label].joined(separator: " ").lowercased()
+            for forbidden in ["paste", "client id", "client secret", "integration token", "google cloud", "environment variable", "sk-"] {
+                XCTAssertFalse(text.contains(forbidden), "\(d.id): \(forbidden)")
+            }
+        }
+        XCTAssertFalse(ConnectorID.allCases.map(\.rawValue).contains("openaiAPI"), "no API-key connector")
+        if case let .googleOAuth(scopes) = ConnectorCatalog.descriptor(.gmail).auth { XCTAssertEqual(scopes, [ConnectorCatalog.gmailScope]) } else { XCTFail() }
+        if case let .googleOAuth(scopes) = ConnectorCatalog.descriptor(.googleCalendar).auth { XCTAssertEqual(scopes, [ConnectorCatalog.calendarScope]) } else { XCTFail() }
+    }
+
+    func testGoogleScopeVerifiedOnEveryCheck() async throws {
+        let store = InMemoryCredentialStore()
+        let g = GoogleConnector(.gmail, config: google, store: store, statusStore: MemoryStatusStore(), session: stub())
+        let far = Date().addingTimeInterval(3600)
+        RouteStub.routes["/gmail/v1/users/me/profile"] = RouteStub.json(#"{"emailAddress":"me@example.com"}"#)
+        try g.google.save(OAuthTokens(accessToken: "A", refreshToken: "R", expiresAt: far, scope: ConnectorCatalog.gmailScope, account: nil))
+        await g.refresh()
+        XCTAssertEqual(g.state, .connected(account: "me@example.com"))
+
+        try g.google.save(OAuthTokens(accessToken: "A", refreshToken: "R", expiresAt: far, scope: ConnectorCatalog.calendarScope, account: nil))
+        await g.refresh()
+        guard case let .permissionDenied(m) = g.state else { return XCTFail("\(g.state)") }
+        XCTAssertTrue(m.contains("Missing permission"), m)
+
+        try g.google.save(OAuthTokens(accessToken: "A", refreshToken: "R", expiresAt: Date().addingTimeInterval(-5), scope: ConnectorCatalog.gmailScope, account: nil))
+        RouteStub.routes["/token"] = RouteStub.json(#"{"error":"invalid_grant","error_description":"Token has been expired or revoked."}"#, 400)
+        await g.refresh()
+        guard case .permissionDenied = g.state else { return XCTFail("revoked/expired refresh → reconnect") }
+
+        try g.google.save(OAuthTokens(accessToken: "A", refreshToken: "R", expiresAt: far, scope: ConnectorCatalog.gmailScope, account: nil))
+        RouteStub.failures["/gmail/v1/users/me/profile"] = .notConnectedToInternet
+        await g.refresh()
+        guard case .temporarilyUnavailable = g.state else { return XCTFail() }
+
+        RouteStub.routes["/revoke"] = (200, Data())
+        await g.disconnect()
+        XCTAssertNil(g.google.tokens)
+        XCTAssertEqual(form(RouteStub.requests.last { $0.0.url?.path == "/revoke" }!.1)["token"], "R")
+    }
+
+    func testGoogleSignInEndToEndOverLoopback() async throws {
+        let store = InMemoryCredentialStore()
+        let g = GoogleConnector(.googleCalendar, config: google, store: store, statusStore: MemoryStatusStore(), session: stub())
+        RouteStub.routes["/token"] = RouteStub.json(#"{"access_token":"A","refresh_token":"R","expires_in":3600,"scope":"https://www.googleapis.com/auth/calendar.readonly","token_type":"Bearer"}"#)
+        RouteStub.routes["/calendar/v3/calendars/primary"] = RouteStub.json(#"{"id":"me@example.com","summary":"me@example.com"}"#)
+        await g.connect { url in
+            let q = query(url)
+            XCTAssertEqual(q["scope"], ConnectorCatalog.calendarScope)
+            redirect(to: URL(string: q["redirect_uri"]!)!, "state=\(q["state"]!)&code=GC&scope=\(q["scope"]!)")
+        }
+        guard case .connected = g.state else { return XCTFail("\(g.state)") }
+        XCTAssertEqual(form(RouteStub.requests.first { $0.0.url?.path == "/token" }!.1)["code"], "GC")
+    }
+
+    func testLoopbackVerdicts() {
+        let u: (String) -> URL = { URL(string: "http://127.0.0.1:9/" + $0)! }
+        XCTAssertEqual(LoopbackReceiver.verdict(u("auth/callback?code=c&state=S"), path: "/auth/callback", expectedState: "S"), .accept)
+        XCTAssertEqual(LoopbackReceiver.verdict(u("auth/callback?code=c&state=X"), path: "/auth/callback", expectedState: "S"), .badState)
+        XCTAssertEqual(LoopbackReceiver.verdict(u("auth/callback?state=S&state=S"), path: "/auth/callback", expectedState: "S"), .badState)
+        XCTAssertEqual(LoopbackReceiver.verdict(u("favicon.ico"), path: "/auth/callback", expectedState: "S"), .notFound)
+        XCTAssertEqual(LoopbackReceiver.verdict(u("other?state=S"), path: "/auth/callback", expectedState: "S"), .notFound)
+    }
+}
+
+/// Opt-in: `WREN_LIVE_SIWC=1 swift test --filter SIWCLiveTests`. Reads only OpenAI's public metadata.
+final class SIWCLiveTests: XCTestCase {
+    func testLiveDiscoveryAndSigningKeys() async throws {
+        guard ProcessInfo.processInfo.environment["WREN_LIVE_SIWC"] != nil else { throw XCTSkip("live test") }
+        let auth = ChatGPTAuth()
+        let d = try await auth.discovery()
+        XCTAssertEqual(d.tokenEndpoint.absoluteString, "https://auth.openai.com/api/accounts/oauth/token")
+        XCTAssertNotNil(d.revocationEndpoint)
+        let (data, _) = try await URLSession.shared.data(from: d.jwksURI)
+        let kids = try JSONDecoder().decode(JSONValue.self, from: data)["keys"]!.array.compactMap { $0["kid"]?.string }
+        XCTAssertFalse(kids.isEmpty)
+        for kid in kids { _ = try await auth.publicKey(kid) }
+    }
+}

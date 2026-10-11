@@ -279,31 +279,6 @@ final class NotionTests: XCTestCase {
         XCTAssertTrue(NotionClient.plainText(blocks).contains("  Nested note"))
     }
 
-    func testConnectorValidatesBeforeSavingAndCleansUp() async throws {
-        let store = InMemoryCredentialStore()
-        let c = NotionConnector(store: store, statusStore: MemoryStatusStore(), session: session())
-        var granted: [Bool] = []
-        c.onPermissions = { granted.append($0) }
-        XCTAssertEqual(c.state, .available)
-        await c.connect(token: "hello")
-        guard case .setupRequired = c.state else { return XCTFail() }
-        RouteStub.routes["/v1/users/me"] = RouteStub.json(#"{"code":"unauthorized"}"#, 401)
-        await c.connect(token: "ntn_badbadbadbadbadbadbad")
-        guard case .permissionDenied = c.state else { return XCTFail("\(c.state)") }
-        XCTAssertNil(store.readString("notion.token"), "rejected tokens are never stored")
-        RouteStub.routes["/v1/users/me"] = RouteStub.json(#"{"object":"user","type":"bot","name":"Wren","bot":{"workspace_name":"Shibaditya's Notion"}}"#)
-        await c.connect(token: "ntn_goodgoodgoodgoodgoodgood")
-        XCTAssertEqual(c.state, .connected(account: "Shibaditya's Notion · integration “Wren”"))
-        XCTAssertNotNil(c.status.lastSuccessfulSync)
-        RouteStub.routes["/v1/users/me"] = (503, Data())
-        await c.refresh()
-        guard case .temporarilyUnavailable = c.state else { return XCTFail() }
-        await c.disconnect()
-        XCTAssertEqual(c.state, .disconnected)
-        XCTAssertNil(store.readString("notion.token"))
-        XCTAssertEqual(granted.last, false)
-    }
-
     func testCreatePageOnlyAfterConfirmation() async throws {
         let h = try Harness(now: Date(), calendar: calendar("Asia/Kolkata"))
         try h.policy.setGrant(.notionWrite, granted: true)
@@ -322,40 +297,7 @@ final class NotionTests: XCTestCase {
 }
 
 @MainActor
-final class OpenAIConnectorTests: XCTestCase {
-    override func setUp() { RouteStub.reset() }
-
-    func testKeyValidatedModelChosenAndAttribution() async throws {
-        let store = InMemoryCredentialStore()
-        let c = OpenAIConnector(store: store, statusStore: MemoryStatusStore(), session: session(), selectedModel: nil)
-        RouteStub.routes["/v1/models"] = RouteStub.json(#"{"error":{"message":"Incorrect API key"}}"#, 401)
-        await c.connect(key: "sk-wrongwrongwrongwrongwrong")
-        guard case .permissionDenied = c.state else { return XCTFail() }
-        XCTAssertNil(store.readString("openai.apiKey"))
-        RouteStub.routes["/v1/models"] = RouteStub.json(#"{"data":[{"id":"model-b"},{"id":"model-a"}]}"#)
-        await c.connect(key: "sk-rightrightrightrightright")
-        guard case .partiallyConnected = c.state else { return XCTFail("needs a model choice") }
-        XCTAssertEqual(c.models, ["model-a", "model-b"], "from the account's list, not hardcoded")
-        c.selectedModel = "model-a"; await c.refresh()
-        XCTAssertEqual(c.state, .connected(account: "Model: model-a"))
-
-        RouteStub.routes["/v1/responses"] = RouteStub.json(#"{"id":"resp_1","model":"model-a-2026-01-01","status":"completed","output":[{"type":"reasoning","summary":[]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Ten names: …"}]}],"usage":{"input_tokens":12,"output_tokens":40}}"#)
-        let r = try await c.client.respond(model: "model-a", input: "Brainstorm names", instructions: nil)
-        XCTAssertEqual(r.text, "Ten names: …")
-        XCTAssertEqual(r.reportedModel, "model-a-2026-01-01", "attribution is what the API reported")
-        XCTAssertEqual(r.outputTokens, 40)
-        let sent = RouteStub.requests.last!
-        XCTAssertEqual(sent.0.value(forHTTPHeaderField: "Authorization"), "Bearer sk-rightrightrightrightright")
-        XCTAssertTrue(String(decoding: sent.1!, as: UTF8.self).contains("\"model\":\"model-a\""))
-
-        RouteStub.failures["/v1/responses"] = .timedOut
-        do { _ = try await c.client.respond(model: "model-a", input: "x", instructions: nil); XCTFail() } catch { XCTAssertEqual(error as? ConnectorError, .timedOut) }
-
-        await c.disconnect()
-        XCTAssertNil(store.readString("openai.apiKey"), "key removed from the store")
-        XCTAssertEqual(c.state, .disconnected)
-    }
-
+final class ExternalAIConfirmationTests: XCTestCase {
     func testEachAPIRequestNeedsConfirmationAndPrivateNeedsExplicitInclusion() async throws {
         let h = try Harness(now: Date(), calendar: calendar("Asia/Kolkata"))
         try h.policy.setGrant(.externalAI, granted: true)
