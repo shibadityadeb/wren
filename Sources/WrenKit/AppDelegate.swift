@@ -94,7 +94,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
                         choose: { [weak self] c, p in self?.chooseCandidate(c, p) },
                         saveAsNew: { [weak self] in self?.saveAsNew($0) },
                         openAISetup: { [weak self] in self?.openAISetup() },
-                        toggleVoice: { [weak self] in self?.toggleVoice() })
+                        toggleVoice: { [weak self] in self?.toggleVoice() },
+                        askAction: { [weak self] a in self?.askAction(a) })
         }
         panel.onCancel = { [weak self] in self?.cancelCapture() }
         panel.onResign = { [weak self] in
@@ -224,6 +225,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
                 if case .answer = r { closeAfter(12) }
             case let .failed(m):
                 captureState.status = m
+            case let .ask(r):
+                showAsk(r, channel: .voice)
             }
             voice.finishedHandling()
         }
@@ -234,6 +237,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
         switch r {
         case .saved: return "saved as a new item"
         case let .failed(m): return "failed: \(m)"
+        case let .ask(r): return r.target == .chatgpt ? "ask ChatGPT" : "general question (choose who answers)"
         case let .resolution(res):
             switch res {
             case let .answer(a): return "answer: \(a.title.hasPrefix("Reminder set") ? "reminder set" : "\(a.lines.count) lines")"
@@ -283,7 +287,112 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
             case .saved: closeCapture()
             case let .resolution(r): captureState.reply = r
             case let .failed(msg): captureState.status = msg
+            case let .ask(r): showAsk(r, channel: .hotkey)
             }
+        }
+    }
+
+    // MARK: Ask ChatGPT / local AI from the panel
+
+    private var askChannel: UserChannel = .hotkey
+
+    /// Shows the Ask card. A request explicitly addressed to ChatGPT runs at once: the user named the
+    /// assistant and pressed Return on exactly this text. A question that names no assistant waits
+    /// for the user to choose.
+    private func showAsk(_ r: AIRequest, channel: UserChannel) {
+        askChannel = channel
+        captureState.reply = nil
+        var card = AskCard(request: r, destination: r.target == .chatgpt ? .chatgpt : .choose)
+        card.localAvailable = model.ai.usableModel != nil
+        captureState.ask = card
+        if card.destination == .chatgpt { askAction(.run(.chatgpt)) }
+    }
+
+    private func askAction(_ a: AskAction) {
+        guard var card = captureState.ask else { return }
+        switch a {
+        case let .run(dest):
+            // One request at a time: a second Return or click while sending does nothing.
+            guard card.phase != .sending else { return }
+            let target: AskCard.Destination = dest == .choose ? .chatgpt : dest
+            if card.destination != target { card.destination = target }
+            card.phase = .sending; card.streamed = ""; card.note = nil
+            captureState.ask = card
+            captureState.busy = true
+            let request = card.request, channel = askChannel
+            Task {
+                let outcome: AskOutcome
+                if target == .local {
+                    outcome = await model.askLocalModel(request) ?? .failed("Local AI isn't set up. Set it up in Wren › Local AI, or ask ChatGPT.", retryable: false)
+                } else {
+                    outcome = await model.askChatGPT(request, channel: channel) { [weak self] d in
+                        guard let self, self.captureState.ask?.phase == .sending else { return }
+                        self.captureState.ask?.streamed += d
+                    }
+                }
+                captureState.busy = false
+                guard captureState.ask?.request == request else { return }
+                captureState.ask?.phase = Self.phase(for: outcome)
+                appLog.notice("ask \(target == .local ? "local" : "chatgpt", privacy: .public): \(String(describing: Self.phase(for: outcome)).prefix(40), privacy: .public)")
+            }
+        case .connect:
+            card.phase = .connecting; captureState.ask = card
+            model.connectChatGPT { [weak self] in
+                guard let self, self.captureState.ask?.request == card.request else { return }
+                self.showCapture()
+                if self.model.hub.chatgpt.account.canSend {
+                    self.captureState.ask?.phase = .ready
+                    self.captureState.ask?.destination = .chatgpt
+                    self.captureState.ask?.note = "Connected. Press Return to ask."
+                } else {
+                    self.captureState.ask?.phase = Self.phase(for: .notConnected)
+                    self.captureState.ask?.note = self.model.hub.chatgpt.account.reason ?? "ChatGPT isn't connected yet."
+                }
+            }
+        case .allowPlan:
+            card.phase = .connecting; captureState.ask = card
+            model.connectChatGPT(reconsent: true) { [weak self] in
+                guard let self, self.captureState.ask?.request == card.request else { return }
+                self.showCapture()
+                self.captureState.ask?.phase = self.model.hub.chatgpt.account.canSend ? .ready : .needsPermission(self.model.hub.chatgpt.account.reason ?? "Plan usage is still not allowed.")
+            }
+        case .manageUsage:
+            NSWorkspace.shared.open(SIWC.manageUsageURL)
+        case .openDelegate:
+            model.delegationDraft = (card.request.prompt, card.request.depth)
+            model.route = .delegate
+            closeCapture()
+            model.openMainWindow()
+        case .openAnswer:
+            model.route = .delegate
+            closeCapture()
+            model.openMainWindow()
+        case .copyAnswer:
+            switch card.phase {
+            case let .answered(t, _, _), let .partial(t, _, _, _):
+                NSPasteboard.general.clearContents(); NSPasteboard.general.setString(t, forType: .string)
+                captureState.status = "Copied"
+            default: break
+            }
+        case .saveAsNote:
+            // Explicit capture: keep exactly what was typed, without running it.
+            if model.capture(card.request.original, source: askChannel == .voice ? .voice : .hotkey) {
+                captureState.ask = nil
+                closeCapture()
+            }
+        }
+    }
+
+    static func phase(for o: AskOutcome) -> AskCard.Phase {
+        switch o {
+        case let .answered(t, s, id): .answered(text: t, source: s, recordID: id)
+        case let .partial(t, s, id, m): .partial(text: t, source: s, recordID: id, message: m)
+        case .notConnected: .notConnected
+        case let .reconnect(m): .reconnect(m)
+        case let .needsPermission(m): .needsPermission(m)
+        case let .usageLimit(m): .usageLimit(m)
+        case let .needsReview(m): .needsReview(m)
+        case let .failed(m, r): .failed(m, retryable: r)
         }
     }
 
@@ -310,6 +419,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
     private func closeCapture() {
         captureState.text = ""
         captureState.reply = nil
+        captureState.ask = nil
         captureState.status = ""
         model.settings.captureDraft = ""
         panel.orderOut(nil)
@@ -460,6 +570,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
                     switch reply {
                     case .saved: appLog.notice("debug command saved as new capture")
                     case let .failed(m): appLog.notice("debug command failed: \(m, privacy: .public)")
+                    case let .ask(r):
+                        appLog.notice("debug command ask: target=\(r.target?.rawValue ?? "choose", privacy: .public) prompt=\(r.prompt, privacy: .public)")
+                        showCapture(); captureState.text = text
+                        showAsk(r, channel: .hotkey)
                     case let .resolution(r):
                         switch r {
                         case let .proposal(p):

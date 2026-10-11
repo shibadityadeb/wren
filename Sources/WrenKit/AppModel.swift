@@ -36,6 +36,8 @@ final class AppModel {
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
     /// Keeps macOS's scheduled reminder notifications in line with the store.
     @ObservationIgnored var reminders: ReminderScheduler?
+    /// "Ask ChatGPT" from the capture panel.
+    @ObservationIgnored var asks: AskService?
     @ObservationIgnored private var reconcileTask: Task<Void, Never>?
     /// Result of the last reconcile, for Settings and confirmations.
     var reminderSync = ReconcileReport()
@@ -144,6 +146,7 @@ final class AppModel {
         insightSettings = settings.insights
         pause = settings.pause
         hub = ConnectorHub(settings: settings, policy: policyStore)
+        if let s, let b = broker { asks = AskService(store: s, broker: b, chatgpt: hub.chatgpt, clock: clock) }
         engine?.externalBriefing = { [weak self] in await self?.externalBriefing() }
         reload()
         notifications.onResponse = { [weak self] r in self?.handle(r) }
