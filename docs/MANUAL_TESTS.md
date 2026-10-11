@@ -1,6 +1,6 @@
 # Manual and live tests
 
-Automated tests (`swift test`, `node --test services/notion-oauth-relay/relay.test.mjs`) cover the
+Automated tests (`swift test`) cover the
 logic with fakes: they are not live tests. This page lists what needs a real Mac session, a person,
 an account or real time, and what has actually been run. Use a **Wren Dev** build
 (`scripts/build-app.sh debug --dev-identity`) so tests never touch the installed Wren's data.
@@ -24,7 +24,9 @@ an account or real time, and what has actually been run. Use a **Wren Dev** buil
 | ChatGPT | Wren's authorization request is accepted by OpenAI (reaches the sign-in page; a made-up client is rejected) | Run in a browser |
 | ChatGPT | Full sign-in, model list, a real answer, reconnect, refresh, usage limit, disconnect | **Not run**: needs your ChatGPT Plus or Pro sign-in |
 | Google | Consent, partial grant, adding a permission, cancel, denial, nothing granted, expiry, revocation, disconnect | Run against stubbed Google endpoints over a real loopback redirect (automated); **not run against Google**: no maintainer client ID registered yet |
-| Notion | Any live connection | **Not run**: blocked on the maintainers' Notion integration + relay |
+| Notion | Registration with a loopback redirect and reaching Notion's consent page | Run against the live Notion MCP service; full sign-in **not run** (needs a Notion account) |
+| Notion | Sign-in, tools, denial, cancel, wrong issuer, refresh, expiry, network, disconnect | Run against stubbed Notion endpoints over a real loopback redirect (automated) |
+| Calendar (this Mac) | Reading events through macOS | **Not run**: needs a person to allow Calendars access |
 
 ## Steps
 
@@ -73,5 +75,12 @@ Debug check at any point: `open -a "$PWD/build/Wren Dev.app" "wren-dev://debug/r
 5. Remove Wren at myaccount.google.com › Security › Third-party access, then Check again: Reauthorization required.
 6. Disconnect Google: Wren's entry disappears from your Google account's third-party access list.
 
-### Notion (after the maintainers' setup)
-Connect, search Notion, then Disconnect. Check that Wren shows the workspace and that disconnecting revokes access.
+### Notion (no setup needed)
+1. Connectors › Notion › Connect Notion. Sign in on Notion's page and allow. Wren comes back and shows "Connected to the workspace …".
+2. Search Notion in the connector page and in Delegate; add a page as context; create a page (confirm first).
+3. Deny on Notion's page: Wren says nothing was connected. Disconnect: Wren removes the sign-in.
+
+### Calendar (this Mac)
+1. Connectors › Calendar › Use this Mac's calendars. macOS asks for Calendars access; allow.
+2. Wren shows how many calendars it found and which accounts. Ask "what meetings do I have tomorrow?".
+3. Deny access instead: Missing permissions with a Privacy Settings button.

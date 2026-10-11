@@ -35,7 +35,7 @@ plist() { /usr/libexec/PlistBuddy -c "Print :$1" "$APP/Contents/Info.plist"; }
 [[ -f "$APP/Contents/Resources/Wren.icns" ]] || fail "icon missing"
 echo "✓ bundle: com.shibadityadeb.wren $VERSION, Dock app with one menu-bar item, macOS 14+"
 has() { /usr/libexec/PlistBuddy -c "Print :$1" "$APP/Contents/Info.plist" >/dev/null 2>&1 && echo "included" || echo "not included"; }
-echo "• provider sign-in: Google $(has WrenGoogleClientID), Notion $(has WrenNotionOAuthRelay) (values not shown)"
+echo "• provider sign-in: Google $(has WrenGoogleClientID) (value not shown); ChatGPT and Notion need no registration"
 
 ARCHS="$(lipo -archs "$APP/Contents/MacOS/Wren")"
 [[ "$ARCHS" == *arm64* && "$ARCHS" == *x86_64* ]] || fail "expected arm64 and x86_64, got: $ARCHS"

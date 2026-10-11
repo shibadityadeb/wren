@@ -178,6 +178,7 @@ struct ConnectorDetailView: View {
     @ViewBuilder func setup(_ state: ConnectorState) -> some View {
         switch id {
         case .gmail, .googleCalendar: googleSetup(state)
+        case .macCalendar: macCalendarSetup(state)
         case .notion: notionSetup(state)
         case .chatgpt: chatgptSetup(state)
         case .voice: voiceSetup(state)
@@ -225,24 +226,49 @@ struct ConnectorDetailView: View {
         }
     }
 
+    @ViewBuilder func macCalendarSetup(_ state: ConnectorState) -> some View {
+        let m = model.hub.macCalendar
+        VStack(alignment: .leading, spacing: 8) {
+            if state.isUsable {
+                connectedActions(state)
+                Toggle("Include in the morning briefing", isOn: Binding(get: { model.policy.rules.contains(.includeConnectedSourcesInBriefing) },
+                                                                      set: { model.setRule(.includeConnectedSourcesInBriefing, $0) })).font(.callout)
+                CalendarPeek(model: model)
+                Text("To add a Google calendar here, add your Google account in System Settings › Internet Accounts and turn on Calendars.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("Wren reads the calendars already on this Mac in Apple's Calendar app: iCloud, Google, Outlook and others you added in System Settings › Internet Accounts. Read-only, and nothing leaves your Mac. No sign-in: macOS asks once for access.")
+                    .font(.callout).fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Button(m.enabled && m.status != .notDetermined ? "Check again" : "Use this Mac's calendars") {
+                        if m.enabled && m.status != .notDetermined { Task { await m.refresh(); model.connectorsChanged() } } else { model.connectMacCalendar() }
+                    }.buttonStyle(.borderedProminent).tint(WrenTheme.accent)
+                    if case .missingPermissions = state {
+                        Button("Privacy Settings…") { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars")!) }
+                    }
+                }
+            }
+        }
+    }
+
     @ViewBuilder func notionSetup(_ state: ConnectorState) -> some View {
         let n = model.hub.notion
         VStack(alignment: .leading, spacing: 8) {
-            if !n.isConfigured {
-                notInBuild(state)
-            } else if state.isUsable {
-                if let w = n.workspace { Text("Workspace: \(w)").font(.callout) }
+            if state.isUsable {
+                if let w = n.workspace { Text("Connected to the workspace “\(w)”").font(.callout) }
                 connectedActions(state)
-                Button("Change which pages Wren can use…") { model.connectNotion() }.buttonStyle(.link).font(.caption)
                 NotionPeek(model: model)
             } else {
-                Text("Wren opens Notion in your browser. Pick the workspace and the pages Wren may use; Wren can't see anything else. You can change the pages later.")
+                Text("Wren opens Notion's sign-in page in your browser. Sign in, choose the workspace, and allow access. You come back to Wren automatically. There's nothing to set up in Notion first.")
                     .font(.callout).fixedSize(horizontal: false, vertical: true)
+                Text("Wren uses Notion's official connection for apps (Notion MCP). It reads pages when you ask and creates a page only after you confirm. Notion asks you to connect again after 30 days without use.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 HStack {
-                    Button(state == .connecting ? "Waiting for Notion…" : (n.notion.tokens == nil ? "Connect Notion" : "Reconnect")) { model.connectNotion() }
+                    Button(state == .connecting ? "Waiting for Notion…" : (n.isSignedIn ? "Reconnect" : "Connect Notion")) { model.connectNotion() }
                         .disabled(state == .connecting).buttonStyle(.borderedProminent).tint(WrenTheme.accent)
-                    if state.bucket == .needsSetup && state != .connecting { Button("Disconnect", role: .destructive) { model.disconnect(id) } }
+                    if n.isSignedIn { Button("Disconnect", role: .destructive) { model.disconnect(id) } }
                 }
+                if let e = n.lastConnectError { Text(e).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
             }
             if let note = n.disconnectNote { Text(note).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
         }
@@ -429,7 +455,7 @@ struct NotionPeek: View {
     @State private var error: String?
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            TextField("Search the pages you chose", text: $q).textFieldStyle(.roundedBorder).controlSize(.small)
+            TextField("Search Notion", text: $q).textFieldStyle(.roundedBorder).controlSize(.small)
                 .onSubmit { Task { do { pages = try await model.notionSearch(q); error = nil } catch { self.error = model.errorText(error) } } }
             if let error { Text(error).font(.caption).foregroundStyle(.orange) }
             ForEach(pages) { p in
@@ -439,7 +465,7 @@ struct NotionPeek: View {
                     if let u = p.url { Link("Open", destination: u).font(.caption) }
                 }
             }
-            Text("Only pages you chose in Notion appear here.").font(.caption2).foregroundStyle(.tertiary)
+            Text("Searches the Notion workspace you connected.").font(.caption2).foregroundStyle(.tertiary)
         }
     }
 }
@@ -459,9 +485,8 @@ struct GoogleAccountCard: View {
         let granted = g.grantedScopes
         VStack(alignment: .leading, spacing: 8) {
             Text("Google account").font(.callout.weight(.semibold))
-            if !model.hub.providers.googleVerified {
-                Label("Google hasn't finished reviewing Wren yet. Until it does, Google shows an “unverified app” warning and only test accounts added by Wren's maintainers can connect; others see an error from Google.",
-                      systemImage: "exclamationmark.shield").font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+            if let notice = model.hub.providers.googleStatus.userNotice, !g.isSignedIn || model.hub.providers.googleStatus == .testing {
+                Label(notice, systemImage: "info.circle").font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             if model.googleConnecting {
                 HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Waiting for you to finish on Google's page in your browser…").font(.callout) }

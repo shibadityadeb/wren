@@ -10,6 +10,11 @@ public struct CalendarEvent: Equatable, Sendable, Identifiable {
     public var isRecurring: Bool
     public var link: URL?
 
+    public init(id: String, title: String, start: Date, end: Date, isAllDay: Bool, location: String?, isRecurring: Bool, link: URL?) {
+        self.id = id; self.title = title; self.start = start; self.end = end; self.isAllDay = isAllDay
+        self.location = location; self.isRecurring = isRecurring; self.link = link
+    }
+
     public func timeText(calendar: Calendar, now: Date) -> String {
         if isAllDay { return "\(DueText.describe(start, hasTime: false, now: now, calendar: calendar)), all day" }
         var f = Date.FormatStyle(date: .omitted, time: .shortened); f.timeZone = calendar.timeZone

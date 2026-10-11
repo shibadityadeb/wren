@@ -210,7 +210,7 @@ public final class GoogleSession: @unchecked Sendable {
 }
 
 /// One-shot HTTP listener on 127.0.0.1 for an OAuth redirect (the supported desktop flow for Google,
-/// Sign in with ChatGPT and Wren's Notion relay). Only a GET to `path` carrying exactly the expected
+/// Sign in with ChatGPT and Notion). Only a GET to `path` carrying exactly the expected
 /// `state` completes the wait; anything else gets an error page and is ignored, so an unrelated local
 /// request can't consume or spoof the sign-in.
 public final class LoopbackReceiver: @unchecked Sendable {

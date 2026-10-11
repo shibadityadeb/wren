@@ -30,7 +30,7 @@ struct DelegateView: View {
             case .localModel: model.ai.usableModel != nil
             case .notionSearch: h.notion.state.isUsable
             case .gmailSearch: h.gmail.state.isUsable
-            case .calendarLookup: h.calendar.state.isUsable
+            case .calendarLookup: model.calendarUsable
             }
         }
     }

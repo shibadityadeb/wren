@@ -1,7 +1,7 @@
 import Foundation
 
 public enum ConnectorID: String, Codable, Sendable, CaseIterable, Identifiable {
-    case chatgpt, voice, gmail, notion, googleCalendar, localFiles, shortcuts
+    case chatgpt, voice, gmail, notion, macCalendar, googleCalendar, localFiles, shortcuts
     public var id: String { rawValue }
 }
 
@@ -90,7 +90,7 @@ public enum ConnectorAuth: Equatable, Sendable {
         case let .macOSPermission(p): "macOS permission: \(p.joined(separator: ", "))"
         case .chatgptSignIn: "Sign in with ChatGPT in your browser. No API key; uses your ChatGPT plan, not API billing."
         case let .googleOAuth(s): "Connect Google (one sign-in for Gmail and Calendar) on Google's own page. This part needs \(s.map(OAuthError.plain).joined(separator: ", "))."
-        case .notionOAuth: "Connect Notion in your browser and choose the pages Wren may use."
+        case .notionOAuth: "Connect Notion on Notion's own sign-in page. Nothing to set up first."
         case .planned: "Not decided yet"
         }
     }
@@ -183,16 +183,27 @@ public enum ConnectorCatalog {
               cleanup: "Disconnecting revokes Wren's access with Google, deletes the token from this Mac and deletes any cached mail.",
               hosts: ["gmail.googleapis.com", "oauth2.googleapis.com", "accounts.google.com"], isPlanned: false),
         .init(id: .notion, name: "Notion", systemImage: "doc.text",
-              summary: "Connect your Notion workspace and choose, on Notion's own screen, which pages Wren may use. Search and read those pages, include them in a request, and create a page after you confirm.",
+              summary: "Connect your Notion workspace on Notion's own sign-in page. Search and read pages, include them in a request, and create a page after you confirm.",
               auth: .notionOAuth,
-              capabilities: [.init(name: "Search the pages you chose", implemented: true, external: true),
+              capabilities: [.init(name: "Search your workspace", implemented: true, external: true),
                              .init(name: "Read page content", implemented: true, external: true),
                              .init(name: "Create a page (asks first)", implemented: true, external: true)],
               permissions: [.notionRead, .notionWrite],
-              privacy: "Wren sees only the pages you pick when you connect. Page content is fetched when you ask and not stored. Sign-in finishes through a small Wren service that holds Wren's Notion app secret; it passes the token to Wren and keeps nothing. The token is kept in a private file in Wren's data folder that only your macOS account can read.",
+              privacy: "Wren connects through Notion's official connection for apps (Notion MCP) and sees what your Notion account can see in that workspace. Page content is fetched when you ask and not stored. Creating a page always asks first. The token is kept in a private file in Wren's data folder that only your macOS account can read.",
               cleanup: "Disconnecting revokes the token with Notion and deletes it from this Mac.",
               hosts: ["api.notion.com"], isPlanned: false),
-        .init(id: .googleCalendar, name: "Google Calendar", systemImage: "calendar",
+        .init(id: .macCalendar, name: "Calendar", systemImage: "calendar",
+              summary: "Read-only: the calendars already on this Mac in Apple's Calendar app, including Google, iCloud and Outlook accounts added in System Settings › Internet Accounts. Today's schedule, “what meetings do I have tomorrow?”, events in the briefing, and reminders from events.",
+              auth: .macOSPermission(["Calendars"]),
+              capabilities: [.init(name: "Read and search events", implemented: true, external: false),
+                             .init(name: "Events in the morning briefing", implemented: true, external: false),
+                             .init(name: "Create a Wren reminder from an event", implemented: true, external: false),
+                             .init(name: "Create or change events", implemented: false, external: false)],
+              permissions: [.calendarRead],
+              privacy: "Read-only, on this Mac: events are read from macOS when needed and not stored or sent anywhere. No Google or other sign-in is needed; macOS asks once for Calendars access.",
+              cleanup: "Turning it off stops Wren reading your calendars. Remove the macOS permission in System Settings › Privacy & Security › Calendars.",
+              hosts: [], isPlanned: false),
+        .init(id: .googleCalendar, name: "Google Calendar (direct)", systemImage: "calendar",
               summary: "Read-only: today's schedule, upcoming events, search, questions like “what meetings do I have tomorrow?”, events in the morning briefing, and reminders from events.",
               auth: .googleOAuth(scopes: [calendarScope]),
               capabilities: [.init(name: "Read and search events", implemented: true, external: true),
