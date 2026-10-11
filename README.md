@@ -22,7 +22,7 @@ Each release has `Wren-macOS-universal.dmg` (signed and notarized) or, until sig
 
 1. Open the `.dmg`.
 2. Drag **Wren** into **Applications**, then eject the disk image.
-3. Open Wren from Applications. It has no Dock icon: look for the bird in the menu bar.
+3. Open Wren from Applications. It appears in the Dock and as a bird in the menu bar. If an older Wren is running, quit it first (right-click its bird › Quit Wren).
 
 **Unsigned preview builds** are blocked by macOS the first time. Open Wren once, then go to **System Settings › Privacy & Security** and click **Open Anyway**. Do this only for a file from this repository whose checksum matches.
 
@@ -52,7 +52,12 @@ The script compiles the Swift package, regenerates the icon from `assets/logo.pn
 
 ## Using Wren
 
-**Opening Wren** from Applications, Spotlight or Finder shows its window: what Wren does, your open commitments, active goals and waiting items, today's overdue and due items, upcoming reminders, Local AI status, and a **New capture** button. The sidebar has Items, Goals, Review, Local AI and Settings. Closing the window doesn't quit Wren: it keeps running in the menu bar (the bird), with no Dock icon. **Open Wren** in the menu, or opening the app again, brings the window back. When Wren starts at login it stays quietly in the menu bar.
+**Wren is a normal Mac app.** It has a Dock icon, a Wren menu (About Wren, Settings…, Hide Wren, Quit Wren), and exactly one bird in the menu bar. All of them are the same running Wren. Opening Wren from the Dock, Applications, Spotlight or Finder shows its window: what Wren does, your open commitments, goals and waiting items, today's overdue and due items, upcoming reminders, and **New reminder** and **New capture** buttons.
+
+- **Closing the window** keeps Wren running in the menu bar, so "Hey Wren", the shortcuts, the briefing and the check-in keep working. Click the Dock icon or the bird to get it back.
+- **Quitting** (⌘Q, Wren › Quit Wren, or right-click the bird › Quit Wren) stops everything, including the microphone, and removes the bird. Reminders are scheduled with macOS, so they still arrive after you quit. Open Wren from the Dock or Applications to start it again.
+- **Only one Wren runs at a time.** Opening it again brings the running one forward, and Wren locks its data folder so two copies can never change your data at once.
+- **Open at login** is in Settings › Startup (off until you turn it on). Started at login, Wren stays in the menu bar without opening its window.
 
 | Do this | How |
 |---|---|
@@ -76,7 +81,27 @@ The script compiles the Swift package, regenerates the icon from `assets/logo.pn
 | Pause notifications | **Pause** at the bottom of the menu, or Settings › Notifications: for 1 hour, until the end of today, or until you resume |
 | Export, back up, restore | Settings › Your data |
 | Reset | Settings › Reset |
-| Quit | **Quit**, at the bottom of the menu. |
+| Set a reminder | Type or say "remind me to call Sam tomorrow at 10 AM", "remind me to submit the report Friday evening" or "remind me to take a break every weekday at 3 PM". Or use **New reminder** in the window. |
+| Change or snooze a reminder | "Move my API reminder to Sunday at noon" or "snooze the current reminder for 30 minutes". Wren shows the change; Return confirms. |
+| Talk to Wren | Say "Hey Wren" (turn it on in Connectors › Voice) or press **⌥⇧ Space**, then say what you need. |
+| Quit | ⌘Q, Wren › Quit Wren, right-click the bird › Quit Wren, or **Quit** at the bottom of the menu. |
+
+### Reminders
+
+A reminder is only reported as set after it's saved and handed to macOS:
+
+1. Wren saves it, records it in the activity log, and schedules a macOS notification for it.
+2. The notification arrives at that time whether or not Wren is running.
+3. Completing, dropping, deleting, snoozing or moving a reminder updates or removes its notification, so nothing stale fires.
+4. Each time Wren starts, it checks its reminders against macOS's pending notifications and fixes any difference without creating duplicates.
+
+**Repeating reminders** ("every day at 9", "every weekday at 3 PM", "every Monday and Thursday at 8am") use macOS's repeating schedule at your local clock time, so they stay at 3 PM through daylight-saving changes and when you travel. **Done** in the notification finishes that day's one; completing the item in Wren ends the series.
+
+**When something is unclear, Wren asks instead of guessing.** "Remind me to call Sam" gets "When should I remind you…?", and "tomorrow at 3" gets "Is that 3 AM or 3 PM?". Your next answer completes the request. A time that has already passed is refused. A date without a time ("on Friday") uses your default reminder hour, and Wren says so.
+
+**Notifications permission:** macOS asks the first time you set a reminder. If notifications are off, reminders still show inside Wren, and Wren tells you. Settings › Notifications shows the permission, how many reminders are scheduled with macOS, and opens macOS's notification settings.
+
+### Dates
 
 Wren reads dates from your own words even without a language model. It understands phrases like "tomorrow", "tonight at 8", "by Friday", "this weekend", "next week", "in 2 hours", "15 October", "9pm", and "end of month". It never invents a date. A deadline without a time gets a reminder at 10:00 on that day, and you can change that hour in Settings. Numeric dates like 10/11 are deliberately not supported, because the day and month order is ambiguous.
 
@@ -117,7 +142,7 @@ Every change Wren proposes from what you type (with or without AI) is shown firs
 
 Open Wren's window › **Connectors** (or Settings › Connectors). You connect your existing accounts by signing in on the provider's own page in your browser. There's never a key, token, client ID or configuration file to deal with.
 
-Each connector shows its real state (Not connected, Connecting, Connected, Partially connected, Temporarily unavailable, Permission denied, Not available in this build, Planned), how it signs in, what it reads and changes, the permissions it grants Wren, its privacy and data handling, the last successful check and the last error. A connector is only shown as Connected after a real, authorized call to the provider succeeded.
+Each connector shows its real state (Available to connect, Connecting, Connected, Missing permissions, Reauthorization required, Usage limit reached, Temporarily unavailable, Maintainer setup required, Not implemented), how it signs in, what it reads and changes, the permissions it grants Wren, its privacy and data handling, the last successful check and the last error. A connector is only shown as Connected after a real, authorized call to the provider succeeded.
 
 | Connector | What you do | What it can do |
 |---|---|---|
@@ -128,7 +153,7 @@ Each connector shows its real state (Not connected, Connecting, Connected, Parti
 | Notion | **Connect Notion**, pick the pages Wren may use | Search and read those pages, create a page after you confirm |
 | Local files, Apple Shortcuts | — | Planned |
 
-If a connector says **Not available in this build**, the copy of Wren you have was built without that provider's sign-in. There's nothing for you to set up; it's for Wren's maintainers to enable.
+If a connector says **Maintainer setup required**, the copy of Wren you have was built without that provider's sign-in. There's nothing for you to set up; it's for Wren's maintainers to enable.
 
 ### ChatGPT
 
@@ -149,9 +174,22 @@ Wren uses your plan only for requests you start and confirm; background tasks ne
 
 **Fallback: copy and open.** Under Connectors › ChatGPT you can also allow copying a prompt and opening ChatGPT in your browser or the ChatGPT app. You paste and send it yourself, then paste the answer back into Delegate. This works without signing in.
 
-### Voice
+### Voice: "Hey Wren" and the voice shortcut
 
-Connectors › Voice › turn on push-to-talk. Hold **⌥⇧ Space**, speak, release. Apple's speech recognition runs **on this Mac** (`requiresOnDeviceRecognition`; Wren refuses server recognition), and the recording is deleted right after. The text lands in the capture panel for you to correct, then goes through exactly the same handling as typing (commands still show a preview). There's also a microphone button in the capture panel. Maximum 60 seconds. If on-device recognition isn't installed for your language, turn on Dictation once in System Settings › Keyboard.
+Turn these on in Connectors › Voice. Both run the same voice command:
+
+- **"Hey Wren"** (off until you turn it on). Wren listens in the background for the phrase only. Say "Hey Wren, remind me to call Sam tomorrow at 10 AM". Wren opens the capture panel, shows what it hears, stops recording when you pause, and then acts.
+- **The voice shortcut** (default **⌥⇧ Space**, changeable; Wren tells you if it clashes with another shortcut). Press it, speak, and pause, or press it again when you're done.
+
+Wren shows what it heard and what it did, for example "Reminder set: Call Sam, tomorrow at 10:00 AM, scheduled with macOS". A clear request such as setting a reminder runs straight away. Changing an existing item shows a preview to confirm. Anything unclear gets a short question. **Esc** or **Cancel** stops listening without doing anything.
+
+**Privacy:**
+- Speech is recognised on this Mac with Apple's on-device recognition. Wren refuses server recognition, and no audio is stored or sent anywhere.
+- While "Hey Wren" is on, macOS shows its orange microphone indicator, and Wren's menu-bar bird gets a dot.
+- Recording stops as soon as a command ends.
+- Quitting Wren turns the microphone off.
+
+If on-device recognition isn't installed for your language, turn on Dictation once in System Settings › Keyboard.
 
 ### Gmail and Google Calendar
 
@@ -178,10 +216,11 @@ You can search those pages, read them, include chosen pages as context in a Dele
 
 | Problem | Fix |
 |---|---|
-| "Not available in this build" | This copy of Wren doesn't include that provider. Nothing to set up on your side |
+| "Maintainer setup required" | This copy of Wren doesn't include that provider. Nothing to set up on your side |
 | ChatGPT: "Account connected, plan usage not authorized" | Press **Allow plan usage…** and approve it, or check that your plan is Plus or Pro |
 | ChatGPT: "Usage limit reached" | Wait for your allowance to reset, or check **Manage usage** |
-| "Reauthorization required" or "Permission denied" | Press **Reconnect** |
+| "Reauthorization required" | Press **Reconnect** |
+| "Missing permissions" | Connect again and approve everything Wren asks for on the provider's page |
 | Gmail/Calendar: "Missing permission" | Connect again and leave the permission ticked on Google's page |
 | Notion pages missing | **Change which pages Wren can use…** and add them in Notion |
 | Voice: "on-device recognition isn't installed" | Turn on Dictation in System Settings › Keyboard once |
@@ -258,7 +297,7 @@ Local packaging: `scripts/package-dmg.sh` (runs tests, builds universal, package
 
 ### Provider sign-in setup
 
-Google and Notion sign-in need app registrations made once by the maintainers and injected at build time; ChatGPT needs none. See [docs/MAINTAINER_SETUP.md](docs/MAINTAINER_SETUP.md). A build without them still works and shows those connectors as "Not available in this build".
+Google and Notion sign-in need app registrations made once by the maintainers and injected at build time; ChatGPT needs none. See [docs/MAINTAINER_SETUP.md](docs/MAINTAINER_SETUP.md). A build without them still works and shows those connectors as "Maintainer setup required".
 
 ### Signing and notarization setup
 
@@ -291,6 +330,14 @@ The Notion sign-in relay has its own tests:
 ```bash
 node --test services/notion-oauth-relay/relay.test.mjs
 ```
+
+To try a development build next to an installed Wren, build it as **Wren Dev**. It's a separate app with its own data folder, preferences, Keychain items and `wren-dev://` URL scheme, so it never touches your real data and never shows up as a second Wren:
+
+```bash
+scripts/build-app.sh debug --dev-identity
+```
+
+Tests that need a person, a real account, macOS permission prompts or real time passing are listed in [docs/MANUAL_TESTS.md](docs/MANUAL_TESTS.md), with what has and hasn't been run.
 
 ## Brand assets
 

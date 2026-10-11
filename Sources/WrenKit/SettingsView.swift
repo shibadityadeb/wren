@@ -128,7 +128,7 @@ struct SettingsView: View {
                     section("Connectors") {
                         HStack {
                             let sum = model.hub.registry.summary
-                            Text("\(sum[.connected] ?? 0) connected · \(sum[.needsSetup] ?? 0) need setup · \(sum[.planned] ?? 0) planned").font(.callout)
+                            Text("\(sum[.connected] ?? 0) connected · \(sum[.needsSetup] ?? 0) need your attention · \(sum[.planned] ?? 0) not implemented").font(.callout)
                             Spacer()
                             Button("Connectors…") { model.route = .connectors }
                         }

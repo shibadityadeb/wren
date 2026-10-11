@@ -31,7 +31,9 @@ extension AppModel {
 
     /// A command about an existing item gets a preview or question; anything else is saved as a new capture.
     func submitFromCapture(_ text: String, channel: UserChannel = .hotkey) async -> CaptureReply {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A spoken command may still start with "Hey Wren,"; it isn't part of the request.
+        let spoken = channel == .voice ? ReminderCommand.stripAddress(text) : text
+        let trimmed = spoken.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return .failed("Nothing to save.") }
         reload()
         if let r = await reminderRequest(trimmed, channel: channel) { return r }
@@ -52,7 +54,10 @@ extension AppModel {
             if ContextResolver.mightBeCommandOrQuestion(trimmed), let r = await modelInterpretation(trimmed, all: all) { return .resolution(r) }
             return capture(trimmed, source: .hotkey) ? .saved : .failed("Couldn't save. Your text is still here.")
         case let .notFound(msg):
-            if let r = await modelInterpretation(trimmed, all: all) { return .resolution(r) }
+            // The model may only help if it found something real; an empty answer would hide the reason.
+            if let r = await modelInterpretation(trimmed, all: all) {
+                if case let .answer(a) = r, a.lines.isEmpty {} else { return .resolution(r) }
+            }
             return .resolution(.notFound(msg))
         default:
             return .resolution(result)

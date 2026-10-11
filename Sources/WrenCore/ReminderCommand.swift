@@ -21,7 +21,7 @@ public enum ReminderCommand: Equatable, Sendable {
                                   "set a reminder for ", "set reminder to ", "reminder to ", "add a reminder to "]
 
     /// Strips a leading "Hey Wren," / "Wren," that a voice transcript may still carry.
-    static func stripAddress(_ text: String) -> String {
+    public static func stripAddress(_ text: String) -> String {
         var t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if let r = t.range(of: #"^(hey|hi|ok|okay)?[\s,]*wren[\s,.:!]+"#, options: [.regularExpression, .caseInsensitive]) { t.removeSubrange(r) }
         return t

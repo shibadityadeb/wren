@@ -42,6 +42,9 @@ final class LiveSpeechStream: SpeechStreaming {
     private var generation = 0
     private var startedAt = Date.distantPast
     private var configObserver: NSObjectProtocol?
+    /// Only touch the input node after it was set up: merely reading `inputNode` opens the audio
+    /// input (and can make macOS ask for the microphone), which must never happen just by quitting.
+    private var tapInstalled = false
     var locale: Locale = .current
 
     static func availability(locale: Locale = .current) -> String? {
@@ -67,9 +70,11 @@ final class LiveSpeechStream: SpeechStreaming {
         guard format.sampleRate > 0, format.channelCount > 0 else { throw VoiceError.noMicrophone }
         input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in req.append(buffer) }
+        tapInstalled = true
         engine.prepare()
         do { try engine.start() } catch {
             input.removeTap(onBus: 0)
+            tapInstalled = false
             throw VoiceError.recordingFailed(error.localizedDescription)
         }
         generation += 1
@@ -126,7 +131,7 @@ final class LiveSpeechStream: SpeechStreaming {
         task?.cancel(); task = nil
         request?.endAudio(); request = nil
         if engine.isRunning { engine.stop() }
-        engine.inputNode.removeTap(onBus: 0)
+        if tapInstalled { engine.inputNode.removeTap(onBus: 0); tapInstalled = false }
         isRunning = false
     }
 }

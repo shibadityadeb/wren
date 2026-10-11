@@ -109,6 +109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
         model.openMainWindow = { [weak self] in self?.popover.performClose(nil); self?.mainWindow.show() }
         // One voice service: "Hey Wren" and the voice shortcut feed the same capture and command path.
         voice = VoiceSession(stream: LiveSpeechStream(), permissions: model.hub.voicePermissions)
+        // Note: nothing here touches the microphone; it opens only when "Hey Wren" or the shortcut is used.
         voice.onPhase = { [weak self] p in self?.voicePhaseChanged(p) }
         voice.onLiveCommand = { [weak self] t in self?.captureState.text = t }
         voice.onCommand = { [weak self] t, trigger in self?.runVoiceCommand(t, trigger) }
@@ -212,6 +213,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
         Task {
             let reply = await model.submitFromCapture(text, channel: .voice)
             captureState.busy = false
+            appLog.notice("voice command result: \(Self.describe(reply), privacy: .public)")
             switch reply {
             case .saved:
                 captureState.status = "Saved"
@@ -224,6 +226,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
                 captureState.status = m
             }
             voice.finishedHandling()
+        }
+    }
+
+    /// Kind of result only (never the words), for diagnostics.
+    static func describe(_ r: CaptureReply) -> String {
+        switch r {
+        case .saved: return "saved as a new item"
+        case let .failed(m): return "failed: \(m)"
+        case let .resolution(res):
+            switch res {
+            case let .answer(a): return "answer: \(a.title.hasPrefix("Reminder set") ? "reminder set" : "\(a.lines.count) lines")"
+            case .proposal: return "proposal awaiting confirmation"
+            case .clarify: return "asked which item"
+            case let .needsDate(q): return "asked: \(q)"
+            case let .notFound(m): return "not found: \(m)"
+            case .notACommand: return "not a command"
+            }
         }
     }
 

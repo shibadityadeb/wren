@@ -6,6 +6,19 @@ Each phase ends with: a green build, tests passing (commands recorded), a git co
 Deliverables: PROJECT_SPEC.md, ARCHITECTURE.md, ROADMAP.md, TEST_PLAN.md, git repository initialised in `Wren/`.
 Acceptance: architecture documented, MVP scope unambiguous, every dependency justified, core vs. later clearly split.
 
+## Milestone 8 status (2026-10-11): full Mac app, reliable reminders, voice (0.8.0)
+
+Done:
+- **Duplicate birds.** The cause was two processes: the installed copy plus a development build. A debug-only exception had let the development build skip the single-instance check. That exception is removed, the data folder is now locked, and development builds can use a separate "Wren Dev" identity.
+- **Mac app basics.** Dock app, app menu, one status item, and a clean quit.
+- **Reminders.** Scheduled with macOS and reconciled, with recurrence and the commands.
+- **Voice.** One service handles both "Hey Wren" and the shortcut, using on-device speech.
+- **Connectors.** Truthful states, and Google with no client secret.
+
+What was run live and what still needs a person, an account or the maintainers' registrations is in docs/MANUAL_TESTS.md. In short:
+- **Run live:** lifecycle checks and the command and voice steps, in a Wren Dev build.
+- **Not run:** real notifications firing, the real microphone, and live OAuth.
+
 ## Milestone 7 status (2026-10-11): account-based sign-in (0.7.0)
 
 Users connect accounts by signing in on each provider's page. All end-user credential entry (Google client ID and secret, Notion token, OpenAI API key) is removed.

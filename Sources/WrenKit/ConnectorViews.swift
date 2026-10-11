@@ -33,10 +33,10 @@ struct ConnectorsView: View {
         let s = reg.summary
         return HStack(spacing: 10) {
             chip("\(s[.connected] ?? 0) connected", WrenTheme.accent)
-            chip("\(s[.needsSetup] ?? 0) need setup", .orange)
+            chip("\(s[.needsSetup] ?? 0) need your attention", .orange)
             chip("\(s[.unavailable] ?? 0) unavailable", .red)
-            chip("\(s[.notConnected] ?? 0) not connected", .secondary)
-            chip("\(s[.planned] ?? 0) planned", .secondary)
+            chip("\(s[.notConnected] ?? 0) available to connect", .secondary)
+            chip("\(s[.planned] ?? 0) not implemented", .secondary)
         }
         .font(.caption)
     }
@@ -121,7 +121,7 @@ struct ConnectorDetailView: View {
                     }
                     Text(descriptor.summary).font(.callout).fixedSize(horizontal: false, vertical: true)
                     if descriptor.isPlanned {
-                        Notice(text: "Planned for a later version. There's nothing to connect yet.", systemImage: "clock")
+                        Notice(text: "Not implemented yet. There's nothing to connect, and Wren doesn't offer it anywhere until it works.", systemImage: "clock")
                             .clipShape(RoundedRectangle(cornerRadius: 6))
                     } else {
                         setup(state)
