@@ -79,6 +79,15 @@ public final class ActionBroker {
         context.insert(rec); try? context.save()
     }
 
+    /// Records something Wren did outside a request (for example applying a restore at startup),
+    /// so the activity log stays complete. Labels only.
+    public func recordEvent(action: ActionID, target: TargetRef, origin: ActionOrigin, detail: String) {
+        let r = ActionRequest(action: action, target: target, origin: origin, createdAt: clock.now)
+        let rec = AuditRecord(request: r, descriptor: descriptor(action), at: clock.now)
+        rec.status = .succeeded; rec.verification = .verified; rec.detail = String(detail.prefix(200))
+        context.insert(rec); try? context.save()
+    }
+
     @discardableResult
     public func submit(_ r: ActionRequest, confirmation: Confirmation? = nil, dryRun: Bool = false) async -> ActionResult {
         let d = descriptor(r.action)

@@ -13,7 +13,7 @@ enum ModelDownload: Equatable {
     case finished(model: String)
 }
 
-enum Route: Equatable { case list, detail(UUID), settings, briefing, checkIn, activity, goals, goal(UUID), review, aiSetup }
+enum Route: Equatable { case overview, list, detail(UUID), settings, briefing, checkIn, activity, goals, goal(UUID), review, aiSetup }
 
 /// A request waiting for the user to approve or cancel, shown as a native alert.
 struct PendingConfirmation: Identifiable {
@@ -30,7 +30,7 @@ final class AppModel {
     @ObservationIgnored let settings = WrenSettings()
     @ObservationIgnored let notifications = NotificationService()
     @ObservationIgnored let clock: WrenClock = SystemClock()
-    @ObservationIgnored private let log = Logger(subsystem: "com.shibadityadeb.wren", category: "app")
+    @ObservationIgnored let log = Logger(subsystem: "com.shibadityadeb.wren", category: "app")
     @ObservationIgnored private var schedulerTimer: Timer?
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
     @ObservationIgnored let loginItems: LoginItemController
@@ -40,6 +40,9 @@ final class AppModel {
     @ObservationIgnored let broker: ActionBroker?
     @ObservationIgnored let policyStore: SwiftDataPolicyStore?
     @ObservationIgnored let engine: WrenEngine?
+    @ObservationIgnored let backups = BackupManager(dataDirectory: WrenStore.defaultDirectory)
+    @ObservationIgnored var startupRestore: WrenStore.StartupRestore = .none
+    static var appVersion: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev" }
 
     var pending: [Commitment] = []
     var closed: [Commitment] = []
@@ -69,17 +72,24 @@ final class AppModel {
     var loginStatus: LoginItemStatus = .disabled
     var daily: DailySettings
     var todayRun: (briefing: DailyEventState, checkIn: DailyEventState) = (.pending, .pending)
+    var pause: NotificationPause?
+    /// Shown after a pause ends: how many reminders were folded into one summary.
+    var resumeNote: String?
+    var backupList: [BackupEntry] = []
+    var backupPreview: BackupPreview?
 
     @ObservationIgnored var openCapturePanel: () -> Void = {}
     @ObservationIgnored var showPopover: () -> Void = {}
     @ObservationIgnored var applyHotKey: () -> Void = {}
+    @ObservationIgnored var openMainWindow: () -> Void = {}
 
     init(store injected: WrenStore? = nil, loginService: LoginItemService? = nil) {
         loginItems = LoginItemController(service: loginService ?? SystemLoginItemService())
         let s: WrenStore?
         var err: String?
+        var restoreOutcome = WrenStore.StartupRestore.none
         if let injected { s = injected } else {
-            do { s = try WrenStore.openDefault() } catch {
+            do { (s, restoreOutcome) = try WrenStore.openDefault(appVersion: Self.appVersion) } catch {
                 s = nil
                 err = (error as? LocalizedError)?.errorDescription ?? "\(error)"
             }
@@ -91,20 +101,36 @@ final class AppModel {
             BuiltInAction.registerLocal(on: b, store: s, notifier: notifications, clock: clock)
             broker = b
             let settingsRef = settings
-            engine = WrenEngine(store: s, broker: b, clock: clock, notifier: notifications, settings: { settingsRef.daily },
-                                insightSettings: { settingsRef.insights })
+            BuiltInAction.registerData(on: b, store: s, backups: BackupManager(dataDirectory: WrenStore.defaultDirectory),
+                                       appVersion: Self.appVersion, clock: clock)
+            let e = WrenEngine(store: s, broker: b, clock: clock, notifier: notifications, settings: { settingsRef.daily },
+                               insightSettings: { settingsRef.insights })
+            e.pause = { settingsRef.pause }
+            engine = e
         } else {
             policyStore = nil; broker = nil; engine = nil
             if s != nil { err = "Couldn't load permissions." }
         }
         storeError = err
+        startupRestore = restoreOutcome
         hotKeyDisplay = settings.hotKey.display
         hotKeyEnabled = settings.hotKeyEnabled
         selectedModel = settings.modelName
         daily = settings.daily
         insightSettings = settings.insights
+        pause = settings.pause
         reload()
         notifications.onResponse = { [weak self] r in self?.handle(r) }
+        engine?.clearPause = { [weak self] in self?.settings.pause = nil; self?.pause = nil }
+        registerAppActions()
+        switch restoreOutcome {
+        case .restored:
+            banner = "Backup restored. Your previous data was backed up first."
+            broker?.recordEvent(action: BuiltInAction.restoreBackup, target: BuiltInAction.allDataTarget, origin: .system("startup"),
+                                detail: "Backup restored at startup; the replaced data is in Restore/ and a pre-restore backup was made")
+        case let .failedAndRolledBack(r): banner = "The backup couldn't be opened, so your previous data was kept. (\(r))"
+        case .none: break
+        }
     }
 
     var reminderHour: Int { settings.dateOnlyReminderHour }
@@ -156,6 +182,9 @@ final class AppModel {
         guard let engine else { return }
         let report = await engine.tick()
         notificationStatus = notifications.status
+        if report.summarizedAfterPause > 0 { resumeNote = "\(report.summarizedAfterPause) reminder\(report.summarizedAfterPause == 1 ? "" : "s") came due while notifications were paused." }
+        pause = settings.pause
+        automaticBackupIfDue()
         if report.remindersDelivered > 0 || report.briefing != nil { reload() }
         let wake = engine.nextWake()
         schedulerTimer = Timer.scheduledTimer(withTimeInterval: max(1, wake.timeIntervalSinceNow + 0.5), repeats: false) { [weak self] _ in
@@ -194,7 +223,15 @@ final class AppModel {
         let token = broker.confirm(p.request)
         Task {
             let r = await run(p.request, confirmation: token)
-            if r?.status == .succeeded, p.request.action == BuiltInAction.delete { route = .list }
+            guard r?.status == .succeeded else { return }
+            switch p.request.action {
+            case BuiltInAction.delete: route = .list
+            case BuiltInAction.restoreBackup: relaunch()
+            case BuiltInAction.eraseAllData: route = .overview; refreshBackups(); banner = "All Wren data was removed. Backups were kept."
+            case BuiltInAction.resetPreferences: reloadPreferences(); banner = "Preferences were reset. Your items are unchanged."
+            case BuiltInAction.deleteBackup: refreshBackups()
+            default: break
+            }
         }
     }
 

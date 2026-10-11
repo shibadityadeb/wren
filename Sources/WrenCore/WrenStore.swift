@@ -60,30 +60,49 @@ public final class WrenStore {
         storeURL = url
     }
 
-    public static func openDefault() throws -> WrenStore {
-        let url = defaultDirectory.appendingPathComponent("Wren.store")
-        try backupBeforeUpgrade(url, version: schemaVersion)
-        return try WrenStore(url: url)
+    /// Bumped whenever models are added or changed.
+    nonisolated public static let schemaVersion = 3
+
+    public enum StartupRestore: Equatable, Sendable {
+        case none
+        case restored
+        /// The staged backup couldn't be opened; the previous data was put back.
+        case failedAndRolledBack(String)
     }
 
-    /// Bumped whenever models are added or changed.
-    public static let schemaVersion = 3
+    /// Opens the default store: applies a staged restore (rolling back if the result won't open),
+    /// and makes a consistent backup the first time this schema version opens existing data.
+    public static func openDefault(appVersion: String) throws -> (WrenStore, StartupRestore) {
+        try open(manager: BackupManager(dataDirectory: defaultDirectory), appVersion: appVersion)
+    }
 
-    /// Copies the store (and its WAL files) once per schema version before the first open,
-    /// so an upgrade can always be rolled back by hand.
-    public static func backupBeforeUpgrade(_ url: URL, version: Int) throws {
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: url.path) else { return }
-        let dir = url.deletingLastPathComponent().appendingPathComponent("Backups", isDirectory: true)
-        let marker = dir.appendingPathComponent("schema-v\(version)")
-        guard !fm.fileExists(atPath: marker.path) else { return }
-        try fm.createDirectory(at: marker, withIntermediateDirectories: true)
-        for suffix in ["", "-wal", "-shm"] {
-            let src = URL(fileURLWithPath: url.path + suffix)
-            if fm.fileExists(atPath: src.path) {
-                try fm.copyItem(at: src, to: marker.appendingPathComponent(src.lastPathComponent))
+    public static func openDefault() throws -> WrenStore { try openDefault(appVersion: "dev").0 }
+
+    /// Testable form of `openDefault`, for any data folder.
+    public static func open(manager: BackupManager, appVersion: String) throws -> (WrenStore, StartupRestore) {
+        var outcome = StartupRestore.none
+        if let replaced = try? manager.applyPendingRestore() {
+            do {
+                return (try WrenStore(url: manager.storeURL), .restored)
+            } catch {
+                try? manager.rollbackRestore(replaced: replaced)
+                outcome = .failedAndRolledBack(error.localizedDescription)
             }
         }
+        try backupBeforeUpgrade(manager: manager, appVersion: appVersion)
+        return (try WrenStore(url: manager.storeURL), outcome)
+    }
+
+    /// One consistent backup per schema version, taken before the new schema first opens the data.
+    /// Older releases left plain copies in `Backups/schema-vN`; those count too.
+    public static func backupBeforeUpgrade(manager: BackupManager, appVersion: String) throws {
+        guard FileManager.default.fileExists(atPath: manager.storeURL.path) else { return }
+        let done = manager.list().contains { e in
+            if let m = e.manifest { return m.reason == .preMigration && m.schemaVersion == schemaVersion }
+            return e.directory.lastPathComponent == "schema-v\(schemaVersion)"
+        }
+        guard !done else { return }
+        try manager.createBackup(reason: .preMigration, appVersion: appVersion)
     }
 
     /// Today's (or any day's) run record, created on first use.
@@ -280,11 +299,11 @@ public final class WrenStore {
 
     /// Records that a reminder was handed to the notification system.
     /// Clears nextReminderAt in the same save, so a restart cannot send it twice.
-    public func markReminderSent(_ c: Commitment, now: Date = .now) throws {
+    public func markReminderSent(_ c: Commitment, now: Date = .now, note: String? = nil) throws {
         c.lastReminderAt = now
         c.nextReminderAt = nil
         c.reminderFromDeadline = false
-        log(c, .reminderSent, at: now)
+        log(c, .reminderSent, at: now, note: note)
         try save()
     }
 

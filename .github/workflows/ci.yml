@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: ['**']   # main and feature branches: every push gets a downloadable preview DMG
   pull_request:
   workflow_dispatch:
 
@@ -52,9 +52,25 @@ jobs:
         run: if [ -d /Applications/Xcode_16.4.app ]; then sudo xcode-select -s /Applications/Xcode_16.4.app; fi
       - name: Build, package and verify
         run: scripts/package-dmg.sh --skip-tests
+      - name: Summarise artifact
+        run: |
+          DMG=$(ls dist/*.dmg | head -1)
+          MNT=$(mktemp -d); hdiutil attach -nobrowse -readonly -mountpoint "$MNT" "$DMG" >/dev/null
+          P="$MNT/Wren.app/Contents/Info.plist"
+          {
+            echo "### Preview installer"
+            echo "| | |"; echo "|---|---|"
+            echo "| File | \`$(basename "$DMG")\` |"
+            echo "| Version | $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$P") (build $(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$P")) |"
+            echo "| Architectures | $(lipo -archs "$MNT/Wren.app/Contents/MacOS/Wren") |"
+            echo "| Minimum macOS | $(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$P") |"
+            echo "| Signing | $(codesign -dv "$MNT/Wren.app" 2>&1 | grep -q 'Developer ID' && echo 'Developer ID' || echo 'Unsigned (ad-hoc) preview: not notarized') |"
+            echo "| SHA-256 | \`$(cut -d' ' -f1 "$DMG.sha256")\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          hdiutil detach "$MNT" -quiet
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: Wren-preview-${{ github.sha }}
+          name: Wren-preview-unsigned-${{ github.sha }}
           path: |
             dist/*.dmg
             dist/*.sha256
@@ -70,7 +86,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: Wren-preview-${{ github.sha }}
+          name: Wren-preview-unsigned-${{ github.sha }}
           path: dist
       - name: Verify (runs the x86_64 slice natively)
         run: scripts/verify-dmg.sh dist/Wren-macOS-universal-unsigned.dmg

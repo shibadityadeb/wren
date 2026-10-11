@@ -135,6 +135,21 @@ struct SettingsView: View {
 
                     section("Notifications") {
                         HStack {
+                            if let p = model.pauseLabel {
+                                Label(p, systemImage: "bell.slash").font(.callout)
+                                Spacer()
+                                Button("Resume now") { model.resumeNotifications() }
+                            } else {
+                                Text("Pause Wren's reminders, briefing and check-in").font(.callout)
+                                Spacer()
+                                Menu("Pause") {
+                                    ForEach(NotificationPause.Option.allCases, id: \.self) { o in Button(o.label) { model.pauseNotifications(o) } }
+                                }.fixedSize()
+                            }
+                        }
+                        Text("While paused, nothing is delivered and nothing is changed: deadlines and schedules stay as they are. When you resume, anything that came due arrives as one summary, not a burst. Notifications macOS already showed can't be taken back.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        HStack {
                             Text(notificationText).font(.callout)
                             Spacer()
                             if model.notificationStatus == .notDetermined {
@@ -151,20 +166,28 @@ struct SettingsView: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
 
-                    section("Data") {
-                        Text(model.store?.storeURL?.path ?? "Unavailable")
-                            .font(.caption.monospaced()).textSelection(.enabled).foregroundStyle(.secondary)
-                        Button("Show in Finder") {
-                            if let url = model.store?.storeURL { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+                    section("Your data") {
+                        HStack {
+                            Button("Export…") { model.exportData() }
+                            Button("Back Up Now") { model.backupNow() }
+                            Spacer()
+                            Button("Show Backups") { model.revealBackups() }.buttonStyle(.link)
                         }
-                        Text("Everything stays on this Mac. There is no account and no cloud sync.")
+                        Text("Export writes one readable JSON file (items, history, goals, follow-ups, review decisions, permissions). Backups are full copies of Wren's database, made daily while Wren runs and before upgrades, restores and resets. Neither contains passwords or keys.")
                             .font(.caption).foregroundStyle(.secondary)
+                        BackupsList(model: model)
+                        Text(model.store?.storeURL?.path ?? "Unavailable")
+                            .font(.caption2.monospaced()).textSelection(.enabled).foregroundStyle(.tertiary)
+                    }
+
+                    section("Reset") {
+                        ResetControls(model: model)
                     }
                 }
                 .padding(14)
             }
         }
-        .onAppear { reminderHour = model.settings.dateOnlyReminderHour; model.refreshLoginStatus() }
+        .onAppear { reminderHour = model.settings.dateOnlyReminderHour; model.refreshLoginStatus(); model.refreshBackups() }
         .onDisappear(perform: stopRecording)
     }
 
@@ -230,5 +253,79 @@ struct SettingsView: View {
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
         recording = false
+    }
+}
+
+struct BackupsList: View {
+    var model: AppModel
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if model.backupList.isEmpty {
+                Text("No backups yet.").font(.caption).foregroundStyle(.secondary)
+            }
+            ForEach(model.backupList.prefix(12)) { e in
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(e.createdAt.formatted(date: .abbreviated, time: .shortened)).font(.callout)
+                            Text("\(e.reasonLabel)\(e.manifest.map { " · \($0.counts["items"] ?? 0) items · v\($0.appVersion)" } ?? "")")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Preview") { model.previewBackup(e) }.controlSize(.small)
+                    }
+                    if let p = model.backupPreview, p.entry.id == e.id {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Label("Verified: checksum and database integrity OK", systemImage: "checkmark.seal").font(.caption).foregroundStyle(WrenTheme.accent)
+                            Text("\(p.counts["items"] ?? 0) items · \(p.counts["goals"] ?? 0) goals · \(p.counts["historyEvents"] ?? 0) history events").font(.caption)
+                            if !p.newestItemTitles.isEmpty {
+                                Text("Newest: " + p.newestItemTitles.prefix(3).joined(separator: " · ")).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                            }
+                            HStack {
+                                Button("Restore…") { model.restore(e) }
+                                Button("Delete…", role: .destructive) { model.deleteBackup(e) }
+                                Spacer()
+                                Button("Close") { model.backupPreview = nil }.buttonStyle(.link)
+                            }.controlSize(.small)
+                            Text("Restoring backs up your current data first, then restarts Wren. If the backup can't be opened, your current data is kept.")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        .padding(8)
+                        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct ResetControls: View {
+    var model: AppModel
+    @State private var backupFirst = true
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Reset preferences").font(.callout)
+                    Text("Shortcut, briefing and check-in times, review thresholds, AI model choice, pause and open-at-login go back to defaults. Items, goals and history are kept.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Button("Reset…") { model.resetPreferences() }
+            }
+            Divider()
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Remove all Wren data").font(.callout)
+                    Text("Deletes every item, goal, history entry, review decision and briefing record, and resets permissions to defaults. Wren itself, Ollama models and backups are not touched.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Toggle("Back up first", isOn: $backupFirst).toggleStyle(.checkbox).font(.caption)
+                }
+                Spacer()
+                Button("Remove…", role: .destructive) { model.eraseAllData(backupFirst: backupFirst) }
+            }
+            Text("Wren can't reliably tell test entries from real ones, so it doesn't offer a one-click “clear test data”. Drop or archive those items individually.")
+                .font(.caption2).foregroundStyle(.tertiary)
+        }
     }
 }

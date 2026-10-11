@@ -12,6 +12,9 @@ public final class WrenEngine {
     public let notifier: WrenNotifier?
     public var settings: () -> DailySettings
     public var insightSettings: () -> InsightSettings
+    /// Current pause (persisted by the caller) and how to clear it when it expires.
+    public var pause: () -> NotificationPause? = { nil }
+    public var clearPause: () -> Void = {}
     private var running = false
 
     public init(store: WrenStore, broker: ActionBroker, clock: WrenClock, notifier: WrenNotifier?, settings: @escaping () -> DailySettings,
@@ -35,6 +38,9 @@ public final class WrenEngine {
         public var remindersUndelivered = 0
         public var briefing: DailyEventState?
         public var checkIn: DailyEventState?
+        public var paused = false
+        /// Reminders folded into the one summary sent when a pause ended.
+        public var summarizedAfterPause = 0
     }
 
     /// Safe to call any time (launch, wake, timer, clock change). Re-entrant calls are ignored.
@@ -44,6 +50,15 @@ public final class WrenEngine {
         guard !running else { return report }
         running = true
         defer { running = false }
+
+        // Paused: deliver nothing, change nothing. Schedules and deadlines stay as they are,
+        // and nothing is recorded as sent. Daily windows that close during the pause are
+        // recorded as missed afterwards by the normal rules.
+        if let p = pause() {
+            if p.isActive(at: clock.now) { report.paused = true; return report }
+            clearPause()
+            report.summarizedAfterPause = await deliverPauseSummary(since: p.since)
+        }
 
         // 1. Reminders, through the broker, as the scheduler under the auto-remind rule.
         let canDeliver = await notifier?.canDeliver() ?? false
@@ -63,8 +78,41 @@ public final class WrenEngine {
         return report
     }
 
+    /// Ends a pause now: one summary for anything that came due, then normal operation.
+    @discardableResult
+    public func resume() async -> TickReport {
+        var summarized = 0
+        if let p = pause() {
+            clearPause()
+            summarized = await deliverPauseSummary(since: p.since)
+        }
+        var r = await tick()
+        r.summarizedAfterPause += summarized
+        return r
+    }
+
+    /// Recovery policy after a pause: never a burst. Every reminder that came due is listed in a
+    /// single notification; only if macOS accepts it are those reminders recorded as delivered
+    /// (each through the broker, with a history note). If notifications are unavailable they stay
+    /// due and show in the app.
+    func deliverPauseSummary(since: Date) async -> Int {
+        guard let notifier, let due = try? ReminderPolicy.due(store.pending(), now: clock.now), !due.isEmpty,
+              await notifier.canDeliver() else { return 0 }
+        let payloads = due.map { ReminderPayload(id: $0.id, title: $0.title, body: ReminderPayload.body(for: $0), late: true) }
+        guard await notifier.deliverPauseSummary(payloads, pausedSince: since) else { return 0 }
+        var n = 0
+        for c in due {
+            let r = ActionRequest(action: BuiltInAction.markReminderSummarized, target: c.targetRef, origin: .system("resume after pause"), createdAt: clock.now)
+            if await broker.submit(r).status == .succeeded { n += 1 }
+        }
+        return n
+    }
+
     /// When the app should call tick() next.
     public func nextWake() -> Date {
+        if let p = pause(), p.isActive(at: clock.now) {
+            return min(p.until ?? clock.now.addingTimeInterval(3600), clock.now.addingTimeInterval(3600))
+        }
         let items = (try? store.pending()) ?? []
         let reminder = ReminderPolicy.nextWake(items, now: clock.now, cap: 60)
         let daily = DailySchedule.nextBoundary(after: clock.now, settings: settings(), calendar: clock.calendar)

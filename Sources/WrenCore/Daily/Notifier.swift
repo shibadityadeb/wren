@@ -21,6 +21,8 @@ public protocol WrenNotifier: AnyObject {
     func deliverBriefing(_ b: Briefing) async -> Bool
     func deliverCheckIn(_ c: CheckIn) async -> Bool
     func withdrawReminder(id: UUID)
+    /// One notification summarising reminders that came due while notifications were paused.
+    func deliverPauseSummary(_ items: [ReminderPayload], pausedSince: Date) async -> Bool
 }
 
 public enum DueText {

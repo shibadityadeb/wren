@@ -19,15 +19,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var debugProposal: ContextProposal?
     #endif
 
+    private var mainWindow: MainWindowController!
+
+    /// Launched by macOS as a login item (then Wren starts quietly in the menu bar).
+    private var launchedAsLoginItem: Bool {
+        guard let ev = NSAppleEventManager.shared().currentAppleEvent, ev.eventID == AEEventID(kAEOpenApplication) else { return false }
+        return ev.paramDescriptor(forKeyword: AEKeyword(keyAEPropData))?.enumCodeValue == OSType(keyAELaunchedAsLogInItem)
+    }
+
     func applicationDidFinishLaunching(_ note: Notification) {
         // One Wren at a time: a login launch plus a manual open must not run two schedulers.
-        if let id = Bundle.main.bundleIdentifier,
-           NSRunningApplication.runningApplications(withBundleIdentifier: id).contains(where: { $0.processIdentifier != getpid() }) {
-            appLog.notice("another Wren instance is running; exiting")
-            NSApp.terminate(nil)
-            return
+        // A relaunch (to finish a restore) waits for the previous copy to quit first.
+        let isRelaunch = CommandLine.arguments.contains("--relaunch")
+        if let id = Bundle.main.bundleIdentifier {
+            var waited: TimeInterval = 0
+            while true {
+                let others = NSRunningApplication.runningApplications(withBundleIdentifier: id).contains { $0.processIdentifier != getpid() }
+                switch InstanceGuard.decide(othersRunning: others, isRelaunch: isRelaunch, waited: waited) {
+                case .proceed: break
+                case .waitForPrevious:
+                    Thread.sleep(forTimeInterval: 0.25); waited += 0.25; continue
+                case .exit:
+                    appLog.notice("another Wren instance is running; exiting")
+                    // Bring the running copy's window forward instead of doing nothing.
+                    NSRunningApplication.runningApplications(withBundleIdentifier: id).first { $0.processIdentifier != getpid() }?.activate()
+                    NSApp.terminate(nil)
+                    return
+                }
+                break
+            }
         }
         model = AppModel()
+        mainWindow = MainWindowController(model: model)
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.image = WrenMark.menuBarImage()
@@ -58,8 +81,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         model.openCapturePanel = { [weak self] in self?.popover.performClose(nil); self?.showCapture() }
         model.showPopover = { [weak self] in self?.openPopover() }
         model.applyHotKey = { [weak self] in self?.applyHotKey() }
+        model.openMainWindow = { [weak self] in self?.popover.performClose(nil); self?.mainWindow.show() }
         applyHotKey()
         model.start()
+        if !launchedAsLoginItem {
+            mainWindow.show()
+            appLog.notice("main window shown at launch")
+        } else {
+            appLog.notice("launched as login item; staying in the menu bar")
+        }
     }
 
     // MARK: Hotkey
@@ -151,12 +181,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         if model.route == .settings { model.route = .list }
     }
 
+    /// Opening Wren again from Finder, Spotlight or the Dock area shows the window.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        mainWindow?.show()
+        return false
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
     // MARK: URL scheme fallback: `open wren://capture`
 
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls where url.scheme == "wren" {
             switch url.host {
             case "capture": showCapture()
+            case "open": mainWindow.show()
             #if DEBUG
             case "debug": debugURL(url)
             #endif
@@ -181,6 +220,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             for c in model.pending + model.closed {
                 appLog.notice("debug item kind=\(c.kind.rawValue, privacy: .public) status=\(c.status.rawValue, privacy: .public) processing=\(c.processing.rawValue, privacy: .public) deadline=\(c.deadline?.description ?? "nil", privacy: .public) next=\(c.nextReminderAt?.description ?? "nil", privacy: .public) last=\(c.lastReminderAt?.description ?? "nil", privacy: .public)")
             }
+            appLog.notice("debug pause=\(self.model.pauseLabel ?? "none", privacy: .public) backups=\(self.model.backups.list().count, privacy: .public)")
             appLog.notice("debug notifications=\(self.model.notificationStatus.rawValue, privacy: .public) ai=\(self.model.ai.title, privacy: .public) briefing=\(self.model.todayRun.briefing.rawValue, privacy: .public) checkIn=\(self.model.todayRun.checkIn.rawValue, privacy: .public) login=\(self.model.loginStatus.label, privacy: .public)")
             let rules = self.model.policy.rules.map(\.rawValue).sorted().joined(separator: ",")
             let grants = self.model.policy.grants.map(\.rawValue).sorted().joined(separator: ",")
@@ -254,6 +294,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             model.cancelDownload()
         case "/ai-state":
             appLog.notice("debug ai state: \(self.model.ai.title, privacy: .public) download=\(String(describing: self.model.download), privacy: .public)")
+        case "/pause":
+            let o = NotificationPause.Option(rawValue: q.first(where: { $0.name == "o" })?.value ?? "oneHour") ?? .oneHour
+            model.pauseNotifications(o)
+            appLog.notice("debug paused: \(self.model.pauseLabel ?? "-", privacy: .public)")
+        case "/resume":
+            model.resumeNotifications()
+        case "/backup":
+            model.backupNow()
+            appLog.notice("debug backups=\(self.model.backupList.count, privacy: .public) newest=\(self.model.backupList.first?.id ?? "-", privacy: .public)")
+        case "/restore-latest":
+            // Debug only: restore the newest manual backup as if the user confirmed it.
+            guard let e = model.backups.list().first(where: { $0.manifest?.reason == .manual }), let broker = model.broker else { break }
+            let req = ActionRequest(action: BuiltInAction.restoreBackup, target: e.targetRef, origin: .user(.settings), createdAt: Date())
+            Task {
+                let first = await broker.submit(req)
+                appLog.notice("debug restore unconfirmed=\(first.status.rawValue, privacy: .public)")
+                let r = await broker.submit(req, confirmation: broker.confirm(req))
+                appLog.notice("debug restore confirmed=\(r.status.rawValue, privacy: .public) \(r.message ?? "", privacy: .public)")
+                if r.status == .succeeded { model.relaunch() }
+            }
+        case "/window-state":
+            appLog.notice("debug window visible=\(self.mainWindow.isVisible, privacy: .public) active=\(NSApp.isActive, privacy: .public) route=\(String(describing: self.model.route), privacy: .public)")
         case "/insights":
             model.reload()
             for i in model.insights { appLog.notice("debug insight \(i.kind.rawValue, privacy: .public): \(i.message, privacy: .public)") }

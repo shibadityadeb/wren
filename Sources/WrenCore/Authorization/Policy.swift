@@ -30,7 +30,7 @@ public enum StandingRuleKind: String, Codable, Sendable, CaseIterable, Identifia
     /// and only for local, reversible actions.
     public var allowsActions: Set<ActionID> {
         switch self {
-        case .autoRemindDeadlines: [BuiltInAction.scheduleReminder, BuiltInAction.deliverReminder]
+        case .autoRemindDeadlines: [BuiltInAction.scheduleReminder, BuiltInAction.deliverReminder, BuiltInAction.markReminderSummarized]
         case .autoApplyInterpretations: [BuiltInAction.applyInterpretation]
         default: []
         }

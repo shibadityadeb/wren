@@ -228,3 +228,11 @@ Any bulk action, meaning more than one target, is reviewed regardless of class u
 - **With a model:** better titles and classification, clarifying questions, more command phrasings, routed questions. **Without:** capture, dates, reminders, goals, review, fixed command phrasings and the same questions (answered deterministically).
 - **External AI services** (e.g. ChatGPT) are not used by this milestone and would be a separate, explicitly approved integration.
 - **Distribution:** universal DMG, macOS 14+, Apple Silicon and Intel. Unsigned builds are clearly labelled previews; stable releases require Developer ID signing and notarization.
+
+## 13. Milestone 5 decisions (2026-10-11)
+
+- Opening Wren shows a window; it stays a menu-bar app without a Dock icon, and starts quietly at login.
+- Data portability: versioned JSON export; consistent, verified, checksummed backups with preview and safe restore.
+- Pausing notifications changes no schedules; the recovery after a pause is one summary, never a burst.
+- Reset is two separate, explained, confirmed actions. No "clear test data", because Wren can't tell test data apart reliably.
+- Version 0.5.0.

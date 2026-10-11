@@ -245,6 +245,39 @@ Network calls are stubbed with recorded Gmail API responses. One optional live t
 | Live model (opt-in) | `LiveModelTests.testLiveDiagnosticsCaptureAndCommand`, `OllamaTests.testLiveOllama` with `WREN_LIVE_OLLAMA` |
 | Packaging | `scripts/verify-dmg.sh` in CI on arm64 and Intel; `--smoke-test` per slice |
 
+## Milestone 5 tests (implemented)
+
+| Requirement | Test |
+|---|---|
+| Export fidelity and relationships | `ExportTests.testRoundTripPreservesRecordsAndRelationships` |
+| Export readable, no secrets | `testReadableOutsideWrenAndNoSecrets` |
+| Export version handling | `testRejectsWrongFormatAndNewerVersion` |
+| No silent overwrite, safe failure | `testNeverSilentlyOverwrites` |
+| Consistent backup of an open store | `BackupTests.testConsistentBackupWhileStoreIsOpenAndVerified` |
+| Corrupted / tampered / newer backups rejected | `testTamperedAndCorruptedBackupsAreRejected` |
+| Older backup format | `testLegacyBackupFromOlderReleaseIsReadable` |
+| Retention, safe delete | `testRetentionKeepsNewestPerReason`, `testDeleteRefusesPathsOutsideBackups` |
+| Restore with confirmation, safety backup, applied at next launch | `testRestoreThroughBrokerAndNextLaunch` |
+| Restore failure keeps current data | `testFailedRestoreKeepsCurrentData`, `testRollbackPutsPreviousStoreBack` |
+| Pause across restart, schedules untouched | `PauseTests.testPausedDeliversNothingAndKeepsSchedulesAcrossRestart` |
+| Long pause → one summary | `testResumeAfterLongPauseSendsOneSummary` |
+| Timed pause expiry and daily rules | `testTimedPauseExpiresOnItsOwnAndDailyRulesStillApply`, `testEndOfDayPause` |
+| Never recorded sent if macOS didn't get it | `testSummaryNotRecordedWhenNotificationsUnavailable` |
+| Safe reset and confirmation | `ResetTests.testEraseNeedsConfirmationThenLeavesACleanWorkingStore`, `testEraseRefusesOtherTargets` |
+| Duplicate-instance prevention | `ResetTests.testInstanceGuard`; live: second launch exits, relaunch waits |
+| Migration and data preservation | `MigrationTests.testV2StoreOpensWithDataAndHistoryIntact` (now also checks the consistent pre-upgrade backup) |
+| Login-item stability | `LoginItemTests` (unchanged), install-over test |
+| Packaging and architectures | `scripts/verify-dmg.sh` in CI on arm64 and Intel |
+
+### Manual checklist (needs a person at the Mac)
+
+1. Open Wren from Applications: the window appears in front with the logo.
+2. Close it; open Wren again from Finder: the window returns. The menu-bar bird still works; ⌥ Space still opens capture.
+3. Settings › Your data › Export…: the save dialog appears; the file opens as readable JSON.
+4. Back Up Now, then Preview a backup: counts look right.
+5. Pause › For 1 hour: the banner shows; Resume: no burst of notifications.
+6. Reset preferences: confirm dialog; items still present afterwards.
+
 ## Commands recorded per phase
 
 ```

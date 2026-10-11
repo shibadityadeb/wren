@@ -6,6 +6,33 @@ Each phase ends with: a green build, tests passing (commands recorded), a git co
 Deliverables: PROJECT_SPEC.md, ARCHITECTURE.md, ROADMAP.md, TEST_PLAN.md, git repository initialised in `Wren/`.
 Acceptance: architecture documented, MVP scope unambiguous, every dependency justified, core vs. later clearly split.
 
+## Milestone 5 status (2026-10-11): daily use, visible window, distribution (0.5.0)
+
+Developed on `feat/daily-use-and-macos-distribution` and submitted as a pull request.
+
+### Verified
+
+| What | How |
+|---|---|
+| Tests | 160 tests, 2 skipped (opt-in live AI), 0 failures |
+| Window at launch | Real session: the window appeared and was the frontmost window (window server) |
+| Reopen from Finder | Switched to Finder, opened Wren again: Wren's window came to the front; one process |
+| Pause across restart | Paused, quit, relaunched: still paused; Resume cleared it |
+| Back Up Now | Manifest counts matched the live database (8 items, 38 events, 19 activity entries), SHA-256, schema 3 |
+| Restore end to end | Confirmation asked, then confirmed; pre-restore backup made; Wren relaunched (new process, waited for the old one); staged backup applied; data intact; replaced data kept in Restore/ |
+| DMG | `scripts/package-dmg.sh`: universal x86_64 + arm64, version 0.5.0, macOS 14+, no debug hooks, both slices pass `--smoke-test` |
+| Upgrade 0.4.0 → 0.5.0 | Installed from the DMG over the existing app: items, history, standing rules, permissions and login preference unchanged; one instance; second launch exits |
+
+### Not verified
+
+- Export through the native save dialog and the restore/reset confirmation alerts as clicked by a person (the code paths are unit-tested; the dialogs need a person).
+- Reset preferences in the real app (would reset your settings).
+- Developer ID signing and notarization (no credentials configured).
+
+### Next
+
+Configure signing secrets and release 0.5.0 signed; then voice capture or read-only email.
+
 ## Milestone 4 status (2026-10-11): working local AI and a downloadable Mac app
 
 ### Root cause of "no AI"
