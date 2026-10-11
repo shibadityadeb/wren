@@ -2,7 +2,22 @@
 
 Versions follow [semantic versioning](https://semver.org). The `VERSION` file is the source of truth; release tags are `v<VERSION>` (stable) or `v<VERSION>-preview.N` (prerelease).
 
-## [Unreleased]
+## [0.9.0] (unreleased)
+
+Real integrations, tracked GPT requests, Gmail inbox intelligence, and an audit (docs/AUDIT_REPORT.md).
+
+- **GPT requests are tracked jobs.** "Hey Wren, search in GPT: …" (typed, spoken or from Delegate) is saved as running before anything is sent, keeps running if you close the panel, and ends completed, incomplete, failed or cancelled with ChatGPT's real answer. Wren tells you once when it's done ("GPT finished: … View result."), and the notification, the panel, the overview and Delegate open a saved result page with your words, what was sent, the model, the times and the answer. Retry reruns a failed request on the same entry; a completed one is never sent again. A repeated Return or voice event doesn't send twice. A request cut off by quitting Wren is shown as interrupted, never as done. Earlier plan answers are shown as completed.
+- Routing: "tell GPT to investigate this and let me know when it's finished", "ask GPT what quantum physics is" and similar keep the whole query and drop only the instruction meant for Wren. A pending "When should I remind you?" no longer swallows your next GPT request or note.
+- **Gmail inbox intelligence** (needs the maintainer fix below to connect): while Wren runs it checks the inbox every few minutes using Gmail's change history (full re-read when that expires), ranks unread mail into Urgent, Time-sensitive, Needs a reply, Professional, Financial and Informational with reasons you can see and correct, alerts once per message (not per Spam/Trash, not during quiet hours, bursts become one summary), and sends a daily email digest at the time and time zone you choose (once per day, late if the Mac slept). New Inbox view with Open in Gmail, Add task, Dismiss and Snooze (Wren's alerts only), and **Mark as read** after you allow Google's extra permission. Email is never sent to ChatGPT or any AI service. Mail metadata lives in a private file outside the database, backups and exports, and is deleted on disconnect.
+- **Fixed: Connect Google could never finish.** Google requires the Desktop client's secret at the token endpoint ("client_secret is missing"); builds can now include it (`WREN_GOOGLE_CLIENT_SECRET`), and a build without it says so plainly.
+- Fixed: "Remove all Wren data" left GPT requests and answers in the database and connector sign-in files on disk. It now removes both and revokes the sign-ins.
+- Fixed: standing rules that read Gmail or Calendar are scoped to their own scheduler, so turning off the briefing's access really stops the briefing.
+- "I need to finish this report by Friday" and "Create a task for … next Monday" are saved as "Finish this report" / "Recruiter follow-up" with the date as the deadline, and a reminder is scheduled.
+- The microphone permission text describes "Hey Wren" accurately.
+- Data version 6 (new delegation fields; a backup is made before the upgrade). Wren 0.8 won't open 0.9 data.
+- `wren-tools live-check chatgpt` runs one real delegation for maintainers.
+
+## Earlier unreleased changes (in 0.9.0)
 
 - Notion connects through Notion's official connection for apps (Notion MCP): sign in on Notion's page and allow. There's nothing to set up, no integration, and no server of Wren's own.
 - New **Calendar** connector reads the calendars already on your Mac (Google, iCloud, Outlook accounts from System Settings) with one macOS permission and no sign-in. Google Calendar (direct) stays optional; events shown from both appear once.

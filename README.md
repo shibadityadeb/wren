@@ -4,7 +4,7 @@
 
 Wren remembers what you said you'd do, helps you follow through, and brings important things back to your attention.
 
-It is a native macOS menu-bar agent. You press a shortcut, type what you need to do, and get back to work. Wren saves it locally, reads any date in it, and reminds you at the right time. No cloud service, account, or API key is involved.
+It is a native macOS menu-bar agent. You press a shortcut, type what you need to do, and get back to work. Wren saves it locally, reads any date in it, and reminds you at the right time. Its core needs no cloud service, account or API key; connecting ChatGPT, Gmail or Notion is optional and uses your own account's sign-in, never an API key.
 
 ## Download
 
@@ -110,7 +110,7 @@ Wren reads dates from your own words even without a language model. It understan
 
 Wren works fully without AI: it saves everything you capture, reads dates with built-in rules, reminds you, and understands a set of fixed command phrasings. A local model adds cleaner titles, recognition of goals, ideas, questions and waiting items, clarifying questions, and many more ways of asking for changes or asking about your items.
 
-The model runs **on your Mac** through [Ollama](https://ollama.com). Wren talks only to `127.0.0.1:11434` and refuses any other address. Nothing you type goes to an external AI service. This is different from external AI services (like ChatGPT), which Wren does not use.
+The model runs **on your Mac** through [Ollama](https://ollama.com). Wren talks only to `127.0.0.1:11434` and refuses any other address. The local model never sends anything to an external AI service. Separately, if you connect ChatGPT, requests you explicitly address to GPT ("ask GPT …") are sent with your ChatGPT plan; nothing else is.
 
 ### First run
 
@@ -148,8 +148,8 @@ Each connector shows its real state (Available to connect, Connecting, Connected
 | Connector | What you do | What it can do |
 |---|---|---|
 | ChatGPT | **Continue with ChatGPT**, sign in, approve Wren | Send requests you confirm and get the answer back, using your ChatGPT plan |
-| Voice | Turn it on; allow Microphone and Speech Recognition when macOS asks | Push-to-talk capture, transcribed on your Mac |
-| Gmail | **Connect Google** (one sign-in for both) | Read-only: search, what needs attention, morning briefing |
+| Voice | Turn it on; allow Microphone and Speech Recognition when macOS asks | The voice shortcut and optional "Hey Wren", transcribed on your Mac |
+| Gmail | **Connect Google** (one sign-in for both) | Inbox triage with reasons, daily email digest, urgent-mail alerts while Wren runs; optional Mark as read |
 | Google Calendar | **Connect Google** (same sign-in) | Read-only: schedule questions, briefing, reminders from events |
 | Calendar | **Use this Mac's calendars** (macOS asks once) | Read-only: every calendar already on this Mac, including Google, iCloud and Outlook accounts |
 | Notion | **Connect Notion**, sign in and allow | Search and read pages, create a page after you confirm |
@@ -170,7 +170,14 @@ If a connector says **Maintainer setup required**, the copy of Wren you have was
 | Usage limit reached | Your plan's allowance for apps is used up for now. **Manage usage** opens ChatGPT's usage page |
 | Temporarily unavailable | ChatGPT or your connection had a problem; nothing was removed |
 
-Say or type "Ask ChatGPT to brainstorm ten names for this project", or open **Delegate**. Wren shows exactly what will leave your Mac. Private items are left out unless you tick them, and detected secrets are replaced with "[removed]" unless you choose otherwise. **Send with ChatGPT** sends that text, once, and streams the answer back. Each request uses your ChatGPT plan's allowance (Plus or Pro). Wren never switches to paid API billing. Requests are sent with storage turned off. Answers are labelled with the model Wren requested and the model the response reports.
+Say or type "Hey Wren, search in GPT: explain quantum physics and give me a few beginner resources", "ask GPT to brainstorm names for my project", or use **Delegate**. Wren treats it as a delegation, not a task or a note:
+
+1. It sends exactly your request (without "ask GPT" and "let me know when it's done") using your ChatGPT plan, once. A repeated Return or voice event doesn't send it twice.
+2. The request is saved as **Running** first, so it keeps going if you close the panel and stays in your history after a restart.
+3. When ChatGPT finishes, Wren tells you once: "GPT finished: … View result." Clicking it (or the entry in Overview › GPT requests or Delegate) opens the saved result: your words, what was sent, the model requested and reported, the times, and the answer exactly as returned.
+4. Failures say why (not connected, permission, usage limit, network, Wren closed mid-request). **Retry** reruns the same entry; a completed request is never re-sent.
+
+The plan API is called with storage off, so the request doesn't appear in your ChatGPT history and there's no link to a ChatGPT conversation; Wren doesn't invent one. **Open ChatGPT** just opens ChatGPT. Nothing from Wren (items, notes, email) is attached unless you add it yourself in Delegate, which shows exactly what will leave your Mac; private items need ticking and detected secrets are replaced with "[removed]". Wren never switches to paid API billing.
 
 Wren uses your plan only for requests you start and confirm; background tasks never use it. Wren can't see your ChatGPT conversations, memories or custom instructions. Tokens stay in a private file in Wren's data folder that only your macOS account can read (not the Keychain, so there are no Keychain password prompts) and never appear on screen, in logs, exports or backups. **Disconnect** revokes the sign-in with OpenAI and deletes the tokens.
 
@@ -204,21 +211,21 @@ One **Connect Google** covers both. In Connectors › Gmail or Google Calendar:
 
 | Permission | What it lets Wren do |
 |---|---|
-| Read your email, read-only (`gmail.readonly`) | Search mail, answer questions such as "anything from the recruiter?", summarise mail and suggest tasks |
+| Read your email, read-only (`gmail.readonly`) | Inbox triage, the email digest, alerts, search and questions |
 | See your calendars, read-only (`calendar.readonly`) | Read upcoming events, answer schedule questions, and add events to the briefing |
+| Change your email's read state (`gmail.modify`, optional, asked separately) | **Mark as read**. Google's permission also covers other changes, but Wren implements only Mark as read: no send, archive or delete |
 
-Afterwards Wren shows:
-- the Google account it's connected to;
-- which permissions Google actually granted;
-- **Add…** for a permission you skipped, plus **Reconnect** and **Disconnect Google**.
+Afterwards Wren shows the Google account, which permissions Google actually granted, **Add…** for a permission you skipped, **Reconnect** and **Disconnect Google**. Gmail or Calendar only switches on after a real read with that permission worked.
 
-Gmail or Calendar only switches on when Google granted its permission and a real read with it worked. Wren can't send, archive, delete or mark mail, or create or change events. Your Google password goes only to Google.
+**Inbox.** While Wren runs (and "Check for new mail while Wren runs" is on), it checks the inbox every 5 minutes by default, reading only what changed since the last check. It never looks at Spam or Trash. Unread mail is ranked into Urgent, Time-sensitive, Needs a reply, Professional (work, recruiting), Financial, and Informational, each with the reason (for example "deadline within a day; asks you something"). Promotions and newsletters are low priority, not "spam", and an unfamiliar sender isn't treated as suspicious. **Correct** changes a message's category or always/never treats a sender as important.
 
-**While Google is still reviewing Wren's app**, Google shows an "unverified app" warning. Only test accounts that Wren's maintainers added can connect, and Wren says so on the Connect Google screen.
+**Alerts.** Mail at or above your threshold (default: urgent and time-sensitive) gets one notification with the sender, subject and reason. Each message alerts once; another message in the same conversation doesn't alert again unless it's more urgent; several at once become one summary; quiet hours (default 22:00–07:00) hold alerts until they end. Clicking an alert opens the message in Wren, with **Open in Gmail**, **Mark as read** (when allowed), **Add task…**, **Dismiss** and **Snooze**. Dismiss and Snooze change Wren's alert only, never Gmail.
 
-What you get: search mail ("Anything from the recruiter?"), "What needs my attention today?" (overdue Wren items + today's events + mail flagged as a request, deadline, bill, interview, security notice, Gmail-important or from your important senders), today's events and mail on the Overview, both in the morning briefing (Connectors › Gmail › "Include in the morning briefing"), "What meetings do I have tomorrow?", and "Remind me" on any event. Suggested tasks from email open in the capture panel for you to edit first.
+**Email digest.** Once a day at the time and time zone you choose (default 08:00, this Mac's zone), Wren sums up unread inbox mail since the last digest plus older important unread mail (up to 14 days), one entry per conversation: sender, subject, Gmail's own preview (factual), Wren's inferred category and reason, and a suggested next step. If the Mac was asleep or Wren wasn't running, the digest comes once when Wren next runs, marked late. With the digest on, the morning briefing leaves email out so you're not told twice.
 
-Mail is fetched when needed and **not stored** unless you turn on the 7-day cache of headers and previews. Text in an email is treated as data: it can't trigger any action. **Disconnect Google** revokes Wren's access to both Gmail and Calendar at Google, removes the sign-in from this Mac and deletes cached mail.
+**Privacy.** Triage runs on your Mac with rules. Email is never sent to ChatGPT or any other AI service, and there's no setting that would. Wren reads headers, labels and Gmail's short preview, not full bodies or attachments. Recent inbox metadata is kept in a private file (`Mail/mailbox.json`, readable only by your macOS account) outside Wren's database, exports and backups, pruned after 30 days, and deleted when you disconnect or remove all data. Text in an email is data: it can't trigger any action. Wren can only check mail while it's running; when you quit it, nothing is checked.
+
+**Before Google has verified Wren's app**, Google shows an "unverified app" warning or only lets listed test accounts connect; Wren says which on the Connect Google screen.
 
 ### Calendar (this Mac)
 
@@ -271,7 +278,7 @@ Details: ARCHITECTURE.md §18.
 | Notifications | Reminders, briefing, check-in, with actions | The first time a capture gets a reminder, or via **Allow…** in the menu |
 | Login item | Open Wren at login | Only when you turn it on in Settings › Startup; macOS shows it in System Settings › General › Login Items |
 
-The global shortcut needs no Accessibility or Input Monitoring permission. Wren registers exactly one key combination through the standard macOS hotkey API and never sees any other keystroke. Wren uses no microphone and needs no file access.
+The global shortcut needs no Accessibility or Input Monitoring permission. Wren registers exactly one key combination through the standard macOS hotkey API and never sees any other keystroke. The microphone is used only for the voice shortcut and, if you turn it on, "Hey Wren" (see Voice). Wren needs no file access.
 
 If notifications are off, due items appear under **Due now** in the menu. Wren does not mark them as sent.
 
@@ -302,7 +309,7 @@ Wren backs up its database once a day while running, before every upgrade, resto
 Settings › Reset offers two separate actions, each explained and confirmed:
 
 - **Reset preferences**: shortcut, times, review thresholds, AI model choice, pause and open-at-login go back to defaults. Items are kept.
-- **Remove all Wren data**: deletes every item, goal, history entry, review decision and briefing record, and resets permissions to defaults. "Back up first" is on by default. Backups, Wren itself and Ollama models are not touched, and nothing outside Wren's data folder is.
+- **Remove all Wren data**: deletes every item, goal, history entry, review decision, briefing record and GPT request, signs out of (and revokes) ChatGPT, Google and Notion, deletes cached mail, and resets permissions to defaults. "Back up first" is on by default. Backups, Wren itself and Ollama models are not touched, and nothing outside Wren's data folder is.
 
 Wren doesn't offer "clear test data": it can't reliably tell test entries from real ones.
 

@@ -9,16 +9,80 @@ public struct EmailMessage: Codable, Equatable, Sendable, Identifiable {
     public var date: Date
     public var snippet: String
     public var labels: [String]
+    /// The message carries a `List-Unsubscribe` header (newsletters, notifications, marketing).
+    public var isBulk: Bool?
+    /// The Gmail account it belongs to, so "Open in Gmail" opens the right mailbox.
+    public var account: String?
     public var unread: Bool { labels.contains("UNREAD") }
+    /// In Spam or Trash: never part of triage, digests or alerts.
+    public var isSpamOrTrash: Bool { labels.contains("SPAM") || labels.contains("TRASH") }
     public var senderName: String {
         if let r = from.range(of: "<") { return from[..<r.lowerBound].trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "\"")) }
         return from
     }
-    public var webURL: URL { URL(string: "https://mail.google.com/mail/u/0/#all/\(threadId)")! }
+    public var senderAddress: String {
+        if let a = from.range(of: "<"), let b = from.range(of: ">", range: a.upperBound..<from.endIndex) { return from[a.upperBound..<b.lowerBound].lowercased() }
+        return from.trimmingCharacters(in: .whitespaces).lowercased()
+    }
+    /// Opens this message's conversation in Gmail on the web, in the right account when known.
+    public var webURL: URL {
+        var c = URLComponents(string: "https://mail.google.com/mail/")!
+        c.queryItems = [URLQueryItem(name: "authuser", value: account ?? "0")]
+        // Gmail's web client opens a conversation by its (hex) thread ID under #all.
+        let fragmentID = threadId.isEmpty ? id : threadId
+        return URL(string: c.url!.absoluteString + "#all/" + (fragmentID.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? fragmentID))!
+    }
+
+    public init(id: String, threadId: String, from: String, to: String, subject: String, date: Date, snippet: String, labels: [String],
+                isBulk: Bool? = nil, account: String? = nil) {
+        self.id = id; self.threadId = threadId; self.from = from; self.to = to; self.subject = subject; self.date = date
+        self.snippet = snippet; self.labels = labels; self.isBulk = isBulk; self.account = account
+    }
 }
 
-/// Read-only Gmail client (scope gmail.readonly). Fetches headers and snippets, not full bodies.
-public struct GmailClient: Sendable {
+/// The only Gmail change Wren implements. Even when Google granted `gmail.modify` (which at the
+/// OAuth level allows much more), Wren's client exposes nothing else: no send, delete, archive,
+/// trash, label or filter calls exist in this code.
+public enum GmailAllowedAction: String, CaseIterable, Sendable {
+    case markRead
+
+    /// The exact `messages.modify` body for the action.
+    public var modifyBody: JSONValue {
+        switch self {
+        case .markRead: .object(["removeLabelIds": .array([.string("UNREAD")])])
+        }
+    }
+}
+
+public enum GmailSyncError: Error, Equatable, LocalizedError {
+    /// The stored history cursor is too old or invalid (HTTP 404): a full sync is needed.
+    case historyExpired
+    public var errorDescription: String? { "Gmail's change history for Wren expired; Wren is re-reading your inbox." }
+}
+
+/// One page of changes since a history ID.
+public struct GmailHistory: Equatable, Sendable {
+    public var added: [String] = []
+    /// message ID → labels added / removed (UNREAD, INBOX, SPAM, TRASH …).
+    public var labelsAdded: [String: Set<String>] = [:]
+    public var labelsRemoved: [String: Set<String>] = [:]
+    public var deleted: Set<String> = []
+    public var historyID: String
+}
+
+/// What Wren's mail features need from Gmail (the live client, or a fake in tests).
+public protocol GmailAPI: Sendable {
+    func profile() async throws -> (email: String, historyID: String)
+    func inboxMessageIDs(query: String, limit: Int) async throws -> [String]
+    func history(since: String) async throws -> GmailHistory
+    func metadata(_ id: String) async throws -> EmailMessage
+    /// Performs one allowlisted change and returns the message's labels as Gmail reports them afterwards.
+    func perform(_ action: GmailAllowedAction, on id: String) async throws -> [String]
+}
+
+/// Gmail client. Reads headers, labels and Gmail's snippet (never full bodies or attachments).
+/// The only write is `perform(_:on:)`, limited to `GmailAllowedAction` (mark as read).
+public struct GmailClient: GmailAPI, Sendable {
     public var http: ConnectorHTTP
     public var token: @Sendable () async throws -> String
     static let base = "https://gmail.googleapis.com/gmail/v1/users/me"
@@ -53,15 +117,104 @@ public struct GmailClient: Sendable {
     }
 
     public func message(_ id: String) async throws -> EmailMessage {
-        let v = try await get("/messages/\(id)", ["format=metadata", "metadataHeaders=From", "metadataHeaders=To", "metadataHeaders=Subject", "metadataHeaders=Date"]
+        guard Self.isValidID(id) else { throw ConnectorError.badResponse("message id") }
+        let v = try await get("/messages/\(id)", ["format=metadata", "metadataHeaders=From", "metadataHeaders=To", "metadataHeaders=Subject",
+                                                  "metadataHeaders=Date", "metadataHeaders=List-Unsubscribe"]
             .map { let p = $0.split(separator: "="); return URLQueryItem(name: String(p[0]), value: String(p[1])) })
         return Self.parse(v)
     }
 
-    public func messages(matching q: String, limit: Int = 25) async throws -> [EmailMessage] {
+    /// Fetches metadata for several messages, a few at a time (not one after another).
+    public func messages(ids: [String], concurrency: Int = 6) async throws -> [EmailMessage] {
         var out: [EmailMessage] = []
-        for id in try await search(q, limit: limit) { out.append(try await message(id)) }
-        return out.sorted { $0.date > $1.date }
+        var index = 0
+        while index < ids.count {
+            let batch = ids[index..<min(ids.count, index + concurrency)]
+            index += batch.count
+            try await withThrowingTaskGroup(of: EmailMessage?.self) { g in
+                for id in batch {
+                    g.addTask {
+                        do { return try await message(id) } catch ConnectorError.http(404, _) { return nil }   // deleted meanwhile
+                    }
+                }
+                for try await m in g { if let m { out.append(m) } }
+            }
+        }
+        return out
+    }
+
+    public func messages(matching q: String, limit: Int = 25) async throws -> [EmailMessage] {
+        // Gmail's search leaves out Spam and Trash unless asked; Wren also drops them explicitly.
+        try await messages(ids: try await search(q, limit: limit)).filter { !$0.isSpamOrTrash }.sorted { $0.date > $1.date }
+    }
+
+    static func isValidID(_ id: String) -> Bool { !id.isEmpty && id.count <= 64 && id.range(of: "^[A-Za-z0-9_-]+$", options: .regularExpression) != nil }
+
+    /// Inbox only: the INBOX label excludes Spam and Trash by definition.
+    public func inboxMessageIDs(query: String, limit: Int) async throws -> [String] {
+        var ids: [String] = [], page: String?
+        repeat {
+            var items = [URLQueryItem(name: "labelIds", value: "INBOX"), URLQueryItem(name: "includeSpamTrash", value: "false"),
+                         URLQueryItem(name: "maxResults", value: String(min(100, limit - ids.count)))]
+            if !query.isEmpty { items.append(.init(name: "q", value: query)) }
+            if let page { items.append(.init(name: "pageToken", value: page)) }
+            let v = try await get("/messages", items)
+            ids += v["messages"]?.array.compactMap { $0["id"]?.string } ?? []
+            page = v["nextPageToken"]?.string
+        } while page != nil && ids.count < limit
+        return Array(ids.prefix(limit))
+    }
+
+    public func profile() async throws -> (email: String, historyID: String) {
+        let v = try await get("/profile")
+        guard let e = v["emailAddress"]?.string, let h = v["historyId"]?.string else { throw ConnectorError.badResponse("profile") }
+        return (e, h)
+    }
+
+    /// Changes since `since` (users.history.list). A 404 means the cursor expired.
+    public func history(since: String) async throws -> GmailHistory {
+        var out = GmailHistory(historyID: since), page: String?
+        repeat {
+            var items = [URLQueryItem(name: "startHistoryId", value: since), URLQueryItem(name: "maxResults", value: "500")]
+            for t in ["messageAdded", "messageDeleted", "labelAdded", "labelRemoved"] { items.append(.init(name: "historyTypes", value: t)) }
+            if let page { items.append(.init(name: "pageToken", value: page)) }
+            let v: JSONValue
+            do { v = try await get("/history", items) } catch ConnectorError.http(404, _) { throw GmailSyncError.historyExpired }
+            Self.apply(v, to: &out)
+            page = v["nextPageToken"]?.string
+        } while page != nil
+        return out
+    }
+
+    static func apply(_ v: JSONValue, to out: inout GmailHistory) {
+        for h in v["history"]?.array ?? [] {
+            for a in h["messagesAdded"]?.array ?? [] {
+                guard let id = a["message"]?["id"]?.string else { continue }
+                let labels = a["message"]?["labelIds"]?.array.compactMap(\.string) ?? []
+                if labels.contains("INBOX"), !labels.contains("SPAM"), !labels.contains("TRASH"), !out.added.contains(id) { out.added.append(id) }
+            }
+            for d in h["messagesDeleted"]?.array ?? [] { if let id = d["message"]?["id"]?.string { out.deleted.insert(id) } }
+            for a in h["labelsAdded"]?.array ?? [] {
+                guard let id = a["message"]?["id"]?.string else { continue }
+                out.labelsAdded[id, default: []].formUnion(a["labelIds"]?.array.compactMap(\.string) ?? [])
+            }
+            for r in h["labelsRemoved"]?.array ?? [] {
+                guard let id = r["message"]?["id"]?.string else { continue }
+                out.labelsRemoved[id, default: []].formUnion(r["labelIds"]?.array.compactMap(\.string) ?? [])
+            }
+        }
+        if let id = v["historyId"]?.string { out.historyID = id }
+    }
+
+    public func metadata(_ id: String) async throws -> EmailMessage { try await message(id) }
+
+    /// The single allowlisted write. Gmail returns the message's labels after the change.
+    public func perform(_ action: GmailAllowedAction, on id: String) async throws -> [String] {
+        guard Self.isValidID(id) else { throw ConnectorError.badResponse("message id") }
+        let url = URL(string: Self.base + "/messages/\(id)/modify")!
+        let v = try await http.json(url, method: "POST", headers: ["Authorization": "Bearer \(try await token())"], body: action.modifyBody)
+        guard let labels = v["labelIds"]?.array.compactMap(\.string) ?? (v["id"] != nil ? [] : nil) else { throw ConnectorError.badResponse("modify") }
+        return labels
     }
 
     static func parse(_ v: JSONValue) -> EmailMessage {
@@ -70,7 +223,8 @@ public struct GmailClient: Sendable {
         let ms = Double(v["internalDate"]?.string ?? "") ?? 0
         return EmailMessage(id: v["id"]?.string ?? "", threadId: v["threadId"]?.string ?? "", from: h("From"), to: h("To"),
                             subject: h("Subject"), date: Date(timeIntervalSince1970: ms / 1000),
-                            snippet: decodeEntities(v["snippet"]?.string ?? ""), labels: v["labelIds"]?.array.compactMap(\.string) ?? [])
+                            snippet: decodeEntities(v["snippet"]?.string ?? ""), labels: v["labelIds"]?.array.compactMap(\.string) ?? [],
+                            isBulk: !h("List-Unsubscribe").isEmpty)
     }
 
     static func decodeEntities(_ s: String) -> String {

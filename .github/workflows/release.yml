@@ -59,6 +59,7 @@ jobs:
         env:
           # Maintainer-registered provider apps; empty values build without that provider.
           WREN_GOOGLE_CLIENT_ID: ${{ secrets.WREN_GOOGLE_CLIENT_ID }}
+          WREN_GOOGLE_CLIENT_SECRET: ${{ secrets.WREN_GOOGLE_CLIENT_SECRET }}
           WREN_GOOGLE_STATUS: ${{ vars.WREN_GOOGLE_STATUS }}
         run: scripts/package-dmg.sh --skip-tests
       - name: Notarize and staple

@@ -55,7 +55,7 @@ struct CaptureView: View {
                     guard !state.busy else { return }
                     if state.reply != nil { state.reply = nil }
                     // Editing the text after a card was shown starts a new request.
-                    if let card = state.ask, card.phase != .sending, state.text != card.request.original { state.ask = nil }
+                    if let card = state.ask, !card.phase.isSending, state.text != card.request.original { state.ask = nil }
                 }
             if let v = state.voiceStatus {
                 HStack(spacing: 6) {
@@ -185,17 +185,18 @@ struct AskCardView: View {
                     HStack { Button("Ask ChatGPT") { act(.run(.chatgpt)) }; Button("Save as a note instead") { act(.saveAsNote) } }.controlSize(.small)
                 }
             case .sending:
-                HStack(spacing: 6) { ProgressView().controlSize(.small); Text(card.destination == .local ? "Asking the local model…" : "Asking ChatGPT…").font(.caption) }
+                HStack(spacing: 6) { ProgressView().controlSize(.small); Text(card.destination == .local ? "Asking the local model…" : "Running in ChatGPT…").font(.caption) }
                 if !card.streamed.isEmpty { answerText(card.streamed) }
+                if card.recordID != nil { Button("Open in Wren") { act(.openAnswer) }.controlSize(.small) }
             case let .answered(text, source, _):
                 answerText(text)
                 Text(source).font(.caption2).foregroundStyle(.tertiary)
-                HStack { Button("Copy answer") { act(.copyAnswer) }; Button("Open in Wren") { act(.openAnswer) } }.controlSize(.small)
+                HStack { Button("Copy answer") { act(.copyAnswer) }; Button("Open result") { act(.openAnswer) } }.controlSize(.small)
             case let .partial(text, source, _, message):
                 answerText(text)
                 Text(message).font(.caption).foregroundStyle(.orange)
                 Text(source).font(.caption2).foregroundStyle(.tertiary)
-                HStack { Button("Try again") { act(.run(card.destination == .choose ? .chatgpt : card.destination)) }; Button("Copy answer") { act(.copyAnswer) } }.controlSize(.small)
+                HStack { Button("Try again") { act(.run(card.destination == .choose ? .chatgpt : card.destination)) }; Button("Copy answer") { act(.copyAnswer) }; Button("Open result") { act(.openAnswer) } }.controlSize(.small)
             case .notConnected:
                 Text("ChatGPT isn't connected. Connect your account, then ask; your question stays here.").font(.caption).foregroundStyle(.orange)
                 HStack { Button("Connect ChatGPT") { act(.connect) }; Button("Save as a note instead") { act(.saveAsNote) } }.controlSize(.small)

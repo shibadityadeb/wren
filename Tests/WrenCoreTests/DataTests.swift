@@ -1,3 +1,4 @@
+import SwiftData
 import XCTest
 @testable import WrenCore
 
@@ -387,5 +388,26 @@ final class ResetTests: XCTestCase {
         XCTAssertEqual(InstanceGuard.decide(othersRunning: true, isRelaunch: false, waited: 0), .exit, "a second copy never runs a second scheduler")
         XCTAssertEqual(InstanceGuard.decide(othersRunning: true, isRelaunch: true, waited: 2), .waitForPrevious, "relaunch after restore waits for the old copy")
         XCTAssertEqual(InstanceGuard.decide(othersRunning: true, isRelaunch: true, waited: 11), .exit)
+    }
+}
+
+/// LIVE DATA (opt-in): opens a COPY of a real Wren data folder with this build, as an upgrade would.
+/// Set WREN_MIGRATION_COPY to a folder containing a copied Wren.store (+ -wal/-shm). Never point it at
+/// the live folder: opening upgrades the copy in place.
+@MainActor
+final class RealStoreUpgradeTests: XCTestCase {
+    func testUpgradeOfACopiedRealStoreKeepsEverything() throws {
+        guard let dir = ProcessInfo.processInfo.environment["WREN_MIGRATION_COPY"] else { throw XCTSkip("set WREN_MIGRATION_COPY") }
+        let url = URL(fileURLWithPath: dir).appendingPathComponent("Wren.store")
+        let before = try String(contentsOf: URL(fileURLWithPath: dir).appendingPathComponent("counts.txt"), encoding: .utf8)
+        let s = try WrenStore(url: url)
+        let items = try s.context.fetchCount(FetchDescriptor<Commitment>())
+        let delegations = try s.context.fetch(FetchDescriptor<DelegationRecord>())
+        let audit = try s.context.fetchCount(FetchDescriptor<AuditRecord>())
+        let after = "items=\(items) delegations=\(delegations.count) audit=\(audit)"
+        print("upgrade before: \(before.trimmingCharacters(in: .whitespacesAndNewlines)) after: \(after)")
+        XCTAssertEqual(before.trimmingCharacters(in: .whitespacesAndNewlines), after)
+        // New v6 fields read with defaults on old rows.
+        for d in delegations { XCTAssertEqual(d.attempts, 0); XCTAssertNil(d.notifiedAt) }
     }
 }

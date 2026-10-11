@@ -67,7 +67,7 @@ public final class WrenStore {
     }
 
     /// Bumped whenever models are added or changed.
-    nonisolated public static let schemaVersion = 5
+    nonisolated public static let schemaVersion = 6
 
     public enum StartupRestore: Equatable, Sendable {
         case none

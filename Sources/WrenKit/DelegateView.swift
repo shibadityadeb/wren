@@ -169,12 +169,17 @@ struct DelegateView: View {
                     } } }
                     .buttonStyle(.borderedProminent).tint(WrenTheme.accent).disabled(task.isEmpty || busy)
             case .chatgptPlan:
-                Button("Send with ChatGPT") { run { r in
-                    streamed = ""
-                    await model.sendToChatGPT(draft, record: r) { streamed += $0 }
-                    streamed = ""
-                    message = r.error } }
-                    .buttonStyle(.borderedProminent).tint(WrenTheme.accent).disabled(task.isEmpty || busy)
+                Button("Send with ChatGPT") {
+                    streamed = ""; message = nil
+                    switch model.sendToChatGPT(draft, onDelta: { streamed += $0 }) {
+                    case let .started(id), let .duplicate(id):
+                        // Tracked like any delegation: it keeps running if you leave, and Wren tells you when it's done.
+                        message = "Sent. Wren will notify you when ChatGPT finishes."
+                        model.route = .delegation(id)
+                    case let .notRun(o): message = Self.describe(o)
+                    }
+                }
+                .buttonStyle(.borderedProminent).tint(WrenTheme.accent).disabled(task.isEmpty || busy)
             case .openaiAPI:
                 EmptyView()
             case .localModel:
@@ -197,6 +202,14 @@ struct DelegateView: View {
                 Button("Search Notion") { search { try await model.notionSearch(task).map { AnswerLine($0.title, recordID: nil, externalURL: $0.url) } } }.disabled(task.isEmpty || busy)
             }
             if busy { ProgressView().controlSize(.small) }
+        }
+    }
+
+    static func describe(_ o: AskOutcome) -> String {
+        switch o {
+        case .notConnected: "ChatGPT isn't connected. Open Connectors › ChatGPT."
+        case let .reconnect(m), let .needsPermission(m), let .usageLimit(m), let .needsReview(m), let .failed(m, _): m
+        case .answered, .partial: ""
         }
     }
 
@@ -231,8 +244,10 @@ struct DelegateView: View {
                 ScrollView { Text(resp).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 220)
                 HStack {
                     Button(model.ai.usableModel != nil ? "Summarise on this Mac" : "Short excerpt") { Task { await model.summarizeLocally(r) } }
-                    Button("Done") { r.status = .completed; model.saveDelegation(r) }
-                    Button("Discard", role: .destructive) { r.response = nil; r.status = .cancelled; model.saveDelegation(r) }
+                    if r.destination != .chatgptPlan {
+                        Button("Done") { r.status = .completed; model.saveDelegation(r) }
+                        Button("Discard", role: .destructive) { r.response = nil; r.status = .cancelled; model.saveDelegation(r) }
+                    }
                 }.controlSize(.small)
                 if let s = r.summary { Text(s).font(.callout).padding(8).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6)) }
                 let follow = HandoffRequest.followUps(in: resp)
@@ -252,11 +267,11 @@ struct DelegateView: View {
         return VStack(alignment: .leading, spacing: 4) {
             if !items.isEmpty { Divider(); Text("History").font(.caption.weight(.semibold)).foregroundStyle(.secondary) }
             ForEach(Array(items)) { r in
-                Button { current = r } label: {
+                Button { if r.destination == .chatgptPlan { model.openDelegation(r.id) } else { current = r } } label: {
                     HStack {
                         Text(r.task).lineLimit(1)
                         Spacer()
-                        Text("\(r.destination.label) · \(r.status == .handedOff ? "waiting for your paste" : r.status.label)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        Text("\(r.destination.label) · \(r.status == .handedOff ? "awaiting submission" : r.status.label)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
                 }.buttonStyle(.plain).font(.callout)
             }

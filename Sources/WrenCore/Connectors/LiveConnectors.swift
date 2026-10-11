@@ -55,7 +55,7 @@ public class BaseConnector {
         switch e {
         case ConnectorError.unauthorized: onPermissions(false); return .reauthorizationRequired(m)
         // The provider rejected this build's own registration: the maintainers have to fix it.
-        case OAuthError.invalidClient: onPermissions(false); return .notAvailableInBuild(m)
+        case OAuthError.invalidClient, OAuthError.clientSecretMissing: onPermissions(false); return .notAvailableInBuild(m)
         case ConnectorError.forbidden: return .missingPermissions(m)
         case OAuthError.denied, OAuthError.scopeNotGranted: onPermissions(false); return .missingPermissions(m)
         default: return .temporarilyUnavailable(m)
@@ -105,7 +105,12 @@ public final class GoogleAccount {
     public var isConfigured: Bool { config != nil }
     public var isSignedIn: Bool { session.tokens != nil }
     public var email: String? { session.tokens?.account }
-    public var grantedScopes: Set<String> { session.grantedScopes.intersection([Self.gmailScope, Self.calendarScope]) }
+    public static let gmailModifyScope = ConnectorCatalog.gmailModifyScope
+    public var grantedScopes: Set<String> { session.grantedScopes.intersection([Self.gmailScope, Self.calendarScope, Self.gmailModifyScope]) }
+    /// Gmail can be read with either the read-only or the modify permission.
+    public var canReadMail: Bool { !grantedScopes.isDisjoint(with: [Self.gmailScope, Self.gmailModifyScope]) }
+    /// Mark as read is possible only when Google granted gmail.modify.
+    public var canMarkRead: Bool { grantedScopes.contains(Self.gmailModifyScope) }
     var oauth: GoogleOAuth? { config.map { GoogleOAuth(config: $0, session: urlSession, now: now) } }
 
     public func token() async throws -> String {
@@ -150,7 +155,7 @@ public final class GoogleAccount {
     @discardableResult
     public func verifiedAccount() async throws -> String {
         var account: String?
-        if grantedScopes.contains(Self.gmailScope) { account = try await gmail.profileEmail() }
+        if canReadMail { account = try await gmail.profileEmail() }
         if grantedScopes.contains(Self.calendarScope) {
             let id = try await calendar.accountID()
             account = account ?? id
@@ -188,7 +193,7 @@ public final class GoogleConnector: BaseConnector, Connector {
     }
 
     public var isConfigured: Bool { account.isConfigured }
-    public var isGranted: Bool { account.grantedScopes.contains(scope) }
+    public var isGranted: Bool { descriptor.id == .gmail ? account.canReadMail : account.grantedScopes.contains(scope) }
     /// Kept for callers that read the token store directly.
     public var google: GoogleSession { account.session }
 

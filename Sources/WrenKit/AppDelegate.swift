@@ -121,6 +121,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
         model.applyVoiceHotKey = { [weak self] in self?.applyVoiceHotKey() }
         model.setWakeWordInService = { [weak self] on in await self?.voice.setWakeWord(on) }
         model.prefillCapture = { [weak self] t in self?.captureState.text = t }
+        // A delegation whose result is on screen in the panel doesn't also get a notification.
+        model.isShowingDelegation = { [weak self] id in
+            guard let self, self.panel.isVisible, self.panel.isKeyWindow else { return false }
+            return self.captureState.ask?.recordID == id
+        }
         applyVoiceHotKey()
         applyHotKey()
         model.start()
@@ -313,28 +318,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
         guard var card = captureState.ask else { return }
         switch a {
         case let .run(dest):
-            // One request at a time: a second Return or click while sending does nothing.
-            guard card.phase != .sending else { return }
+            // One request at a time: a second Return, click or voice event while sending does nothing.
+            guard !card.phase.isSending else { return }
             let target: AskCard.Destination = dest == .choose ? .chatgpt : dest
             if card.destination != target { card.destination = target }
-            card.phase = .sending; card.streamed = ""; card.note = nil
-            captureState.ask = card
-            captureState.busy = true
+            card.streamed = ""; card.note = nil
             let request = card.request, channel = askChannel
-            Task {
-                let outcome: AskOutcome
-                if target == .local {
-                    outcome = await model.askLocalModel(request) ?? .failed("Local AI isn't set up. Set it up in Wren › Local AI, or ask ChatGPT.", retryable: false)
-                } else {
-                    outcome = await model.askChatGPT(request, channel: channel) { [weak self] d in
-                        guard let self, self.captureState.ask?.phase == .sending else { return }
-                        self.captureState.ask?.streamed += d
-                    }
+            if target == .local {
+                card.phase = .sending(recordID: nil)
+                captureState.ask = card
+                captureState.busy = true
+                Task {
+                    let outcome = await model.askLocalModel(request) ?? .failed("Local AI isn't set up. Set it up in Wren › Local AI, or ask ChatGPT.", retryable: false)
+                    captureState.busy = false
+                    guard captureState.ask?.request == request else { return }
+                    captureState.ask?.phase = Self.phase(for: outcome)
                 }
-                captureState.busy = false
-                guard captureState.ask?.request == request else { return }
-                captureState.ask?.phase = Self.phase(for: outcome)
-                appLog.notice("ask \(target == .local ? "local" : "chatgpt", privacy: .public): \(String(describing: Self.phase(for: outcome)).prefix(40), privacy: .public)")
+                return
+            }
+            // ChatGPT runs as a tracked delegation: persisted first, independent of this panel, and
+            // announced when it finishes. A failed earlier attempt is retried on the same record.
+            let start: AskStart
+            if let id = card.recordID, model.asks?.record(id)?.canRetry == true { start = model.retryDelegation(id) }
+            else {
+                start = model.startDelegation(request, channel: channel) { [weak self] d in
+                    guard let self, self.captureState.ask?.request == request, self.captureState.ask?.phase.isSending == true else { return }
+                    self.captureState.ask?.streamed += d
+                }
+            }
+            switch start {
+            case let .notRun(o):
+                card.phase = Self.phase(for: o)
+                captureState.ask = card
+            case let .started(id), let .duplicate(id):
+                card.recordID = id
+                if case .duplicate = start, let r = model.asks?.record(id), r.status != .running, let o = model.asks?.outcome(of: r) {
+                    card.phase = Self.phase(for: o)
+                    card.note = "Already sent a moment ago; nothing new was sent."
+                    captureState.ask = card
+                    return
+                }
+                card.phase = .sending(recordID: id)
+                card.note = "Sent to ChatGPT. You can close this; Wren will tell you when it's finished."
+                captureState.ask = card
+                appLog.notice("delegation \(id.uuidString.prefix(8), privacy: .public) \(String(describing: start).prefix(9), privacy: .public)")
+                Task {
+                    guard let outcome = await model.asks?.outcome(id) else { return }
+                    guard captureState.ask?.request == request else { return }
+                    captureState.ask?.phase = Self.phase(for: outcome)
+                    captureState.ask?.note = nil
+                }
             }
         case .connect:
             card.phase = .connecting; captureState.ask = card
@@ -365,9 +398,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
             closeCapture()
             model.openMainWindow()
         case .openAnswer:
-            model.route = .delegate
             closeCapture()
-            model.openMainWindow()
+            if let id = card.recordID { model.openDelegation(id) } else { model.route = .delegate; model.openMainWindow() }
         case .copyAnswer:
             switch card.phase {
             case let .answered(t, _, _), let .partial(t, _, _, _):
@@ -673,9 +705,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
             // Debug only: same path as pressing "Send with ChatGPT" on the preview (that press is the confirmation).
             let task = q.first(where: { $0.name == "task" })?.value ?? "Reply with the single word: ready"
             Task {
-                guard let r = model.newDelegation(task, destination: .chatgptPlan, depth: .normal) else { return }
-                await model.sendToChatGPT(HandoffDraft(task: task, depth: .normal), record: r) { _ in }
-                appLog.notice("debug chatgpt ask status=\(r.status.rawValue, privacy: .public) chars=\(r.response?.count ?? 0, privacy: .public) source=\(r.responseSource ?? "-", privacy: .public) error=\(r.error ?? "none", privacy: .public) account=\(self.model.hub.chatgpt.account.title, privacy: .public)")
+                let start = model.sendToChatGPT(HandoffDraft(task: task, depth: .normal)) { _ in }
+                guard case let .started(id) = start, let asks = model.asks else { appLog.notice("debug chatgpt ask not started: \(String(describing: start), privacy: .public)"); return }
+                _ = await asks.outcome(id)
+                let r = asks.record(id)
+                appLog.notice("debug chatgpt ask id=\(id.uuidString.prefix(8), privacy: .public) status=\(r?.status.rawValue ?? "-", privacy: .public) chars=\(r?.response?.count ?? 0, privacy: .public) requested=\(r?.requestedModel ?? "-", privacy: .public) reported=\(r?.reportedModel ?? "-", privacy: .public) error=\(r?.error ?? "none", privacy: .public) notified=\(r?.notifiedAt != nil, privacy: .public)")
             }
         case "/voice-command":
             // Debug only: the step after transcription, with this text as if it had been spoken.

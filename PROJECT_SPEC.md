@@ -1,5 +1,15 @@
 # Wren — Project Specification
 
+> **As built (0.9.0, 2026-10-11): where this spec and the code differ, the code and ARCHITECTURE §35–§44 win.**
+> - Credentials are private files in Wren's data folder (0700/0600), not the Keychain (§128, §199).
+> - There is no OpenAI API-key path (§176). ChatGPT is used through Sign in with ChatGPT and the user's plan, only for requests the user addresses to GPT; results are tracked jobs with completion notifications (ARCHITECTURE §39).
+> - Voice has the push-to-talk shortcut **and** an opt-in "Hey Wren" wake phrase with continuous on-device recognition while Wren runs (§81, §245). No audio is stored.
+> - Gmail: inbox triage, digest, alerts and optional Mark as read (`gmail.modify`) are built; email bodies aren't fetched, and email is never sent to an AI service (ARCHITECTURE §37).
+> - Notion uses Notion MCP, not an integration token.
+> - There is no `~/Library/Logs/Wren/` file log; Wren logs to the unified log (`subsystem com.shibadityadeb.wren`), never with content.
+> - Verified-live status of each feature: docs/AUDIT_REPORT.md.
+
+
 Wren is a local-first personal execution assistant that lives natively on the Mac. It captures casual commitments from anywhere via a global shortcut, remembers them, briefs you in the morning, checks in with you in the evening, and never forgets an unfinished item unless you explicitly complete or drop it.
 
 It is not a notes app, a chatbot, a web dashboard, or a conventional reminder manager.

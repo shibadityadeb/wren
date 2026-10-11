@@ -1,4 +1,5 @@
 import AppKit
+import WrenCore
 import WrenKit
 
 /// Dev-only tool.
@@ -12,6 +13,13 @@ if args.count == 3 && args[1] == "snapshot" {
     try MainActor.assumeIsolated { try SnapshotRenderer.renderAll(to: URL(fileURLWithPath: args[2])) }
     print("wrote snapshots to \(args[2])")
     exit(0)
+}
+if args.count >= 3 && args[1] == "live-check" && args[2] == "chatgpt" {
+    let prompt = args.count >= 4 ? args[3] : "Ask GPT to reply with the single word: ready"
+    let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent(ProcessInfo.processInfo.environment["WREN_DATA_FOLDER_NAME"] ?? "Wren", isDirectory: true)
+    Task { @MainActor in exit(await LiveCheck.chatgpt(prompt: prompt, dataFolder: folder)) }
+    dispatchMain()
 }
 guard args.count >= 4 else { usage() }
 let logoURL = URL(fileURLWithPath: args[2])

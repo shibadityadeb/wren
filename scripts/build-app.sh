@@ -62,7 +62,7 @@ echo "→ brand assets from assets/logo.png"
 iconutil -c icns Brand/Wren.iconset -o build/Wren.icns
 
 # Provider registrations. Only these keys are read from the file; nothing in it is executed.
-PROVIDER_VARS=(WREN_GOOGLE_CLIENT_ID WREN_GOOGLE_STATUS WREN_GOOGLE_VERIFIED)
+PROVIDER_VARS=(WREN_GOOGLE_CLIENT_ID WREN_GOOGLE_CLIENT_SECRET WREN_GOOGLE_STATUS WREN_GOOGLE_VERIFIED)
 if [[ -f config/providers.env ]]; then
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ "$line" =~ '^[[:space:]]*(#|$)' ]] && continue
@@ -74,9 +74,15 @@ xml_escape() { local s="$1"; s="${s//&/&amp;}"; s="${s//</&lt;}"; s="${s//>/&gt;
 PROVIDER_PLIST=""
 add_provider() { [[ -n "$2" ]] && PROVIDER_PLIST+="  <key>$1</key><string>$(xml_escape "$2")</string>"$'\n' || true; }
 add_provider WrenGoogleClientID "${WREN_GOOGLE_CLIENT_ID:-}"
+# Google requires the Desktop-app client's secret at the token endpoint (verified: without it Google
+# answers "client_secret is missing"). Google documents installed-app secrets as not confidential.
+add_provider WrenGoogleClientSecret "${WREN_GOOGLE_CLIENT_SECRET:-}"
 add_provider WrenGoogleStatus "${WREN_GOOGLE_STATUS:-$([[ "${WREN_GOOGLE_VERIFIED:-}" == 1 ]] && echo verified)}"
 included() { [[ -n "${(P)1:-}" ]] && echo "included" || echo "not included"; }
-echo "→ provider sign-in: Google $(included WREN_GOOGLE_CLIENT_ID) (status: ${WREN_GOOGLE_STATUS:-testing}); ChatGPT and Notion always (they register Wren themselves)"
+echo "→ provider sign-in: Google $(included WREN_GOOGLE_CLIENT_ID), Google client secret $(included WREN_GOOGLE_CLIENT_SECRET) (status: ${WREN_GOOGLE_STATUS:-testing}); ChatGPT and Notion always (they register Wren themselves)"
+if [[ -n "${WREN_GOOGLE_CLIENT_ID:-}" && -z "${WREN_GOOGLE_CLIENT_SECRET:-}" ]]; then
+  echo "  ⚠︎ WREN_GOOGLE_CLIENT_SECRET is not set: Google will refuse the sign-in (\"client_secret is missing\"). See docs/MAINTAINER_SETUP.md." >&2
+fi
 
 echo "→ assembling $APP ($VERSION, build $BUILD_NUMBER)"
 rm -rf "$APP"
@@ -100,7 +106,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSUIElement</key><false/>
   <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
   <key>NSHumanReadableCopyright</key><string>Local-first personal assistant. Data stays on this Mac.</string>
-  <key>NSMicrophoneUsageDescription</key><string>Wren records only while you hold the push-to-talk shortcut, to turn what you say into a capture. Audio is transcribed on this Mac and deleted.</string>
+  <key>NSMicrophoneUsageDescription</key><string>Wren listens when you press the voice shortcut and, if you turn on “Hey Wren”, in the background for the wake phrase while Wren is running. Speech is transcribed on this Mac; audio is never stored or sent anywhere.</string>
 ${PROVIDER_PLIST}  <key>NSCalendarsFullAccessUsageDescription</key><string>Wren reads your calendars (read-only) to answer questions like “what meetings do I have tomorrow?” and to add events to your briefing. Nothing leaves this Mac.</string>
   <key>NSCalendarsUsageDescription</key><string>Wren reads your calendars (read-only) to answer questions about your schedule. Nothing leaves this Mac.</string>
   <key>NSSpeechRecognitionUsageDescription</key><string>Wren uses on-device speech recognition to turn your voice capture into text. Audio never leaves this Mac.</string>

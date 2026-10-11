@@ -35,6 +35,14 @@ public enum Intent: Equatable, Sendable {
     case capture
 }
 
+/// Wren asked "When should I remind you…?". Only text that isn't its own explicit request may be the answer.
+public enum ReminderFollowUp {
+    public static func mayAnswer(_ text: String) -> Bool {
+        let t = ReminderCommand.stripAddress(text)
+        return IntentRouter.aiRequest(t) == nil && IntentRouter.explicitCapture(t) == nil
+    }
+}
+
 /// Deterministic routing. The local model is only consulted afterwards, for `.capture` inputs that
 /// look like commands, and its answer is checked against the user's own words.
 public enum IntentRouter {
@@ -116,7 +124,14 @@ public enum IntentRouter {
         if let r = s.range(of: #"^(?:about\s+|to\s+)?(?:whether|if)\s+"#, options: [.regularExpression, .caseInsensitive]) { s.removeSubrange(r); yesNo = true }
         let leading = #"^(?:to|about|for|on|and|that|regarding|re:?|please)\s+"#
         while let r = s.range(of: leading, options: [.regularExpression, .caseInsensitive]) { s.removeSubrange(r) }
+        // "… and let me know when it's finished": that's for Wren (it notifies on completion), not part of the query.
+        s = s.replacingOccurrences(of: #"[\s,]+(?:and\s+)?(?:then\s+)?(?:tell|let|notify|ping|alert)\s+me(?:\s+know)?\s+(?:when|once|after)\s+(?:it\s*(?:'s|is|has)\s+|it'?s\s+|you'?re\s+|you\s+are\s+|that'?s\s+)?(?:done|finished|ready|complete|completed|back|through)[\s.!?]*$"#,
+                                    with: "", options: [.regularExpression, .caseInsensitive])
         s = s.replacingOccurrences(of: #"[\s,]+(?:and\s+)?(?:tell|let)\s+me(?:\s+know)?(?:\s+what\s+(?:it|they)\s+says?)?[\s.!?]*$"#, with: "", options: [.regularExpression, .caseInsensitive])
+        // "what quantum physics is" → "what is quantum physics" (an embedded question read back as a question).
+        if let m = s.firstMatch(of: /^(?i)(what|who|where)\s+(.{2,80}?)\s+(is|are|was|were)[\s.?!]*$/) {
+            s = "\(m.1) \(m.3) \(m.2)?"
+        }
         s = s.replacingOccurrences(of: #"[\s,]+(?:for me|please)[\s.!?]*$"#, with: "", options: [.regularExpression, .caseInsensitive])
         s = s.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ",;:")))
         if yesNo { return "Is it true that " + s.trimmingCharacters(in: CharacterSet(charactersIn: "?.! ")) + "?" }

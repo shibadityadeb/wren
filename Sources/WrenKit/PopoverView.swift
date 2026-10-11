@@ -27,6 +27,9 @@ struct RouteView: View {
         case .connectors: ConnectorsView(model: model)
         case let .connector(id): ConnectorDetailView(model: model, id: id)
         case .delegate: DelegateView(model: model)
+        case let .delegation(id): DelegationDetailView(model: model, id: id)
+        case .inbox: InboxView(model: model)
+        case let .mailMessage(id): MailMessageView(model: model, id: id)
         case let .goal(id):
             if let g = model.goal(id) { GoalDetailView(model: model, goal: g) } else { ListPane(model: model) }
         }

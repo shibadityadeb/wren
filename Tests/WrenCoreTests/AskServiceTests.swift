@@ -53,7 +53,7 @@ extension ChatGPTConnectorTests {
         let sent = try JSONDecoder().decode(JSONValue.self, from: RouteStub.requests.last { $0.0.url?.path == "/v1/responses" }!.1!)
         XCTAssertTrue(sent["input"]!.array.first!["content"]!.string!.contains("What is quantum physics?"), "the question, meaning intact")
         let rec = try XCTUnwrap(delegations(h).first { $0.id == id })
-        XCTAssertEqual(rec.status, .responseImported); XCTAssertEqual(rec.response, text)
+        XCTAssertEqual(rec.status, .completed); XCTAssertEqual(rec.response, text); XCTAssertEqual(rec.reportedModel, "gpt-fast-2026"); XCTAssertNotNil(rec.completedAt)
         let audit = try XCTUnwrap(h.audit().first)
         XCTAssertEqual(audit.status, .succeeded); XCTAssertEqual(audit.action, BuiltInAction.delegateToExternalAI.rawValue)
         _ = streamed
@@ -107,7 +107,7 @@ extension ChatGPTConnectorTests {
         XCTAssertEqual(RouteStub.requests.filter { $0.0.url?.path == "/v1/responses" }.count, 1)
         // And the panel's Return key does nothing while sending or after the answer.
         var card = AskCard(request: quantum, destination: .chatgpt)
-        card.phase = .sending; XCTAssertNil(card.primary)
+        card.phase = .sending(recordID: nil); XCTAssertNil(card.primary)
         card.phase = .answered(text: "ok", source: "s", recordID: UUID()); XCTAssertNil(card.primary)
     }
 

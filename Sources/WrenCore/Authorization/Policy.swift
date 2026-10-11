@@ -15,6 +15,8 @@ public enum StandingRuleKind: String, Codable, Sendable, CaseIterable, Identifia
     case noPrivateDataToExternalAI
     /// The briefing may read connected Gmail and Calendar (read-only) on its own.
     case includeConnectedSourcesInBriefing
+    /// While Wren runs, it may check connected Gmail for new inbox mail (read-only) for alerts and the digest.
+    case monitorConnectedEmail
 
     public var id: String { rawValue }
 
@@ -26,6 +28,7 @@ public enum StandingRuleKind: String, Codable, Sendable, CaseIterable, Identifia
         case .showDraftBeforeSending: "Never send an email without showing me the final draft"
         case .noPrivateDataToExternalAI: "Don't send private content outside this Mac unless I include it each time"
         case .includeConnectedSourcesInBriefing: "Let the briefing read connected Gmail and Calendar"
+        case .monitorConnectedEmail: "Check connected Gmail for new mail while Wren runs (alerts and digest)"
         }
     }
 
@@ -36,8 +39,25 @@ public enum StandingRuleKind: String, Codable, Sendable, CaseIterable, Identifia
         case .autoRemindDeadlines: [BuiltInAction.scheduleReminder, BuiltInAction.deliverReminder, BuiltInAction.markReminderSummarized]
         case .autoApplyInterpretations: [BuiltInAction.applyInterpretation]
         case .includeConnectedSourcesInBriefing: [BuiltInAction.readEmail, BuiltInAction.readCalendar]
+        case .monitorConnectedEmail: [BuiltInAction.readEmail]
         default: []
         }
+    }
+
+    /// Which of Wren's schedulers a rule speaks for (`ActionOrigin.system(label)`). nil: any. Rules that
+    /// read external data are scoped, so turning off the briefing's rule stops the briefing even while
+    /// the mail monitor's rule is on (and the other way round).
+    public var systemScope: String? {
+        switch self {
+        case .includeConnectedSourcesInBriefing: "briefing"
+        case .monitorConnectedEmail: "mail monitor"
+        default: nil
+        }
+    }
+
+    /// True when this rule lets `system` (the scheduler's label) perform `action` on its own.
+    public func covers(_ action: ActionID, system: String) -> Bool {
+        allowsActions.contains(action) && (systemScope == nil || systemScope == system)
     }
 
     /// Rules that only ever add restrictions.
@@ -145,9 +165,9 @@ public enum Authorizer {
         case let .user(channel):
             if policyLevel == .always { return .needsConfirmation(confirmationPrompt(d, r)) }
             return .allow(.directUserInstruction(channel))
-        case .system:
+        case let .system(label):
             guard d.category == .localReversible || d.category == .externalRead,
-                  let rule = policy.rules.first(where: { $0.allowsActions.contains(d.id) }) else {
+                  let rule = policy.rules.first(where: { $0.covers(d.id, system: label) }) else {
                 return .deny("No standing rule lets Wren do “\(d.summary)” on its own.")
             }
             return .allow(.standingRule(rule))

@@ -157,7 +157,7 @@ All tests use `MockTool` and an in-memory store.
 | P9-17 | Tool executes but verification returns mismatch | status `failed`, not `succeeded` |
 | P9-18 | Tool times out | status `unverified`, notification says unverified, no automatic retry |
 | P9-19 | Dry-run mode on | plan returned, tool `execute` call count is zero |
-| P9-20 | Revoke a tool | Keychain items removed, rules disabled, later requests rejected |
+| P9-20 | Revoke a tool | credential files removed, rules disabled, later requests rejected |
 | P9-21 | Audit entries | contain IDs and short labels; no field exceeds the configured length; no body text |
 | P9-22 | Phase 1–8 suites | still pass after commitment actions move to `wren.tasks` |
 
@@ -168,9 +168,9 @@ Network calls are stubbed with recorded Gmail API responses. One optional live t
 | ID | Scenario | Expected |
 |---|---|---|
 | P10-01 | OAuth URL construction | PKCE S256 challenge, loopback redirect, scope `gmail.readonly` only |
-| P10-02 | Token exchange success | refresh token in Keychain, nothing token-like in SwiftData or UserDefaults |
+| P10-02 | Token exchange success | refresh token in the private credential file, nothing token-like in SwiftData or UserDefaults; the Desktop client secret is sent to the token endpoint and never in the browser URL |
 | P10-03 | Enabling archive | triggers incremental consent for `gmail.modify`, not before |
-| P10-04 | Disconnect | revoke endpoint called, Keychain item gone, `EmailMessage` rows deleted |
+| P10-04 | Disconnect | revoke endpoint called, credential file gone, `Mail/mailbox.json` deleted |
 | P10-05 | Incremental sync from `historyId` | only changed messages fetched; expired `historyId` triggers bounded resync |
 | P10-06 | Index fields | metadata and snippet only; body nil when retention is off |
 | P10-07 | Classifier: important sender, invoice, security alert, interview invite, newsletter with `List-Unsubscribe`, promotion, unknown human asking a question | essential, essential, essential, essential, low, low, essential, each with a reason |
@@ -285,7 +285,7 @@ All provider calls are mocked with `RouteStub` (no network, no credentials in CI
 | Requirement | Tests |
 |---|---|
 | Registry, catalog, states | `ConnectorRegistryTests` |
-| Keychain handling | `CredentialTests.testInMemory`, `testRealKeychain` (local only) |
+| Credential storage | `ConnectorTests` (file store 0700/0600, never the Keychain); `MailIntelligenceTests.testMailboxFileIsPrivateAndClearedOnDisconnect` |
 | HTTPS + host allowlist, error mapping | `HTTPPolicyTests` |
 | OAuth URL, PKCE (RFC 7636 vector), callback/state validation, exchange, scope check, refresh, revocation errors | `GoogleOAuthTests` |
 | Gmail search, pagination, parsing, triage, read-only, cache, question mapping | `GmailTests` |
@@ -310,3 +310,20 @@ swift test                                   # WrenCore
 xcodebuild -project App/Wren.xcodeproj -scheme Wren -configuration Debug build
 xcodebuild -project App/Wren.xcodeproj -scheme Wren test   # app-level tests, from Phase 2
 ```
+
+
+## 0.9.0: workflow tests (recorded 2026-10-11)
+
+Command: `swift test` → **303 tests, 0 failures, 4 skipped** (skipped = opt-in live tests: `WREN_LIVE_OLLAMA` ×2, `WREN_LIVE_SIWC`, `WREN_MIGRATION_COPY`). Baseline before this work: 255 tests, 0 failures, 3 skipped.
+Labels: **mock** = stubbed provider (`RouteStub`, `FakeGmail`, `FakeReminderCenter`); **live** = real provider or real macOS (see docs/MANUAL_TESTS.md).
+
+| Area | Tests | Kind |
+|---|---|---|
+| GPT routing (brief phrasings, prompt extraction, not-a-task/note/stored-query, empty request, pending reminder question) | `WorkflowRoutingTests` | unit |
+| GPT job: persisted running first, completes once, survives restart, dedupe (running and just finished), retry on the same record, never re-run a success, usage limit, interrupted by quit, only the request text leaves the Mac, reviewed private context on retry, pre-v6 records | `DelegationLifecycleTests`, `AskServiceTests` | mock |
+| GPT live: real request via `wren-tools live-check chatgpt` | M-GPT-1/2 | **live, passed** |
+| Gmail: categories and reasons, promotions ≠ spam, unfamiliar sender not suspicious, corrections, prompt-injection text is data, Spam/Trash exclusion, baseline first sync, incremental sync, duplicate history IDs, expired cursor fallback, account switch, alert threshold/once/thread/escalation/quiet hours/bursts, digest at-most-once across restart, late digest, time zone, grouping, carry-over rule, Mark as read allowlist body, permission + confirmation, scheduler can't mark read, failure keeps unread, mailbox file 0600 + cleared, Open email link, history parsing, 404 cursor | `MailIntelligenceTests` | mock |
+| Google secret: sent on exchange/refresh, never in the browser URL, "client_secret is missing" → build problem, config parsing | `MailIntelligenceTests` | mock (Google's real answer probed live) |
+| Standing-rule scope (briefing vs mail monitor) | `ExternalReadPolicyTests` | unit |
+| Task → reminder: "I need to finish this report by Friday" → task, deadline, reminder, scheduled request linked to the item, no duplicate on relaunch, completion withdraws it | `TaskToReminderPipelineTests` | mock center (live: M-REM-1) |
+| Upgrade of a copy of a real 0.8.0 store | `RealStoreUpgradeTests` (opt-in) | **live data copy, passed** |

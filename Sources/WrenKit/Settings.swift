@@ -102,10 +102,14 @@ final class WrenSettings {
         get { d.stringArray(forKey: "importantSenders") ?? [] }
         set { d.set(newValue, forKey: "importantSenders") }
     }
+    var mail: MailPreferences {
+        get { (d.data(forKey: "mailPreferences")).flatMap { try? JSONDecoder().decode(MailPreferences.self, from: $0) } ?? MailPreferences() }
+        set { d.set(try? JSONEncoder().encode(newValue.normalized()), forKey: "mailPreferences") }
+    }
     /// Every preference key Wren writes. "Reset preferences" removes exactly these.
     static let allKeys = ["hotKeyEnabled", "hotKey", "ollamaModel", "useModel", "dateOnlyReminderHour", "captureDraft",
                           "dailySettings", "launchAtLogin", "insightSettings", "notificationPause", "lastAutomaticBackup",
-                          "voiceEnabled", "voiceHotKey", "wakeWordEnabled", "macCalendarEnabled", "chatgptEnabled", "chatgptDestination", "chatgptModel", "openaiModel", "gmailCacheEnabled", "importantSenders"]
+                          "voiceEnabled", "voiceHotKey", "wakeWordEnabled", "macCalendarEnabled", "chatgptEnabled", "chatgptDestination", "chatgptModel", "openaiModel", "gmailCacheEnabled", "importantSenders", "mailPreferences"]
 
     func resetAll() { Self.allKeys.forEach(d.removeObject(forKey:)) }
 

@@ -109,6 +109,49 @@ public enum SnapshotRenderer {
                 .background(appearance == .aqua ? Color(white: 0.85) : Color(white: 0.15)),
                        size: CGSize(width: 600, height: 160), appearance: appearance, to: dir.appendingPathComponent("capture-\(tag).png"))
         }
+        // GPT delegations and the inbox (sample data only).
+        let gptDone = DelegationRecord(task: "Explain quantum physics and give me a few useful beginner resources.", destination: .chatgptPlan, depth: .normal, now: now.addingTimeInterval(-300))
+        gptDone.original = "Hey Wren, search in GPT: explain quantum physics and give me a few useful beginner resources."
+        gptDone.prompt = gptDone.task; gptDone.status = .completed; gptDone.requestedModel = "gpt-6-luna"; gptDone.reportedModel = "gpt-6-luna"
+        gptDone.response = "Quantum physics describes how matter and energy behave at very small scales, where particles act like waves and outcomes are probabilistic.\n\nBeginner resources:\n1. \"Quantum Physics for Babies\" (yes, really) for intuition\n2. MIT OpenCourseWare 8.04, lectures 1–3\n3. 3Blue1Brown's videos on wave functions"
+        gptDone.completedAt = now.addingTimeInterval(-280); gptDone.notifiedAt = gptDone.completedAt; gptDone.attempts = 1; gptDone.channelRaw = UserChannel.voice.rawValue
+        let running = DelegationRecord(task: "Compare these two approaches.", destination: .chatgptPlan, depth: .normal, now: now.addingTimeInterval(-20))
+        running.prompt = running.task; running.status = .running; running.requestedModel = "gpt-6-luna"; running.attempts = 1
+        let failed = DelegationRecord(task: "Research rust async runtimes.", destination: .chatgptPlan, depth: .normal, now: now.addingTimeInterval(-900))
+        failed.prompt = failed.task; failed.status = .failed; failed.failure = .usageLimit; failed.attempts = 1
+        failed.error = ChatGPTError.usageLimitReached.errorDescription; failed.completedAt = now.addingTimeInterval(-890); failed.notifiedAt = failed.completedAt
+        for r in [gptDone, running, failed] { store.context.insert(r) }
+        try store.context.save()
+        var mb = MailboxState(); mb.account = "you@example.com"; mb.lastSyncAt = now.addingTimeInterval(-120); mb.monitoringSince = now.addingTimeInterval(-86400)
+        let samples: [EmailMessage] = [
+            EmailMessage(id: "m1", threadId: "t1", from: "Google <no-reply@accounts.google.com>", to: "you", subject: "Security alert", date: now.addingTimeInterval(-1800), snippet: "A new sign-in on Mac. If this was you, you don't need to do anything.", labels: ["INBOX", "UNREAD", "IMPORTANT"]),
+            EmailMessage(id: "m2", threadId: "t2", from: "Priya Shah <priya@acme.com>", to: "you", subject: "Contract for review", date: now.addingTimeInterval(-3600), snippet: "Could you please sign the contract by tomorrow? Happy to walk through it.", labels: ["INBOX", "UNREAD"]),
+            EmailMessage(id: "m3", threadId: "t3", from: "Jordan (BigCo Talent) <jordan@bigco.com>", to: "you", subject: "Opportunity at BigCo", date: now.addingTimeInterval(-7200), snippet: "I'm a recruiter at BigCo and your background stood out for a staff engineer role.", labels: ["INBOX", "UNREAD"]),
+            EmailMessage(id: "m4", threadId: "t4", from: "Bank <alerts@bank.com>", to: "you", subject: "Your statement is ready", date: now.addingTimeInterval(-9000), snippet: "Your October statement is available.", labels: ["INBOX", "UNREAD"]),
+            EmailMessage(id: "m5", threadId: "t5", from: "Shop <deals@shop.com>", to: "you", subject: "50% off everything", date: now.addingTimeInterval(-5000), snippet: "This weekend only.", labels: ["INBOX", "UNREAD", "CATEGORY_PROMOTIONS"], isBulk: true),
+        ]
+        for m in samples { mb.items[m.id] = MailItem(message: m, classification: MailTriage.classify(m, now: now, calendar: cal), firstSeenAt: now, baseline: false) }
+        _ = MailDigest.build(&mb, key: "sample", slot: now, late: false, now: now)
+        MailDigest.mark(&mb, key: "sample", .delivered)
+        model.mailbox = mb
+        model.previewGmail = true
+        model.delegationVersion += 1
+        for (r, name, h) in [(Route.delegation(gptDone.id), "gpt-result", 760.0), (.delegation(running.id), "gpt-running", 560), (.delegation(failed.id), "gpt-failed", 560),
+                             (.inbox, "inbox", 1100), (.mailMessage("m2"), "mail-message", 760), (.overview, "overview-workflows", 1000)] {
+            model.route = r
+            try render(MainWindowView(model: model), size: CGSize(width: 980, height: h), appearance: .aqua, to: dir.appendingPathComponent("window-\(name)-light.png"))
+        }
+        model.route = .delegation(gptDone.id)
+        try render(MainWindowView(model: model), size: CGSize(width: 980, height: 760), appearance: .darkAqua, to: dir.appendingPathComponent("window-gpt-result-dark.png"))
+        let sending = CaptureState()
+        sending.text = gptDone.original!
+        var card = AskCard(request: AIRequest(prompt: gptDone.task, original: gptDone.original!, target: .chatgpt), destination: .chatgpt)
+        card.phase = .sending(recordID: running.id); card.recordID = running.id
+        card.note = "Sent to ChatGPT. You can close this; Wren will tell you when it's finished."
+        sending.ask = card
+        try render(CaptureView(state: sending, submit: { _ in }, cancel: {}).padding(20).background(Color(white: 0.85)),
+                   size: CGSize(width: 600, height: 240), appearance: .aqua, to: dir.appendingPathComponent("capture-gpt-sending-light.png"))
+
         // Empty state.
         let empty = AppModel(store: try WrenStore(url: nil))
         empty.ai = .noChatModel
