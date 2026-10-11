@@ -322,8 +322,15 @@ final class MigrationTests: XCTestCase {
         let url = dir.appendingPathComponent("Wren.store")
         try FileManager.default.copyItem(at: src, to: url)
 
-        try WrenStore.backupBeforeUpgrade(url, version: 3)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: dir.appendingPathComponent("Backups/schema-v3/Wren.store").path))
+        // Opening through the startup path takes one consistent pre-upgrade backup, once.
+        let manager = BackupManager(dataDirectory: dir)
+        _ = try WrenStore.open(manager: manager, appVersion: "test")
+        XCTAssertEqual(manager.list().filter { $0.manifest?.reason == .preMigration }.count, 1)
+        _ = try WrenStore.open(manager: manager, appVersion: "test")
+        XCTAssertEqual(manager.list().filter { $0.manifest?.reason == .preMigration }.count, 1, "only once per schema version")
+        let backup = try XCTUnwrap(manager.list().first)
+        XCTAssertEqual(backup.manifest?.counts["items"], 4)
+        XCTAssertNoThrow(try manager.verify(backup))
 
         let cal = calendar("Asia/Kolkata")
         let h = try Harness(url: url, now: at(cal, 2026, 10, 8, 12), calendar: cal)

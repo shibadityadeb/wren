@@ -106,6 +106,18 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Wre
         return await add("checkin-\(c.day)", content)
     }
 
+    /// One notification for everything that came due while paused.
+    func deliverPauseSummary(_ items: [ReminderPayload], pausedSince: Date) async -> Bool {
+        let content = UNMutableNotificationContent()
+        content.title = "While notifications were paused"
+        let names = items.prefix(3).map { "“\($0.title)”" }.joined(separator: ", ")
+        content.body = items.count == 1 ? "\(names) came due." : "\(items.count) reminders came due, including \(names). Open Wren to review."
+        content.sound = .default
+        content.userInfo = ["kind": "pauseSummary"]
+        content.threadIdentifier = "reminders"
+        return await add("pause-summary-\(Int(Date().timeIntervalSince1970))", content)
+    }
+
     func withdrawReminder(id: UUID) {
         center.removeDeliveredNotifications(withIdentifiers: ["reminder-\(id.uuidString)"])
     }

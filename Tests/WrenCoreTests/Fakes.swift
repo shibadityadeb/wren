@@ -9,11 +9,16 @@ final class FakeNotifier: WrenNotifier {
     var briefings: [Briefing] = []
     var checkIns: [CheckIn] = []
     var withdrawn: [UUID] = []
+    var pauseSummaries: [[ReminderPayload]] = []
     func canDeliver() async -> Bool { allowed }
     func deliverReminder(_ p: ReminderPayload) async -> Bool { guard acceptsDelivery else { return false }; reminders.append(p); return true }
     func deliverBriefing(_ b: Briefing) async -> Bool { guard acceptsDelivery else { return false }; briefings.append(b); return true }
     func deliverCheckIn(_ c: CheckIn) async -> Bool { guard acceptsDelivery else { return false }; checkIns.append(c); return true }
     func withdrawReminder(id: UUID) { withdrawn.append(id) }
+    func deliverPauseSummary(_ items: [ReminderPayload], pausedSince: Date) async -> Bool {
+        guard acceptsDelivery else { return false }
+        pauseSummaries.append(items); return true
+    }
 }
 
 @MainActor
@@ -44,6 +49,7 @@ struct Harness {
     let policy: SwiftDataPolicyStore
     let broker: ActionBroker
     let engine: WrenEngine
+    let backups: BackupManager
     var daily = DailySettings()
 
     init(url: URL? = nil, now: Date, calendar: Calendar, notifier: FakeNotifier = FakeNotifier(), daily: DailySettings = DailySettings()) throws {
@@ -53,6 +59,9 @@ struct Harness {
         policy = try SwiftDataPolicyStore(context: store.context, clock: clock)
         broker = ActionBroker(context: store.context, policyStore: policy, clock: clock)
         BuiltInAction.registerLocal(on: broker, store: store, notifier: notifier, clock: clock)
+        backups = BackupManager(dataDirectory: url?.deletingLastPathComponent()
+                                ?? FileManager.default.temporaryDirectory.appendingPathComponent("wren-mem-\(UUID().uuidString)"))
+        BuiltInAction.registerData(on: broker, store: store, backups: backups, appVersion: "test", clock: clock)
         let d = daily
         engine = WrenEngine(store: store, broker: broker, clock: clock, notifier: notifier, settings: { d })
         self.daily = daily

@@ -209,6 +209,32 @@ extension WrenStore {
         return g
     }
 
+    // MARK: Erase
+
+    /// Removes everything the user created and resets permissions to the defaults. Keeps only the
+    /// audit record of this erase (so the log shows that it happened, without content).
+    public func eraseAllUserData(keepingAuditFor requestID: UUID?, now: Date = .now) throws {
+        try context.fetch(FetchDescriptor<Commitment>()).forEach(context.delete)
+        try context.fetch(FetchDescriptor<ActivityEvent>()).forEach(context.delete)
+        try context.fetch(FetchDescriptor<Goal>()).forEach(context.delete)
+        try context.fetch(FetchDescriptor<GoalEvent>()).forEach(context.delete)
+        try context.fetch(FetchDescriptor<InsightRecord>()).forEach(context.delete)
+        try context.fetch(FetchDescriptor<DailyRun>()).forEach(context.delete)
+        try context.fetch(FetchDescriptor<DenialRecord>()).forEach(context.delete)
+        try context.fetch(FetchDescriptor<AuditRecord>()).filter { $0.requestID != requestID }.forEach(context.delete)
+        try context.fetch(FetchDescriptor<PermissionGrantRecord>()).forEach(context.delete)
+        try context.fetch(FetchDescriptor<StandingRuleRecord>()).forEach(context.delete)
+        for p in PolicySnapshot.defaultGrants { context.insert(PermissionGrantRecord(p, at: now)) }
+        for k in StandingRuleKind.defaults { context.insert(StandingRuleRecord(k, at: now)) }
+        try save()
+    }
+
+    public func userDataCounts() -> [String: Int] {
+        ["items": (try? context.fetchCount(FetchDescriptor<Commitment>())) ?? 0,
+         "goals": (try? context.fetchCount(FetchDescriptor<Goal>())) ?? 0,
+         "historyEvents": (try? context.fetchCount(FetchDescriptor<ActivityEvent>())) ?? 0]
+    }
+
     // MARK: Insight ledger
 
     public func insightRecord(_ key: String) throws -> InsightRecord? {
