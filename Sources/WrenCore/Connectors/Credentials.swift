@@ -1,7 +1,6 @@
 import Foundation
-import Security
 
-/// Secret storage. Production uses the macOS Keychain; tests use memory.
+/// Secret storage. The app uses `FileCredentialStore` (private files in Wren's data folder); tests use memory.
 public protocol CredentialStore: Sendable {
     func read(_ key: String) throws -> Data?
     func write(_ key: String, _ value: Data) throws
@@ -10,45 +9,74 @@ public protocol CredentialStore: Sendable {
 
 public enum CredentialError: Error, Equatable, LocalizedError {
     case keychain(OSStatus)
+    case badKey(String)
+    case file(String)
     public var errorDescription: String? {
-        switch self { case let .keychain(s): "Keychain error \(s)." }
+        switch self {
+        case let .keychain(s): "Keychain error \(s)."
+        case let .badKey(k): "Invalid credential name “\(k)”."
+        case let .file(m): "Couldn't save the sign-in: \(m)"
+        }
     }
 }
 
-/// Generic-password items under one service name, accessible only when the Mac is unlocked,
-/// never synced to iCloud.
-public struct KeychainCredentialStore: CredentialStore {
-    public let service: String
-    public init(service: String = AppIdentity.keychainService) { self.service = service }
+/// Connector sign-in tokens as private files: `<Wren data folder>/Credentials/<key>`, the folder
+/// readable only by your macOS user (0700) and each file 0600, written atomically. No Keychain, so
+/// no Keychain password prompts. Never part of Wren's database, exports or backups. Any app running
+/// as your user could read these files, which is the trade-off against the Keychain.
+public struct FileCredentialStore: CredentialStore {
+    public let directory: URL
+    public init(directory: URL) { self.directory = directory }
 
-    func query(_ key: String) -> [String: Any] {
-        [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: key]
+    @MainActor public static var `default`: FileCredentialStore {
+        FileCredentialStore(directory: WrenStore.defaultDirectory.appendingPathComponent("Credentials", isDirectory: true))
+    }
+
+    func url(_ key: String) throws -> URL {
+        guard !key.isEmpty, key.range(of: "^[A-Za-z0-9._-]+$", options: .regularExpression) != nil, !key.hasPrefix(".") else {
+            throw CredentialError.badKey(key)
+        }
+        return directory.appendingPathComponent(key)
+    }
+
+    func ensureDirectory() throws {
+        let fm = FileManager.default
+        if !fm.fileExists(atPath: directory.path) {
+            try fm.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        }
+        try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
     }
 
     public func read(_ key: String) throws -> Data? {
-        var q = query(key)
-        q[kSecReturnData as String] = true
-        q[kSecMatchLimit as String] = kSecMatchLimitOne
-        var out: CFTypeRef?
-        let s = SecItemCopyMatching(q as CFDictionary, &out)
-        if s == errSecItemNotFound { return nil }
-        guard s == errSecSuccess else { throw CredentialError.keychain(s) }
-        return out as? Data
+        let u = try url(key)
+        guard FileManager.default.fileExists(atPath: u.path) else { return nil }
+        return try Data(contentsOf: u)
     }
 
     public func write(_ key: String, _ value: Data) throws {
-        let attrs: [String: Any] = [kSecValueData as String: value,
-                                    kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly]
-        var s = SecItemUpdate(query(key) as CFDictionary, attrs as CFDictionary)
-        if s == errSecItemNotFound {
-            s = SecItemAdd(query(key).merging(attrs) { $1 } as CFDictionary, nil)
+        try ensureDirectory()
+        let u = try url(key)
+        let tmp = directory.appendingPathComponent(".\(key).\(UUID().uuidString).tmp")
+        guard FileManager.default.createFile(atPath: tmp.path, contents: value, attributes: [.posixPermissions: 0o600]) else {
+            throw CredentialError.file("couldn't write \(key)")
         }
-        guard s == errSecSuccess else { throw CredentialError.keychain(s) }
+        do {
+            _ = try FileManager.default.replaceItemAt(u, withItemAt: tmp)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: u.path)
+        } catch {
+            try? FileManager.default.removeItem(at: tmp)
+            throw CredentialError.file(error.localizedDescription)
+        }
     }
 
     public func delete(_ key: String) throws {
-        let s = SecItemDelete(query(key) as CFDictionary)
-        guard s == errSecSuccess || s == errSecItemNotFound else { throw CredentialError.keychain(s) }
+        let u = try url(key)
+        if FileManager.default.fileExists(atPath: u.path) { try FileManager.default.removeItem(at: u) }
+    }
+
+    /// Removes every stored credential (used when all Wren data is erased).
+    public func deleteAll() throws {
+        if FileManager.default.fileExists(atPath: directory.path) { try FileManager.default.removeItem(at: directory) }
     }
 }
 

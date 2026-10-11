@@ -171,7 +171,7 @@ If a connector says **Maintainer setup required**, the copy of Wren you have was
 
 Say or type "Ask ChatGPT to brainstorm ten names for this project", or open **Delegate**. Wren shows exactly what will leave your Mac. Private items are left out unless you tick them, and detected secrets are replaced with "[removed]" unless you choose otherwise. **Send with ChatGPT** sends that text, once, and streams the answer back. Each request uses your ChatGPT plan's allowance (Plus or Pro). Wren never switches to paid API billing. Requests are sent with storage turned off. Answers are labelled with the model Wren requested and the model the response reports.
 
-Wren uses your plan only for requests you start and confirm; background tasks never use it. Wren can't see your ChatGPT conversations, memories or custom instructions. Tokens stay in the macOS Keychain and never appear on screen, in logs, exports or backups. **Disconnect** revokes the sign-in with OpenAI and deletes the tokens.
+Wren uses your plan only for requests you start and confirm; background tasks never use it. Wren can't see your ChatGPT conversations, memories or custom instructions. Tokens stay in a private file in Wren's data folder that only your macOS account can read (not the Keychain, so there are no Keychain password prompts) and never appear on screen, in logs, exports or backups. **Disconnect** revokes the sign-in with OpenAI and deletes the tokens.
 
 **Fallback: copy and open.** Under Connectors › ChatGPT you can also allow copying a prompt and opening ChatGPT in your browser or the ChatGPT app. You paste and send it yourself, then paste the answer back into Delegate. This works without signing in.
 
@@ -205,13 +205,13 @@ Wren checks which permission Google actually granted. If you unticked it, the co
 
 What you get: search mail ("Anything from the recruiter?"), "What needs my attention today?" (overdue Wren items + today's events + mail flagged as a request, deadline, bill, interview, security notice, Gmail-important or from your important senders), today's events and mail on the Overview, both in the morning briefing (Connectors › Gmail › "Include in the morning briefing"), "What meetings do I have tomorrow?", and "Remind me" on any event. Suggested tasks from email open in the capture panel for you to edit first.
 
-Mail is fetched when needed and **not stored** unless you turn on the 7-day cache of headers and previews. Text in an email is treated as data: it can't trigger any action. **Disconnect** revokes Wren's access with Google, removes the token from the Keychain and deletes cached mail.
+Mail is fetched when needed and **not stored** unless you turn on the 7-day cache of headers and previews. Text in an email is treated as data: it can't trigger any action. **Disconnect** revokes Wren's access with Google, removes the token from this Mac and deletes cached mail.
 
 ### Notion
 
 **Connect Notion** opens Notion in your browser. Pick the workspace and the pages Wren may use; Wren can't see anything else. Wren shows the workspace it's connected to. **Change which pages Wren can use…** takes you back to Notion to adjust.
 
-You can search those pages, read them, include chosen pages as context in a Delegate request, and create a page (it asks first). Unsupported block types are shown as "[type block not shown]". Sign-in finishes through a small service run by Wren's maintainers that holds Wren's Notion app secret; it passes the token to Wren and stores nothing. **Disconnect** revokes the token with Notion and deletes it from the Keychain.
+You can search those pages, read them, include chosen pages as context in a Delegate request, and create a page (it asks first). Unsupported block types are shown as "[type block not shown]". Sign-in finishes through a small service run by Wren's maintainers that holds Wren's Notion app secret; it passes the token to Wren and stores nothing. **Disconnect** revokes the token with Notion and deletes it from this Mac.
 
 ### Troubleshooting
 
@@ -332,7 +332,7 @@ The Notion sign-in relay has its own tests:
 node --test services/notion-oauth-relay/relay.test.mjs
 ```
 
-To try a development build next to an installed Wren, build it as **Wren Dev**. It's a separate app with its own data folder, preferences, Keychain items and `wren-dev://` URL scheme, so it never touches your real data and never shows up as a second Wren:
+To try a development build next to an installed Wren, build it as **Wren Dev**. It's a separate app with its own data folder, preferences, credentials and `wren-dev://` URL scheme, so it never touches your real data and never shows up as a second Wren:
 
 ```bash
 scripts/build-app.sh debug --dev-identity

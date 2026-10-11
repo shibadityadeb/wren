@@ -40,13 +40,21 @@ final class CredentialTests: XCTestCase {
         try s.delete("missing")
     }
 
-    /// Real macOS Keychain round trip (skipped on CI runners).
-    func testRealKeychain() throws {
-        if ProcessInfo.processInfo.environment["CI"] != nil { throw XCTSkip("Keychain test runs locally only") }
-        let s = KeychainCredentialStore(service: "com.shibadityadeb.wren.tests.\(UUID().uuidString)")
-        try s.writeString("token", "first"); XCTAssertEqual(s.readString("token"), "first")
-        try s.writeString("token", "second"); XCTAssertEqual(s.readString("token"), "second", "update in place")
-        try s.delete("token"); XCTAssertNil(s.readString("token"))
+    func testPrivateFileStoreNeverUsesTheKeychain() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("wren-cred-\(UUID())/Credentials")
+        let s = FileCredentialStore(directory: dir)
+        XCTAssertNil(s.readString("chatgpt.connection"))
+        try s.writeString("chatgpt.connection", "first"); XCTAssertEqual(s.readString("chatgpt.connection"), "first")
+        try s.writeString("chatgpt.connection", "second"); XCTAssertEqual(s.readString("chatgpt.connection"), "second", "replaced atomically")
+        let fileMode = try FileManager.default.attributesOfItem(atPath: dir.appendingPathComponent("chatgpt.connection").path)[.posixPermissions] as? Int
+        let dirMode = try FileManager.default.attributesOfItem(atPath: dir.path)[.posixPermissions] as? Int
+        XCTAssertEqual(fileMode, 0o600, "only your user can read it"); XCTAssertEqual(dirMode, 0o700)
+        XCTAssertThrowsError(try s.writeString("../escape", "x"), "keys can't leave the folder")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path), ["chatgpt.connection"], "no temporary files left behind")
+        try s.delete("chatgpt.connection"); XCTAssertNil(s.readString("chatgpt.connection"))
+        try s.delete("missing")
+        try s.writeString("a", "1"); try s.deleteAll()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.path))
     }
 }
 

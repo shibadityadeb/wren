@@ -37,7 +37,7 @@ natively in Swift (`Sources/WrenCore/Connectors/ChatGPTAuth.swift`, `ChatGPTPlan
 - Discovery at `https://auth.openai.com/.well-known/openid-configuration`.
 - First authorization uses `client_id=dynamic_agent_client`, `agent_name_hint=Wren` and a per-Mac
   `ext_agent_host_id`. OpenAI returns an issued `oaiapp_…` client ID, which Wren keeps (in the
-  Keychain) and reuses. Disconnecting keeps it, so reconnecting doesn't register Wren again.
+  credentials file) and reuses. Disconnecting keeps it, so reconnecting doesn't register Wren again.
 - PKCE (S256), `state`, `nonce`, loopback redirect `http://127.0.0.1:<port>/auth/callback`.
 - ID tokens are verified (RS256) against the issuer's JWKS: issuer, audience, expiry, nonce.
 - Plan usage is enabled only if the granted scopes include `chatgpt.tokens.use.direct`.
@@ -141,7 +141,7 @@ open -a "$PWD/build/Wren Dev.app" "wren-dev://debug/connectors"
 ```
 
 Build it as **Wren Dev** (`scripts/build-app.sh debug --dev-identity`) so it runs beside an installed
-Wren with its own data, preferences, Keychain items and the `wren-dev://` scheme. A normal debug
+Wren with its own data, preferences, credentials and the `wren-dev://` scheme. A normal debug
 build is still Wren: the single-instance check and the data lock stop it from running next to the
 installed copy.
 
