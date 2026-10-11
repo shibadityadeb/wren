@@ -604,7 +604,7 @@ final class ProviderConfigTests: XCTestCase {
 
     func testMissingProviderIsAMaintainerBlockerNotAUserTask() async {
         let store = InMemoryCredentialStore()
-        let g = GoogleConnector(.gmail, config: nil, store: store, statusStore: MemoryStatusStore(), session: stub())
+        let g = GoogleConnector(.gmail, account: GoogleAccount(config: nil, store: store, session: stub()), statusStore: MemoryStatusStore())
         let n = NotionConnector(config: nil, store: store, statusStore: MemoryStatusStore(), session: stub())
         for s in [g.state, n.state] {
             guard case .notAvailableInBuild = s else { return XCTFail("\(s)") }
@@ -631,48 +631,131 @@ final class ProviderConfigTests: XCTestCase {
         if case let .googleOAuth(scopes) = ConnectorCatalog.descriptor(.googleCalendar).auth { XCTAssertEqual(scopes, [ConnectorCatalog.calendarScope]) } else { XCTFail() }
     }
 
-    func testGoogleScopeVerifiedOnEveryCheck() async throws {
-        let store = InMemoryCredentialStore()
-        let g = GoogleConnector(.gmail, config: google, store: store, statusStore: MemoryStatusStore(), session: stub())
-        let far = Date().addingTimeInterval(3600)
+    // MARK: Connect Google: one sign-in for Gmail and Calendar
+
+    static let both = "\(ConnectorCatalog.gmailScope) \(ConnectorCatalog.calendarScope)"
+    func googleStack(_ store: InMemoryCredentialStore = InMemoryCredentialStore()) -> (GoogleAccount, GoogleConnector, GoogleConnector) {
+        let a = GoogleAccount(config: google, store: store, session: stub())
+        a.signInTimeout = 3
+        let status = MemoryStatusStore()
+        return (a, GoogleConnector(.gmail, account: a, statusStore: status), GoogleConnector(.googleCalendar, account: a, statusStore: status))
+    }
+    func tokenResponse(scope: String, access: String = "A", refresh: String? = "R") -> (Int, Data) {
+        RouteStub.json(#"{"access_token":"\#(access)",\#(refresh.map { "\"refresh_token\":\"\($0)\"," } ?? "")"expires_in":3600,"scope":"\#(scope)","token_type":"Bearer"}"#)
+    }
+    func stubReads() {
         RouteStub.routes["/gmail/v1/users/me/profile"] = RouteStub.json(#"{"emailAddress":"me@example.com"}"#)
-        try g.google.save(OAuthTokens(accessToken: "A", refreshToken: "R", expiresAt: far, scope: ConnectorCatalog.gmailScope, account: nil))
-        await g.refresh()
-        XCTAssertEqual(g.state, .connected(account: "me@example.com"))
-
-        try g.google.save(OAuthTokens(accessToken: "A", refreshToken: "R", expiresAt: far, scope: ConnectorCatalog.calendarScope, account: nil))
-        await g.refresh()
-        guard case let .missingPermissions(m) = g.state else { return XCTFail("\(g.state)") }
-        XCTAssertTrue(m.contains("Missing permission"), m)
-
-        try g.google.save(OAuthTokens(accessToken: "A", refreshToken: "R", expiresAt: Date().addingTimeInterval(-5), scope: ConnectorCatalog.gmailScope, account: nil))
-        RouteStub.routes["/token"] = RouteStub.json(#"{"error":"invalid_grant","error_description":"Token has been expired or revoked."}"#, 400)
-        await g.refresh()
-        guard case .reauthorizationRequired = g.state else { return XCTFail("revoked/expired refresh → reconnect") }
-
-        try g.google.save(OAuthTokens(accessToken: "A", refreshToken: "R", expiresAt: far, scope: ConnectorCatalog.gmailScope, account: nil))
-        RouteStub.failures["/gmail/v1/users/me/profile"] = .notConnectedToInternet
-        await g.refresh()
-        guard case .temporarilyUnavailable = g.state else { return XCTFail() }
-
-        RouteStub.routes["/revoke"] = (200, Data())
-        await g.disconnect()
-        XCTAssertNil(g.google.tokens)
-        XCTAssertEqual(form(RouteStub.requests.last { $0.0.url?.path == "/revoke" }!.1)["token"], "R")
+        RouteStub.routes["/calendar/v3/calendars/primary"] = RouteStub.json(#"{"id":"me@example.com","summary":"me@example.com"}"#)
+    }
+    /// Google's consent: the browser comes back to Wren's loopback with this query.
+    func consent(_ a: GoogleAccount, _ answer: @escaping ([String: String]) -> String?) async throws {
+        try await a.connect(scopes: [ConnectorCatalog.gmailScope, ConnectorCatalog.calendarScope]) { url in
+            let q = query(url)
+            if let reply = answer(q) { redirect(to: URL(string: q["redirect_uri"]!)!, reply) }
+        }
     }
 
-    func testGoogleSignInEndToEndOverLoopback() async throws {
-        let store = InMemoryCredentialStore()
-        let g = GoogleConnector(.googleCalendar, config: google, store: store, statusStore: MemoryStatusStore(), session: stub())
-        RouteStub.routes["/token"] = RouteStub.json(#"{"access_token":"A","refresh_token":"R","expires_in":3600,"scope":"https://www.googleapis.com/auth/calendar.readonly","token_type":"Bearer"}"#)
-        RouteStub.routes["/calendar/v3/calendars/primary"] = RouteStub.json(#"{"id":"me@example.com","summary":"me@example.com"}"#)
-        await g.connect { url in
-            let q = query(url)
-            XCTAssertEqual(q["scope"], ConnectorCatalog.calendarScope)
-            redirect(to: URL(string: q["redirect_uri"]!)!, "state=\(q["state"]!)&code=GC&scope=\(q["scope"]!)")
+    func testOneConsentConnectsGmailAndCalendar() async throws {
+        let (a, gmail, cal) = googleStack()
+        stubReads()
+        RouteStub.routes["/token"] = tokenResponse(scope: Self.both)
+        var asked: [String: String] = [:]
+        try await consent(a) { q in asked = q; return "state=\(q["state"]!)&code=GC&scope=x" }
+        XCTAssertEqual(Set(asked["scope"]!.split(separator: " ").map(String.init)), [ConnectorCatalog.gmailScope, ConnectorCatalog.calendarScope],
+                       "only the two read-only scopes")
+        XCTAssertEqual(asked["include_granted_scopes"], "true"); XCTAssertEqual(asked["code_challenge_method"], "S256")
+        XCTAssertNil(asked["client_secret"])
+        XCTAssertFalse(String(decoding: RouteStub.requests.first { $0.0.url?.path == "/token" }!.1!, as: UTF8.self).contains("client_secret"))
+        XCTAssertEqual(a.email, "me@example.com", "identity from a real authorized read")
+        await gmail.refresh(); await cal.refresh()
+        XCTAssertEqual(gmail.state, .connected(account: "me@example.com"))
+        XCTAssertEqual(cal.state, .connected(account: "me@example.com"))
+        // Real reads use the shared token.
+        RouteStub.routes["/gmail/v1/users/me/messages"] = RouteStub.json(#"{"messages":[]}"#)
+        _ = try await gmail.gmail.messages(matching: "from:recruiter", limit: 5)
+        XCTAssertEqual(RouteStub.requests.last!.0.value(forHTTPHeaderField: "Authorization"), "Bearer A")
+        XCTAssertTrue(RouteStub.requests.allSatisfy { $0.0.httpMethod == "GET" || $0.0.url?.path == "/token" }, "read-only")
+    }
+
+    func testOnlyWhatGoogleGrantedIsTurnedOn() async throws {
+        let (a, gmail, cal) = googleStack()
+        stubReads()
+        RouteStub.routes["/token"] = tokenResponse(scope: ConnectorCatalog.calendarScope)   // user unticked Gmail
+        try await consent(a) { q in "state=\(q["state"]!)&code=GC" }
+        await gmail.refresh(); await cal.refresh()
+        XCTAssertEqual(cal.state, .connected(account: "me@example.com"))
+        guard case let .missingPermissions(m) = gmail.state else { return XCTFail("\(gmail.state)") }
+        XCTAssertTrue(m.contains("didn't allow Wren to read your email"))
+        XCTAssertFalse(RouteStub.requests.contains { $0.0.url?.path == "/gmail/v1/users/me/profile" }, "no Gmail call without the Gmail permission")
+        // Adding Gmail later asks again for both, keeping Calendar.
+        RouteStub.routes["/token"] = tokenResponse(scope: Self.both, access: "A2")
+        var asked = ""
+        try await a.connect(scopes: [ConnectorCatalog.gmailScope]) { url in
+            let q = query(url); asked = q["scope"]!
+            redirect(to: URL(string: q["redirect_uri"]!)!, "state=\(q["state"]!)&code=GC2")
         }
-        guard case .connected = g.state else { return XCTFail("\(g.state)") }
-        XCTAssertEqual(form(RouteStub.requests.first { $0.0.url?.path == "/token" }!.1)["code"], "GC")
+        XCTAssertTrue(asked.contains(ConnectorCatalog.calendarScope) && asked.contains(ConnectorCatalog.gmailScope))
+        await gmail.refresh()
+        XCTAssertEqual(gmail.state, .connected(account: "me@example.com"))
+    }
+
+    func testCancelDenyAndNothingGrantedLeaveNothingBehind() async throws {
+        let (a, gmail, _) = googleStack()
+        stubReads()
+        // Cancelled: the browser never comes back.
+        do { try await consent(a) { _ in nil }; XCTFail() } catch { XCTAssertEqual(error as? OAuthError, .timedOut) }
+        XCTAssertFalse(a.isSignedIn)
+        // Denied on Google's screen.
+        do { try await consent(a) { q in "state=\(q["state"]!)&error=access_denied" }; XCTFail() } catch { XCTAssertEqual(error as? OAuthError, .denied) }
+        XCTAssertFalse(a.isSignedIn)
+        // Every permission unticked.
+        RouteStub.routes["/token"] = tokenResponse(scope: "openid")
+        do { try await consent(a) { q in "state=\(q["state"]!)&code=GC" }; XCTFail() } catch { guard case .scopeNotGranted = error as? OAuthError else { return XCTFail("\(error)") } }
+        XCTAssertFalse(a.isSignedIn)
+        await gmail.refresh()
+        XCTAssertEqual(gmail.state, .available)
+        // A failed reconnect keeps an existing sign-in.
+        RouteStub.routes["/token"] = tokenResponse(scope: Self.both)
+        try await consent(a) { q in "state=\(q["state"]!)&code=GC" }
+        do { try await consent(a) { q in "state=\(q["state"]!)&error=access_denied" }; XCTFail() } catch {}
+        XCTAssertTrue(a.isSignedIn, "a cancelled reconnect doesn't disconnect")
+    }
+
+    func testExpiryRefreshRevocationAndDisconnect() async throws {
+        let store = InMemoryCredentialStore()
+        let (a, gmail, cal) = googleStack(store)
+        stubReads()
+        try a.session.save(OAuthTokens(accessToken: "old", refreshToken: "R", expiresAt: Date().addingTimeInterval(-5), scope: Self.both, account: "me@example.com"))
+        RouteStub.routes["/token"] = RouteStub.json(#"{"access_token":"new","expires_in":3600,"token_type":"Bearer"}"#)
+        await gmail.refresh()
+        XCTAssertEqual(gmail.state, .connected(account: "me@example.com"))
+        XCTAssertEqual(a.session.tokens?.accessToken, "new"); XCTAssertEqual(a.grantedScopes.count, 2, "scopes kept across refresh")
+        // Revoked at Google: refresh fails → reconnect needed.
+        try a.session.save(OAuthTokens(accessToken: "x", refreshToken: "R", expiresAt: Date().addingTimeInterval(-5), scope: Self.both, account: nil))
+        RouteStub.routes["/token"] = RouteStub.json(#"{"error":"invalid_grant","error_description":"Token has been expired or revoked."}"#, 400)
+        await cal.refresh()
+        guard case .reauthorizationRequired = cal.state else { return XCTFail("\(cal.state)") }
+        // Network error: temporary, sign-in kept.
+        try a.session.save(OAuthTokens(accessToken: "A", refreshToken: "R", expiresAt: Date().addingTimeInterval(3600), scope: Self.both, account: nil))
+        RouteStub.failures["/gmail/v1/users/me/profile"] = .notConnectedToInternet
+        await gmail.refresh()
+        guard case .temporarilyUnavailable = gmail.state else { return XCTFail() }
+        XCTAssertTrue(a.isSignedIn)
+        // Disconnect revokes at Google and removes it for both.
+        RouteStub.routes["/revoke"] = (200, Data())
+        await gmail.disconnect(); await cal.refresh()
+        XCTAssertEqual(form(RouteStub.requests.last { $0.0.url?.path == "/revoke" }!.1)["token"], "R")
+        XCTAssertFalse(a.isSignedIn); XCTAssertNil(a.disconnectNote)
+        XCTAssertEqual(cal.state, .available)
+        XCTAssertNil(store.readString(GoogleSession.accountKey))
+    }
+
+    func testEarlierPerConnectorSignInIsAdopted() throws {
+        let store = InMemoryCredentialStore()
+        try store.writeJSON("google.googleCalendar.tokens", OAuthTokens(accessToken: "A", refreshToken: "R", expiresAt: .distantFuture, scope: ConnectorCatalog.calendarScope, account: "me@example.com"))
+        let a = GoogleAccount(config: google, store: store, session: stub())
+        XCTAssertEqual(a.email, "me@example.com"); XCTAssertEqual(a.grantedScopes, [ConnectorCatalog.calendarScope])
+        XCTAssertNil(store.readString("google.googleCalendar.tokens"))
     }
 
     func testLoopbackVerdicts() {

@@ -67,18 +67,33 @@ behind the same `ChatGPTConnector`.
 
 ## Google (Gmail and Google Calendar)
 
+Users see one **Connect Google** that covers Gmail and Calendar. Wren makes one sign-in with both
+read-only scopes, or the subset the user ticks, and uses `include_granted_scopes=true`, so adding
+the other one later keeps the first. It turns on only the features whose scope Google granted, and
+only after a real read succeeds.
+
+One OAuth application, owned by the maintainers, is shared by every user. To register it (this
+needs owner access to the Google Cloud project, so it can't be done from the codebase):
+
 1. In a Google Cloud project owned by the maintainers, enable the **Gmail API** and the
    **Google Calendar API**.
-2. Google Auth Platform › Branding: app name **Wren**, support email, home page, privacy policy.
-   Audience: **External**.
-3. Data access: add only `https://www.googleapis.com/auth/gmail.readonly` and
-   `https://www.googleapis.com/auth/calendar.readonly`. Wren requests each one separately, from its
-   own connector, and checks the granted scope.
-4. Clients › Create client › **Desktop app**. Loopback redirects on any port are allowed for this
-   type; no redirect URI is entered.
-5. Put the client ID in `config/providers.env` or the repository secrets. Don't add the client secret
-   anywhere: Wren is a public client (loopback redirect + PKCE), and Google documents `client_secret`
-   as optional for installed apps, so none is shipped or sent.
+2. Google Auth Platform › Branding: app name **Wren**, the Wren logo, a support email, a home page,
+   a privacy policy and an authorized domain.
+3. Audience: **External**. Leave it in **Testing** and add the Google accounts that may connect
+   (up to 100) under **Test users**.
+4. Data access: add only `https://www.googleapis.com/auth/gmail.readonly` and
+   `https://www.googleapis.com/auth/calendar.readonly`.
+5. Clients › Create client › **Desktop app**. Loopback redirects on any port are allowed for this
+   type, so no redirect URI is entered.
+6. Put the client ID in `config/providers.env` (`WREN_GOOGLE_CLIENT_ID`) or the repository secret of
+   the same name, and rebuild. Don't add the client secret anywhere: Wren is a public client
+   (loopback redirect, PKCE and state), and Google documents `client_secret` as optional for
+   installed apps, so none is shipped or sent.
+7. Leave `WREN_GOOGLE_VERIFIED` empty until Google approves verification. While it's empty, the
+   Connect Google screen tells users that only test accounts can connect. Set it to `1` (or the
+   repository variable of the same name) only after approval.
+8. Connect with a test account and follow docs/MANUAL_TESTS.md › Google. Don't call Google ready for
+   everyone until verification is approved.
 
 ### Google verification: what's needed before ordinary users can connect
 

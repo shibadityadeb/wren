@@ -141,7 +141,7 @@ final class GoogleOAuthTests: XCTestCase {
 
     func testSessionRefreshesNearExpiryAndKeepsRefreshToken() async throws {
         let store = InMemoryCredentialStore()
-        let s = GoogleSession(connector: .gmail, store: store)
+        let s = GoogleSession(store: store)
         try s.save(OAuthTokens(accessToken: "old", refreshToken: "R1", expiresAt: Date(timeIntervalSince1970: 1_030), scope: "x", account: "me@example.com"))
         RouteStub.routes["/token"] = RouteStub.json(#"{"access_token":"new","expires_in":3600,"scope":"x"}"#)
         let o = GoogleOAuth(config: config, session: session(), now: { Date(timeIntervalSince1970: 1_000) })

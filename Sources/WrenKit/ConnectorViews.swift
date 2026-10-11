@@ -202,30 +202,24 @@ struct ConnectorDetailView: View {
 
     @ViewBuilder func googleSetup(_ state: ConnectorState) -> some View {
         let c = id == .gmail ? model.hub.gmail : model.hub.calendar
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             if !c.isConfigured {
                 notInBuild(state)
-            } else if state.isUsable {
-                connectedActions(state)
-                if id == .gmail {
-                    Toggle("Keep a 7-day local cache of headers and previews", isOn: Binding(get: { model.settings.gmailCacheEnabled }, set: {
-                        model.settings.gmailCacheEnabled = $0
-                        model.hub.gmail.emailCache = $0 ? EmailCache(directory: WrenStore.defaultDirectory) : nil
-                        if !$0 { EmailCache(directory: WrenStore.defaultDirectory).clear() }
-                    })).font(.callout)
-                    Text("Off by default: mail is fetched when you ask and not stored.").font(.caption).foregroundStyle(.secondary)
-                    ImportantSendersEditor(model: model)
-                }
-                Toggle("Include in the morning briefing", isOn: Binding(get: { model.policy.rules.contains(.includeConnectedSourcesInBriefing) },
-                                                                      set: { model.setRule(.includeConnectedSourcesInBriefing, $0) })).font(.callout)
-                if id == .googleCalendar { CalendarPeek(model: model) }
             } else {
-                Text("Wren opens Google's sign-in page in your browser. You choose the account and approve one permission: \(id == .gmail ? "read your email" : "see your calendars"), read-only. Wren can't send, delete or change anything, and never sees your password.")
-                    .font(.callout).fixedSize(horizontal: false, vertical: true)
-                HStack {
-                    Button(state == .connecting ? "Waiting for Google…" : (c.google.tokens == nil ? "Connect with Google" : "Reconnect")) { model.connectGoogle(c) }
-                        .disabled(state == .connecting).buttonStyle(.borderedProminent).tint(WrenTheme.accent)
-                    if state.bucket == .needsSetup && state != .connecting { Button("Disconnect", role: .destructive) { model.disconnect(id) } }
+                GoogleAccountCard(model: model, focus: id)
+                if state.isUsable {
+                    if id == .gmail {
+                        Toggle("Keep a 7-day local cache of headers and previews", isOn: Binding(get: { model.settings.gmailCacheEnabled }, set: {
+                            model.settings.gmailCacheEnabled = $0
+                            model.hub.gmail.emailCache = $0 ? EmailCache(directory: WrenStore.defaultDirectory) : nil
+                            if !$0 { EmailCache(directory: WrenStore.defaultDirectory).clear() }
+                        })).font(.callout)
+                        Text("Off by default: mail is fetched when you ask and not stored.").font(.caption).foregroundStyle(.secondary)
+                        ImportantSendersEditor(model: model)
+                    }
+                    Toggle("Include in the morning briefing", isOn: Binding(get: { model.policy.rules.contains(.includeConnectedSourcesInBriefing) },
+                                                                          set: { model.setRule(.includeConnectedSourcesInBriefing, $0) })).font(.callout)
+                    if id == .googleCalendar { CalendarPeek(model: model) }
                 }
             }
         }
@@ -446,6 +440,83 @@ struct NotionPeek: View {
                 }
             }
             Text("Only pages you chose in Notion appear here.").font(.caption2).foregroundStyle(.tertiary)
+        }
+    }
+}
+
+
+/// One Google sign-in for Gmail and Calendar: what Wren may read, Google's permission screen, and
+/// afterwards the account, the permissions Google actually granted, and reconnect/disconnect.
+struct GoogleAccountCard: View {
+    var model: AppModel
+    let focus: ConnectorID
+    @State private var wantGmail = true
+    @State private var wantCalendar = true
+
+    var body: some View {
+        let _ = model.connectorVersion
+        let g = model.hub.google
+        let granted = g.grantedScopes
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Google account").font(.callout.weight(.semibold))
+            if !model.hub.providers.googleVerified {
+                Label("Google hasn't finished reviewing Wren yet. Until it does, Google shows an “unverified app” warning and only test accounts added by Wren's maintainers can connect; others see an error from Google.",
+                      systemImage: "exclamationmark.shield").font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+            }
+            if model.googleConnecting {
+                HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Waiting for you to finish on Google's page in your browser…").font(.callout) }
+            } else if !g.isSignedIn {
+                Text("Wren opens Google's sign-in page in your browser. Choose your account, review the permissions, and approve. You come straight back to Wren.")
+                    .font(.callout).fixedSize(horizontal: false, vertical: true)
+                Toggle(isOn: $wantGmail) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Read my email (read-only)")
+                        Text("Search messages, answer questions like “anything from the recruiter?”, summarise mail and suggest tasks. Wren can't send, delete, archive or change anything.")
+                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                }.toggleStyle(.checkbox)
+                Toggle(isOn: $wantCalendar) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("See my calendars (read-only)")
+                        Text("Read upcoming events to answer “what meetings do I have tomorrow?” and add them to the briefing. Wren can't create or change events.")
+                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                }.toggleStyle(.checkbox)
+                Button("Connect Google") { model.connectGoogle(scopes: chosen) }
+                    .buttonStyle(.borderedProminent).tint(WrenTheme.accent).disabled(chosen.isEmpty)
+                Text("Your Google password goes only to Google. Wren keeps the sign-in in a private file on this Mac, and you can untick a permission on Google's page too.")
+                    .font(.caption2).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("Connected as \(g.email ?? "your Google account")").font(.callout)
+                permissionRow("Read email (read-only)", granted.contains(GoogleAccount.gmailScope), add: GoogleAccount.gmailScope)
+                permissionRow("See calendars (read-only)", granted.contains(GoogleAccount.calendarScope), add: GoogleAccount.calendarScope)
+                HStack {
+                    Button("Check again") { Task { await model.hub.gmail.refresh(); await model.hub.calendar.refresh(); model.connectorsChanged() } }
+                    Button("Reconnect") { model.connectGoogle(scopes: Array(granted.isEmpty ? [GoogleAccount.gmailScope, GoogleAccount.calendarScope] : granted)) }
+                    Button("Disconnect Google", role: .destructive) { model.disconnectGoogle() }
+                }.controlSize(.small)
+                Text("Disconnecting removes Wren's access to both Gmail and Calendar at Google and deletes the sign-in from this Mac.")
+                    .font(.caption2).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
+            }
+            if let e = model.googleError { Text(e).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
+            if let n = g.disconnectNote { Text(n).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
+        }
+        .padding(10)
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+        .onAppear { wantGmail = focus == .gmail || !g.isSignedIn; wantCalendar = focus == .googleCalendar || !g.isSignedIn }
+    }
+
+    var chosen: [String] {
+        (wantGmail ? [GoogleAccount.gmailScope] : []) + (wantCalendar ? [GoogleAccount.calendarScope] : [])
+    }
+
+    func permissionRow(_ title: String, _ on: Bool, add scope: String) -> some View {
+        HStack {
+            Image(systemName: on ? "checkmark.circle.fill" : "circle").foregroundStyle(on ? WrenTheme.accent : .secondary)
+            Text(title).font(.callout)
+            Text(on ? "Granted" : "Not granted").font(.caption).foregroundStyle(.secondary)
+            Spacer()
+            if !on { Button("Add…") { model.connectGoogle(scopes: [scope]) }.controlSize(.small) }
         }
     }
 }

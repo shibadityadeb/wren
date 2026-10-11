@@ -23,7 +23,8 @@ an account or real time, and what has actually been run. Use a **Wren Dev** buil
 | Voice | Real microphone, "Hey Wren", the voice shortcut | **Not run**: needs a person to allow Microphone and Speech Recognition |
 | ChatGPT | Wren's authorization request is accepted by OpenAI (reaches the sign-in page; a made-up client is rejected) | Run in a browser |
 | ChatGPT | Full sign-in, model list, a real answer, reconnect, refresh, usage limit, disconnect | **Not run**: needs your ChatGPT Plus or Pro sign-in |
-| Google, Notion | Any live connection | **Not run**: blocked on the maintainers' Google client and Notion integration + relay |
+| Google | Consent, partial grant, adding a permission, cancel, denial, nothing granted, expiry, revocation, disconnect | Run against stubbed Google endpoints over a real loopback redirect (automated); **not run against Google**: no maintainer client ID registered yet |
+| Notion | Any live connection | **Not run**: blocked on the maintainers' Notion integration + relay |
 
 ## Steps
 
@@ -64,5 +65,13 @@ Debug check at any point: `open -a "$PWD/build/Wren Dev.app" "wren-dev://debug/r
 3. Reconnect, then Disconnect: tokens are removed and the state returns to "Available to connect".
 4. Sign in but untick plan usage: "Account connected, plan usage not authorized".
 
-### Google and Notion (after the maintainers' setup in MAINTAINER_SETUP.md)
-Connect, ask "what needs my attention today?", "what meetings do I have tomorrow?", search Notion, then Disconnect. Check that Wren shows the account or workspace and that disconnecting revokes access.
+### Google (after the maintainers' setup in MAINTAINER_SETUP.md, with a listed test account)
+1. Connectors › Gmail: both permissions ticked › Connect Google. Google's page opens. Approve both. Wren comes forward and shows the account, both permissions as Granted, and Gmail and Calendar as Connected.
+2. Ask "anything from the recruiter?", "summarise my unread mail", "what meetings do I have tomorrow?": real results.
+3. Disconnect Google, then connect again and untick Gmail on Google's page: Calendar is Connected and Gmail shows Missing permissions with Add…. Choose Add… and approve: Gmail turns on, Calendar stays.
+4. Close Google's tab without approving: after 5 minutes (or on the next try) Wren says nothing changed. Choose Cancel on Google's page: "You chose not to allow access".
+5. Remove Wren at myaccount.google.com › Security › Third-party access, then Check again: Reauthorization required.
+6. Disconnect Google: Wren's entry disappears from your Google account's third-party access list.
+
+### Notion (after the maintainers' setup)
+Connect, search Notion, then Disconnect. Check that Wren shows the workspace and that disconnecting revokes access.

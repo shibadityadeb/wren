@@ -62,7 +62,7 @@ echo "→ brand assets from assets/logo.png"
 iconutil -c icns Brand/Wren.iconset -o build/Wren.icns
 
 # Provider registrations. Only these keys are read from the file; nothing in it is executed.
-PROVIDER_VARS=(WREN_GOOGLE_CLIENT_ID WREN_NOTION_CLIENT_ID WREN_NOTION_OAUTH_RELAY)
+PROVIDER_VARS=(WREN_GOOGLE_CLIENT_ID WREN_GOOGLE_VERIFIED WREN_NOTION_CLIENT_ID WREN_NOTION_OAUTH_RELAY)
 if [[ -f config/providers.env ]]; then
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ "$line" =~ '^[[:space:]]*(#|$)' ]] && continue
@@ -74,6 +74,7 @@ xml_escape() { local s="$1"; s="${s//&/&amp;}"; s="${s//</&lt;}"; s="${s//>/&gt;
 PROVIDER_PLIST=""
 add_provider() { [[ -n "$2" ]] && PROVIDER_PLIST+="  <key>$1</key><string>$(xml_escape "$2")</string>"$'\n' || true; }
 add_provider WrenGoogleClientID "${WREN_GOOGLE_CLIENT_ID:-}"
+add_provider WrenGoogleVerified "${WREN_GOOGLE_VERIFIED:-}"
 add_provider WrenNotionClientID "${WREN_NOTION_CLIENT_ID:-}"
 add_provider WrenNotionOAuthRelay "${WREN_NOTION_OAUTH_RELAY:-}"
 included() { [[ -n "${(P)1:-}" ]] && echo "included" || echo "not included"; }
