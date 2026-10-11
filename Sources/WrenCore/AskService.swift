@@ -34,6 +34,8 @@ public struct AskCard: Equatable, Sendable {
     public var phase: Phase = .ready
     /// A local model is set up (for general questions, Return asks it first).
     public var localAvailable = false
+    /// ChatGPT is connected with plan usage allowed (then it answers general questions by default).
+    public var chatgptReady = false
     public var streamed = ""
     /// Shown above the actions, e.g. "Connected. Press Return to ask."
     public var note: String?
@@ -43,7 +45,10 @@ public struct AskCard: Equatable, Sendable {
     /// What Return does now. nil while sending or after an answer, so Return can't send twice.
     public var primary: AskAction? {
         switch phase {
-        case .ready: return destination == .choose ? .run(localAvailable ? .local : .chatgpt) : .run(destination)
+        case .ready:
+            guard destination == .choose else { return .run(destination) }
+            // ChatGPT when you're connected; the local model only when ChatGPT isn't available.
+            return .run(chatgptReady || !localAvailable ? .chatgpt : .local)
         case .sending, .answered, .partial, .connecting: return nil
         case .notConnected: return .connect
         case .reconnect: return .connect

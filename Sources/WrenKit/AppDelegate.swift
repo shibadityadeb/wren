@@ -304,6 +304,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
         captureState.reply = nil
         var card = AskCard(request: r, destination: r.target == .chatgpt ? .chatgpt : .choose)
         card.localAvailable = model.ai.usableModel != nil
+        card.chatgptReady = model.hub.chatgpt.account.canSend
         captureState.ask = card
         if card.destination == .chatgpt { askAction(.run(.chatgpt)) }
     }

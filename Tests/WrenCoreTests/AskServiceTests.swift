@@ -123,7 +123,9 @@ extension ChatGPTConnectorTests {
         var card = AskCard(request: q, destination: .choose)
         XCTAssertEqual(card.primary, .run(.chatgpt), "no local model: ChatGPT")
         card.localAvailable = true
-        XCTAssertEqual(card.primary, .run(.local), "a local model answers general questions first")
+        XCTAssertEqual(card.primary, .run(.local), "ChatGPT not connected: the local model")
+        card.chatgptReady = true
+        XCTAssertEqual(card.primary, .run(.chatgpt), "connected: ChatGPT answers, not the local model")
         // Merely showing or changing a card never runs anything.
         XCTAssertTrue(RouteStub.requests.isEmpty)
     }

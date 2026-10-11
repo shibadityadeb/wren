@@ -176,8 +176,8 @@ struct AskCardView: View {
                 if card.destination == .choose {
                     Text("You didn't name an assistant. Choose who answers, or keep it as a note.").font(.caption).foregroundStyle(.secondary)
                     HStack {
-                        if aiAvailable { Button("Ask local AI (on this Mac)") { act(.run(.local)) } }
                         Button("Ask ChatGPT") { act(.run(.chatgpt)) }
+                        if aiAvailable { Button("Ask local AI (on this Mac)") { act(.run(.local)) } }
                         Button("Save as a note") { act(.saveAsNote) }
                     }.controlSize(.small)
                 } else {
