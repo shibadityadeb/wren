@@ -6,6 +6,11 @@
 # --universal  builds arm64 and x86_64 separately and merges them with lipo (SwiftPM's
 #              multi-arch mode rejects this package's per-target language settings).
 #
+# Provider sign-in (maintainers only): Google and Notion app registrations are read from
+# config/providers.env (git-ignored) or from the environment (CI secrets) and written into
+# Info.plist. Values are never printed. A missing value builds a copy of Wren that reports
+# "Not available in this build" for that provider. See docs/MAINTAINER_SETUP.md.
+#
 # Signing: ad-hoc by default. Set WREN_SIGN_IDENTITY to a "Developer ID Application: …"
 # identity in the keychain to sign for distribution (hardened runtime + secure timestamp).
 set -euo pipefail
@@ -49,6 +54,25 @@ echo "→ brand assets from assets/logo.png"
 "$TOOLS" assets assets/logo.png Brand >/dev/null
 iconutil -c icns Brand/Wren.iconset -o build/Wren.icns
 
+# Provider registrations. Only these keys are read from the file; nothing in it is executed.
+PROVIDER_VARS=(WREN_GOOGLE_CLIENT_ID WREN_GOOGLE_CLIENT_SECRET WREN_NOTION_CLIENT_ID WREN_NOTION_OAUTH_RELAY)
+if [[ -f config/providers.env ]]; then
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ '^[[:space:]]*(#|$)' ]] && continue
+    k="${line%%=*}"; v="${line#*=}"; v="${v%\"}"; v="${v#\"}"
+    if (( ${PROVIDER_VARS[(Ie)$k]} )) && [[ -z "${(P)k:-}" ]]; then typeset -gx "$k=$v"; fi
+  done < config/providers.env
+fi
+xml_escape() { local s="$1"; s="${s//&/&amp;}"; s="${s//</&lt;}"; s="${s//>/&gt;}"; print -r -- "$s"; }
+PROVIDER_PLIST=""
+add_provider() { [[ -n "$2" ]] && PROVIDER_PLIST+="  <key>$1</key><string>$(xml_escape "$2")</string>"$'\n' || true; }
+add_provider WrenGoogleClientID "${WREN_GOOGLE_CLIENT_ID:-}"
+add_provider WrenGoogleClientSecret "${WREN_GOOGLE_CLIENT_SECRET:-}"
+add_provider WrenNotionClientID "${WREN_NOTION_CLIENT_ID:-}"
+add_provider WrenNotionOAuthRelay "${WREN_NOTION_OAUTH_RELAY:-}"
+included() { [[ -n "${(P)1:-}" ]] && echo "included" || echo "not included"; }
+echo "→ provider sign-in: Google $(included WREN_GOOGLE_CLIENT_ID), Notion $( [[ -n "${WREN_NOTION_CLIENT_ID:-}" && -n "${WREN_NOTION_OAUTH_RELAY:-}" ]] && echo included || echo 'not included'), ChatGPT always (no registration needed)"
+
 echo "→ assembling $APP ($VERSION, build $BUILD_NUMBER)"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
@@ -72,7 +96,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
   <key>NSHumanReadableCopyright</key><string>Local-first personal assistant. Data stays on this Mac.</string>
   <key>NSMicrophoneUsageDescription</key><string>Wren records only while you hold the push-to-talk shortcut, to turn what you say into a capture. Audio is transcribed on this Mac and deleted.</string>
-  <key>NSSpeechRecognitionUsageDescription</key><string>Wren uses on-device speech recognition to turn your voice capture into text. Audio never leaves this Mac.</string>
+${PROVIDER_PLIST}  <key>NSSpeechRecognitionUsageDescription</key><string>Wren uses on-device speech recognition to turn your voice capture into text. Audio never leaves this Mac.</string>
   <key>CFBundleURLTypes</key>
   <array><dict>
     <key>CFBundleURLName</key><string>com.shibadityadeb.wren</string>

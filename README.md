@@ -115,28 +115,39 @@ Every change Wren proposes from what you type (with or without AI) is shown firs
 
 ## Connectors
 
-Open Wren's window › **Connectors** (or Settings › Connectors). Each connector shows its real state (Available, Setup required, Connecting, Connected, Partially connected, Temporarily unavailable, Permission denied, Disconnected, Planned), how it signs in, the permissions it grants Wren, what it can do, its privacy and data handling, the last successful check and the last error. A connector is only shown as Connected after Wren has checked it with the provider.
+Open Wren's window › **Connectors** (or Settings › Connectors). You connect your existing accounts by signing in on the provider's own page in your browser. There's never a key, token, client ID or configuration file to deal with.
 
-| Connector | Status in this version | Needs from you |
+Each connector shows its real state (Not connected, Connecting, Connected, Partially connected, Temporarily unavailable, Permission denied, Not available in this build, Planned), how it signs in, what it reads and changes, the permissions it grants Wren, its privacy and data handling, the last successful check and the last error. A connector is only shown as Connected after a real, authorized call to the provider succeeded.
+
+| Connector | What you do | What it can do |
 |---|---|---|
-| ChatGPT (handoff) | Working | Turn it on; choose browser or the ChatGPT app |
-| Voice | Working (on-device) | Turn it on; allow Microphone and Speech Recognition when macOS asks |
-| Gmail (read-only) | Implemented | Your own Google OAuth client, then **Connect with Google** |
-| Google Calendar (read-only) | Implemented | Same Google client, then **Connect with Google** |
-| Notion | Implemented | An internal integration token, and pages shared with it |
-| OpenAI API (optional) | Implemented | An API key (billed by OpenAI) |
-| Local files | Planned | — |
-| Apple Shortcuts | Planned | — |
+| ChatGPT | **Continue with ChatGPT**, sign in, approve Wren | Send requests you confirm and get the answer back, using your ChatGPT plan |
+| Voice | Turn it on; allow Microphone and Speech Recognition when macOS asks | Push-to-talk capture, transcribed on your Mac |
+| Gmail | **Connect with Google** | Read-only: search, what needs attention, morning briefing |
+| Google Calendar | **Connect with Google** | Read-only: schedule questions, briefing, reminders from events |
+| Notion | **Connect Notion**, pick the pages Wren may use | Search and read those pages, create a page after you confirm |
+| Local files, Apple Shortcuts | — | Planned |
 
-### ChatGPT handoff (your own account, no API key)
+If a connector says **Not available in this build**, the copy of Wren you have was built without that provider's sign-in. There's nothing for you to set up; it's for Wren's maintainers to enable.
 
-Say or type "Ask ChatGPT to brainstorm ten names for this project" (also "Send this … to GPT", "Use my ChatGPT account to …", "Prepare a prompt for ChatGPT to …"), or open **Delegate**. Wren prepares the prompt and shows exactly what will leave your Mac. Private items are left out unless you tick them, and detected secrets (API keys, passwords, card numbers, verification codes) are replaced with "[removed]" unless you choose otherwise. **Copy and open ChatGPT** copies the prompt and opens chatgpt.com in your browser or the ChatGPT app. **You** paste it and press send: Wren never sends it and never says it was sent. Paste the answer back into Delegate to save it, summarise it on your Mac and turn parts into tasks.
+### ChatGPT
 
-OpenAI doesn't document a supported way to prefill or submit a prompt by link, so Wren uses the clipboard. "Think deeply" requests are written into the prompt; Wren can't choose or confirm ChatGPT's model or thinking mode.
+**Continue with ChatGPT** opens OpenAI's sign-in page ("Sign in with ChatGPT"). Sign in and approve Wren, including use of your ChatGPT plan. Wren then lists the models your plan offers and shows:
 
-### OpenAI API (optional)
+| State | Meaning |
+|---|---|
+| Not connected | You haven't signed in |
+| Account connected, plan usage not authorized | You signed in but didn't allow plan usage, or your plan can't be used by apps. **Allow plan usage…** asks again |
+| Connected and ChatGPT plan usage enabled | Ready. The Delegate panel shows **Using ChatGPT plan** and a **Manage usage** link |
+| Reauthorization required | The sign-in expired or was removed. **Reconnect** |
+| Usage limit reached | Your plan's allowance for apps is used up for now. **Manage usage** opens ChatGPT's usage page |
+| Temporarily unavailable | ChatGPT or your connection had a problem; nothing was removed |
 
-Separate from a ChatGPT subscription and billed by OpenAI per request. Paste a key in Connectors › OpenAI API; Wren checks it by listing your models and stores it in the Keychain. Choose a model from that list. Every request shows the exact text and runs only when you press **Send**. Answers are labelled with the model the API reports.
+Say or type "Ask ChatGPT to brainstorm ten names for this project", or open **Delegate**. Wren shows exactly what will leave your Mac. Private items are left out unless you tick them, and detected secrets are replaced with "[removed]" unless you choose otherwise. **Send with ChatGPT** sends that text, once, and streams the answer back. Each request uses your ChatGPT plan's allowance (Plus or Pro). Wren never switches to paid API billing. Requests are sent with storage turned off. Answers are labelled with the model Wren requested and the model the response reports.
+
+Wren uses your plan only for requests you start and confirm; background tasks never use it. Wren can't see your ChatGPT conversations, memories or custom instructions. Tokens stay in the macOS Keychain and never appear on screen, in logs, exports or backups. **Disconnect** revokes the sign-in with OpenAI and deletes the tokens.
+
+**Fallback: copy and open.** Under Connectors › ChatGPT you can also allow copying a prompt and opening ChatGPT in your browser or the ChatGPT app. You paste and send it yourself, then paste the answer back into Delegate. This works without signing in.
 
 ### Voice
 
@@ -144,45 +155,35 @@ Connectors › Voice › turn on push-to-talk. Hold **⌥⇧ Space**, speak, rel
 
 ### Gmail and Google Calendar
 
-Both are **read-only**. Scopes requested:
+**Connect with Google** opens Google's sign-in page. Choose your account and approve one read-only permission. Gmail and Calendar are connected separately and each asks only for its own:
 
-| Connector | Scope |
+| Connector | Permission (scope) |
 |---|---|
-| Gmail | `https://www.googleapis.com/auth/gmail.readonly` |
-| Google Calendar | `https://www.googleapis.com/auth/calendar.readonly` |
+| Gmail | Read your email: `https://www.googleapis.com/auth/gmail.readonly` |
+| Google Calendar | See your calendars: `https://www.googleapis.com/auth/calendar.readonly` |
 
-**One-time Google setup** (Google requires every desktop app to use its own OAuth client):
-
-1. [Google Cloud Console](https://console.cloud.google.com/) › create a project.
-2. APIs & Services › Library: enable **Gmail API** and/or **Google Calendar API**.
-3. OAuth consent screen: User type External (or Internal for a Workspace org, if your admin allows), add yourself as a test user.
-4. Credentials › Create credentials › OAuth client ID › **Desktop app**. Copy the client ID and client secret.
-5. In Wren: Connectors › Gmail › paste both › Save. They go to the Keychain. (A desktop client's secret isn't confidential, but Google's token endpoint asks for it.)
-6. **Connect with Google**: your browser opens Google's consent page; after you allow, Google redirects to a one-time listener on `127.0.0.1` and Wren finishes the sign-in with PKCE. Wren never sees your password.
-
-While your consent screen is in **Testing**, Google may expire access after 7 days; you'd reconnect. Google, not Wren, decides those limits.
+Wren checks which permission Google actually granted. If you unticked it, the connector says what's missing instead of claiming to work. Wren can't send, archive, delete or mark mail, or create or change events.
 
 What you get: search mail ("Anything from the recruiter?"), "What needs my attention today?" (overdue Wren items + today's events + mail flagged as a request, deadline, bill, interview, security notice, Gmail-important or from your important senders), today's events and mail on the Overview, both in the morning briefing (Connectors › Gmail › "Include in the morning briefing"), "What meetings do I have tomorrow?", and "Remind me" on any event. Suggested tasks from email open in the capture panel for you to edit first.
 
-Mail is fetched when needed and **not stored** unless you turn on the 7-day cache of headers and previews. Wren never sends, archives, deletes or marks mail. Text in an email is treated as data: it can't trigger any action. Disconnecting revokes the token with Google, removes it from the Keychain and deletes cached mail.
+Mail is fetched when needed and **not stored** unless you turn on the 7-day cache of headers and previews. Text in an email is treated as data: it can't trigger any action. **Disconnect** revokes Wren's access with Google, removes the token from the Keychain and deletes cached mail.
 
 ### Notion
 
-1. notion.so › Settings › Connections › Develop or manage integrations › New integration (internal). Capabilities: read content, insert content. Copy the token.
-2. On each page Wren may use: ••• › Connections › add your integration. Wren can't see other pages.
-3. Connectors › Notion › paste the token. Wren checks it with Notion (API version 2026-03-11) before saving it in the Keychain.
+**Connect Notion** opens Notion in your browser. Pick the workspace and the pages Wren may use; Wren can't see anything else. Wren shows the workspace it's connected to. **Change which pages Wren can use…** takes you back to Notion to adjust.
 
-You can search shared pages, read them, include chosen pages as context in a Delegate request, and create a page (it asks first). Unsupported block types are shown as "[type block not shown]". Disconnecting removes the token; also remove the integration in Notion.
+You can search those pages, read them, include chosen pages as context in a Delegate request, and create a page (it asks first). Unsupported block types are shown as "[type block not shown]". Sign-in finishes through a small service run by Wren's maintainers that holds Wren's Notion app secret; it passes the token to Wren and stores nothing. **Disconnect** revokes the token with Notion and deletes it from the Keychain.
 
 ### Troubleshooting
 
 | Problem | Fix |
 |---|---|
-| Google "Setup required" | Add your OAuth client (above) |
-| "Google rejected the OAuth client" | Check the client ID/secret; the client must be type Desktop app |
-| "Didn't grant the needed permission" | Tick the Gmail/Calendar box on Google's consent screen |
-| Permission denied after a week | Testing-mode consent screen expired the token: Reconnect |
-| Notion pages missing | Share them with your integration (••• › Connections) |
+| "Not available in this build" | This copy of Wren doesn't include that provider. Nothing to set up on your side |
+| ChatGPT: "Account connected, plan usage not authorized" | Press **Allow plan usage…** and approve it, or check that your plan is Plus or Pro |
+| ChatGPT: "Usage limit reached" | Wait for your allowance to reset, or check **Manage usage** |
+| "Reauthorization required" or "Permission denied" | Press **Reconnect** |
+| Gmail/Calendar: "Missing permission" | Connect again and leave the permission ticked on Google's page |
+| Notion pages missing | **Change which pages Wren can use…** and add them in Notion |
 | Voice: "on-device recognition isn't installed" | Turn on Dictation in System Settings › Keyboard once |
 | Voice: microphone denied | System Settings › Privacy & Security › Microphone › Wren |
 
@@ -255,6 +256,10 @@ Rules: the tag must match `VERSION`. A **stable** tag is only published if the b
 
 Local packaging: `scripts/package-dmg.sh` (runs tests, builds universal, packages, verifies). `scripts/verify-dmg.sh <dmg>` re-checks any DMG.
 
+### Provider sign-in setup
+
+Google and Notion sign-in need app registrations made once by the maintainers and injected at build time; ChatGPT needs none. See [docs/MAINTAINER_SETUP.md](docs/MAINTAINER_SETUP.md). A build without them still works and shows those connectors as "Not available in this build".
+
 ### Signing and notarization setup
 
 Required for a frictionless public release. Add these **repository secrets** (Settings › Secrets and variables › Actions). Never commit them.
@@ -279,6 +284,12 @@ The test suite covers persistence across reopen, status transitions, reminder de
 
 ```bash
 WREN_LIVE_OLLAMA=qwen2.5:3b swift test --filter "LiveModelTests|testLiveOllama"
+```
+
+The Notion sign-in relay has its own tests:
+
+```bash
+node --test services/notion-oauth-relay
 ```
 
 ## Brand assets

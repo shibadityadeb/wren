@@ -131,7 +131,7 @@ struct SettingsView: View {
                             Spacer()
                             Button("Connectors…") { model.route = .connectors }
                         }
-                        Text("ChatGPT handoff, voice, Gmail, Notion, Google Calendar, OpenAI API. Each shows its real status, permissions and privacy.")
+                        Text("ChatGPT, voice, Gmail, Notion, Google Calendar. Each shows its real status, permissions and privacy.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
 

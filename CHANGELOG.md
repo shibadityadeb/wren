@@ -2,6 +2,18 @@
 
 Versions follow [semantic versioning](https://semver.org). The `VERSION` file is the source of truth; release tags are `v<VERSION>` (stable) or `v<VERSION>-preview.N` (prerelease).
 
+## [0.7.0]
+
+Connect your accounts by signing in. No keys, tokens or developer setup.
+
+- ChatGPT: **Continue with ChatGPT** signs in with your ChatGPT account (Sign in with ChatGPT). Requests you confirm are sent with your ChatGPT plan and the answer streams back. Shows the account, whether plan usage is allowed, **Using ChatGPT plan** and **Manage usage**, and clear states for usage limits, expired sign-ins and outages. Models come from your account. No API-billing fallback, and background tasks never use your plan.
+- Copy-and-open ChatGPT handoff stays as an optional fallback.
+- Gmail and Google Calendar: **Connect with Google** using Wren's own registration. Each asks for one read-only permission and checks it was granted.
+- Notion: **Connect Notion** and pick pages on Notion's own screen. Shows the connected workspace.
+- Disconnect revokes access with the provider, and says so if the provider couldn't confirm it.
+- Removed: entering a Google client ID or secret, pasting a Notion token, and the OpenAI API-key connector. Any of these saved by an earlier build are deleted from the Keychain.
+- A connector this build wasn't set up for says "Not available in this build" instead of asking you to configure anything.
+
 ## [0.6.0]
 
 Connectors, voice and ChatGPT handoff.

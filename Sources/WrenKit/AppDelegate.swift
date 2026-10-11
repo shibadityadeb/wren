@@ -34,7 +34,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         // One Wren at a time: a login launch plus a manual open must not run two schedulers.
         // A relaunch (to finish a restore) waits for the previous copy to quit first.
         let isRelaunch = CommandLine.arguments.contains("--relaunch")
-        if let id = Bundle.main.bundleIdentifier {
+        var isolatedDebugData = false
+        #if DEBUG
+        // A debug build pointed at a throwaway data folder can run beside the installed copy.
+        isolatedDebugData = ProcessInfo.processInfo.environment["WREN_DEBUG_DATA_DIR"] != nil
+        #endif
+        if let id = Bundle.main.bundleIdentifier, !isolatedDebugData {
             var waited: TimeInterval = 0
             while true {
                 let others = NSRunningApplication.runningApplications(withBundleIdentifier: id).contains { $0.processIdentifier != getpid() }
@@ -381,7 +386,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         case "/handoff":
             // Debug only: same path as pressing "Copy and open ChatGPT" on the preview.
             let task = q.first(where: { $0.name == "task" })?.value ?? "Brainstorm ten names for a personal assistant app"
-            model.hub.chatgpt.enabled = true
+            model.hub.chatgpt.handoffEnabled = true
             Task {
                 let draft = HandoffDraft(task: task, depth: .deep)
                 guard let r = model.newDelegation(task, destination: .chatgptHandoff, depth: .deep) else { return }
@@ -389,10 +394,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 appLog.notice("debug handoff error=\(err ?? "none", privacy: .public) status=\(r.status.rawValue, privacy: .public) promptChars=\(r.prompt?.count ?? 0, privacy: .public)")
             }
         case "/chatgpt-off":
-            model.hub.chatgpt.enabled = false
+            model.hub.chatgpt.handoffEnabled = false
             try? model.policyStore?.setGrant(.chatgptHandoff, granted: false)
             model.connectorsChanged()
             appLog.notice("debug chatgpt handoff off: \(self.model.hub.chatgpt.state.label, privacy: .public)")
+        case "/chatgpt-connect":
+            // Debug only: same as pressing "Continue with ChatGPT". The user still signs in in the browser.
+            model.connectChatGPT(reconsent: q.contains { $0.name == "reconsent" })
+            appLog.notice("debug chatgpt sign-in started")
+        case "/chatgpt-status":
+            Task {
+                await model.hub.chatgpt.refresh()
+                let c = model.hub.chatgpt
+                appLog.notice("debug chatgpt account=\(c.account.title, privacy: .public) models=\(c.models.map(\.slug).joined(separator: ","), privacy: .public) selected=\(c.selectedModel ?? "-", privacy: .public) grantAI=\(self.model.policy.grants.contains(.externalAI), privacy: .public)")
+            }
+        case "/chatgpt-ask":
+            // Debug only: same path as pressing "Send with ChatGPT" on the preview (that press is the confirmation).
+            let task = q.first(where: { $0.name == "task" })?.value ?? "Reply with the single word: ready"
+            Task {
+                guard let r = model.newDelegation(task, destination: .chatgptPlan, depth: .normal) else { return }
+                await model.sendToChatGPT(HandoffDraft(task: task, depth: .normal), record: r) { _ in }
+                appLog.notice("debug chatgpt ask status=\(r.status.rawValue, privacy: .public) chars=\(r.response?.count ?? 0, privacy: .public) source=\(r.responseSource ?? "-", privacy: .public) error=\(r.error ?? "none", privacy: .public) account=\(self.model.hub.chatgpt.account.title, privacy: .public)")
+            }
         case "/transcribe":
             // Debug only: on-device transcription of a given audio file (only if already authorized).
             guard let path = q.first(where: { $0.name == "file" })?.value else { break }

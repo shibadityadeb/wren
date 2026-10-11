@@ -6,7 +6,8 @@ struct DelegateView: View {
     @Bindable var model: AppModel
     @State private var task = ""
     @State private var deep = false
-    @State private var destination: DelegationDestination = .chatgptHandoff
+    @State private var destination: DelegationDestination = .chatgptPlan
+    @State private var streamed = ""
     @State private var selectedItems: Set<UUID> = []
     @State private var notionContext: [HandoffContextItem] = []
     @State private var includedPrivate: Set<String> = []
@@ -23,8 +24,9 @@ struct DelegateView: View {
         let h = model.hub!
         return DelegationDestination.allCases.filter {
             switch $0 {
-            case .chatgptHandoff: h.chatgpt.state.isUsable
-            case .openaiAPI: h.openai.state.isConnected
+            case .chatgptPlan: h.chatgpt.account.canSend && h.chatgpt.selectedModel != nil
+            case .chatgptHandoff: h.chatgpt.handoffAvailable
+            case .openaiAPI: false
             case .localModel: model.ai.usableModel != nil
             case .notionSearch: h.notion.state.isUsable
             case .gmailSearch: h.gmail.state.isUsable
@@ -44,7 +46,7 @@ struct DelegateView: View {
             VStack(alignment: .leading, spacing: 14) {
                 Text("Delegate").font(.title2.weight(.semibold))
                 if available.isEmpty {
-                    Notice(text: "No destinations are set up. Turn on ChatGPT handoff, connect the OpenAI API, Notion, Gmail or Calendar, or set up local AI.", systemImage: "puzzlepiece.extension",
+                    Notice(text: "No destinations are set up. Continue with ChatGPT, connect Notion, Gmail or Calendar, or set up local AI.", systemImage: "puzzlepiece.extension",
                            action: ("Connectors", { model.route = .connectors })).clipShape(RoundedRectangle(cornerRadius: 6))
                 }
                 TextField("What should be done? e.g. Brainstorm ten names for this project", text: $task, axis: .vertical)
@@ -58,6 +60,7 @@ struct DelegateView: View {
                 }
                 Text(destination.leavesMac ? "↗ Sends the prompt below outside your Mac (\(destination.label))." : "Runs on this Mac or only reads from a connected service.")
                     .font(.caption).foregroundStyle(destination.leavesMac ? .orange : .secondary)
+                if destination == .chatgptPlan { planIndicator }
 
                 if destination.leavesMac || destination == .localModel { contextPicker; preview }
                 actions
@@ -66,6 +69,9 @@ struct DelegateView: View {
                     ForEach(lookup) { l in
                         HStack { Text(l.text).font(.callout); Spacer(); if let u = l.externalURL { Link("Open", destination: u).font(.caption) } }
                     }
+                }
+                if busy && destination == .chatgptPlan && !streamed.isEmpty {
+                    ScrollView { Text(streamed).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 220)
                 }
                 if let r = current { resultSection(r) }
                 history
@@ -76,6 +82,21 @@ struct DelegateView: View {
             if let d = model.delegationDraft { task = d.task; deep = d.depth == .deep; model.delegationDraft = nil }
             if !available.contains(destination), let f = available.first { destination = f }
         }
+    }
+
+    /// Which account and allowance a request uses, before it's sent.
+    var planIndicator: some View {
+        let c = model.hub.chatgpt
+        return HStack(spacing: 8) {
+            Label("Using ChatGPT plan", systemImage: "checkmark.seal.fill").foregroundStyle(WrenTheme.accent)
+            if let e = c.email { Text(e).foregroundStyle(.secondary) }
+            Picker("Model", selection: Binding(get: { c.selectedModel ?? "" }, set: { c.selectedModel = $0.isEmpty ? nil : $0; model.connectorVersion += 1 })) {
+                ForEach(c.models) { Text($0.displayName).tag($0.slug) }
+            }
+            .labelsHidden().frame(maxWidth: 200)
+            Link("Manage usage", destination: SIWC.manageUsageURL)
+        }
+        .font(.caption)
     }
 
     var contextPicker: some View {
@@ -130,8 +151,10 @@ struct DelegateView: View {
                 Label("Removed \(d.findings.map(\.label).joined(separator: ", ")).", systemImage: "exclamationmark.shield").font(.caption).foregroundStyle(.orange)
                 Toggle("Send them as written (not recommended)", isOn: $includeSensitive).toggleStyle(.checkbox).font(.caption)
             }
-            if deep && destination.leavesMac {
-                Text("“Deeper thinking” is a request written into the prompt. Wren can't choose or verify ChatGPT's model or thinking mode.").font(.caption2).foregroundStyle(.tertiary)
+            if deep && destination == .chatgptHandoff {
+                Text("“Deeper thinking” is a request written into the prompt. Wren can't choose or verify ChatGPT's model or thinking mode in the ChatGPT app.").font(.caption2).foregroundStyle(.tertiary)
+            } else if deep && destination == .chatgptPlan {
+                Text("“Deeper thinking” is a request written into the prompt; the model is the one chosen below.").font(.caption2).foregroundStyle(.tertiary)
             }
         }
     }
@@ -145,9 +168,15 @@ struct DelegateView: View {
                         message = "Copied and opened ChatGPT. Paste (⌘V) and press send there; nothing has been sent by Wren. Then paste the answer below."
                     } } }
                     .buttonStyle(.borderedProminent).tint(WrenTheme.accent).disabled(task.isEmpty || busy)
-            case .openaiAPI:
-                Button("Send to OpenAI API") { run { r in await model.sendToAPI(draft, record: r); message = r.error } }
+            case .chatgptPlan:
+                Button("Send with ChatGPT") { run { r in
+                    streamed = ""
+                    await model.sendToChatGPT(draft, record: r) { streamed += $0 }
+                    streamed = ""
+                    message = r.error } }
                     .buttonStyle(.borderedProminent).tint(WrenTheme.accent).disabled(task.isEmpty || busy)
+            case .openaiAPI:
+                EmptyView()
             case .localModel:
                 Button("Ask local model") { run { r in
                     r.prompt = draft.prompt
