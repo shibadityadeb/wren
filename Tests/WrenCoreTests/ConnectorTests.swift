@@ -22,7 +22,11 @@ final class ConnectorRegistryTests: XCTestCase {
         XCTAssertEqual(ConnectorState.connected(account: "a").bucket, .connected)
         XCTAssertEqual(ConnectorState.partiallyConnected("x").bucket, .connected)
         XCTAssertEqual(ConnectorState.setupRequired("x").bucket, .needsSetup)
-        XCTAssertEqual(ConnectorState.permissionDenied("x").bucket, .unavailable)
+        XCTAssertEqual(ConnectorState.missingPermissions("x").bucket, .needsSetup)
+        XCTAssertEqual(ConnectorState.reauthorizationRequired("x").bucket, .needsSetup)
+        XCTAssertEqual(ConnectorState.usageLimitReached("x").bucket, .unavailable)
+        XCTAssertEqual(ConnectorState.planned.label, "Not implemented")
+        XCTAssertEqual(ConnectorState.available.label, "Available to connect")
         XCTAssertEqual(ConnectorState.disconnected.bucket, .notConnected)
         XCTAssertEqual(ConnectorState.planned.bucket, .planned)
     }
@@ -36,13 +40,21 @@ final class CredentialTests: XCTestCase {
         try s.delete("missing")
     }
 
-    /// Real macOS Keychain round trip (skipped on CI runners).
-    func testRealKeychain() throws {
-        if ProcessInfo.processInfo.environment["CI"] != nil { throw XCTSkip("Keychain test runs locally only") }
-        let s = KeychainCredentialStore(service: "com.shibadityadeb.wren.tests.\(UUID().uuidString)")
-        try s.writeString("token", "first"); XCTAssertEqual(s.readString("token"), "first")
-        try s.writeString("token", "second"); XCTAssertEqual(s.readString("token"), "second", "update in place")
-        try s.delete("token"); XCTAssertNil(s.readString("token"))
+    func testPrivateFileStoreNeverUsesTheKeychain() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("wren-cred-\(UUID())/Credentials")
+        let s = FileCredentialStore(directory: dir)
+        XCTAssertNil(s.readString("chatgpt.connection"))
+        try s.writeString("chatgpt.connection", "first"); XCTAssertEqual(s.readString("chatgpt.connection"), "first")
+        try s.writeString("chatgpt.connection", "second"); XCTAssertEqual(s.readString("chatgpt.connection"), "second", "replaced atomically")
+        let fileMode = try FileManager.default.attributesOfItem(atPath: dir.appendingPathComponent("chatgpt.connection").path)[.posixPermissions] as? Int
+        let dirMode = try FileManager.default.attributesOfItem(atPath: dir.path)[.posixPermissions] as? Int
+        XCTAssertEqual(fileMode, 0o600, "only your user can read it"); XCTAssertEqual(dirMode, 0o700)
+        XCTAssertThrowsError(try s.writeString("../escape", "x"), "keys can't leave the folder")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path), ["chatgpt.connection"], "no temporary files left behind")
+        try s.delete("chatgpt.connection"); XCTAssertNil(s.readString("chatgpt.connection"))
+        try s.delete("missing")
+        try s.writeString("a", "1"); try s.deleteAll()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.path))
     }
 }
 
@@ -73,7 +85,7 @@ final class HTTPPolicyTests: XCTestCase {
 
 final class GoogleOAuthTests: XCTestCase {
     override func setUp() { RouteStub.reset() }
-    let config = GoogleOAuthConfig(clientID: "1234567890-abcdefghijklmnopqrstuvwxyz.apps.googleusercontent.com", clientSecret: "dev-secret")
+    let config = GoogleOAuthConfig(clientID: "1234567890-abcdefghijklmnopqrstuvwxyz.apps.googleusercontent.com")
 
     func testPKCEMatchesRFC7636Example() {
         XCTAssertEqual(PKCE.challenge(for: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"), "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM")
@@ -93,7 +105,7 @@ final class GoogleOAuthTests: XCTestCase {
         XCTAssertEqual(q["access_type"], "offline")
         XCTAssertNil(q["client_secret"], "the secret never goes into the browser URL")
         XCTAssertTrue(config.isPlausible)
-        XCTAssertFalse(GoogleOAuthConfig(clientID: "abc", clientSecret: nil).isPlausible)
+        XCTAssertFalse(GoogleOAuthConfig(clientID: "abc").isPlausible)
     }
 
     func testCallbackValidation() throws {
@@ -114,6 +126,7 @@ final class GoogleOAuthTests: XCTestCase {
         XCTAssertEqual(t.expiresAt, Date(timeIntervalSince1970: 4_600))
         let body = String(decoding: RouteStub.requests.last!.1 ?? Data(), as: UTF8.self)
         XCTAssertTrue(body.contains("code_verifier=") && body.contains("grant_type=authorization_code"))
+        XCTAssertFalse(body.contains("client_secret"), "public client: no secret is shipped or sent")
 
         RouteStub.routes["/token"] = RouteStub.json(#"{"access_token":"A1","refresh_token":"R1","expires_in":3600,"scope":"openid"}"#)
         do { _ = try await o.exchange(code: "c", pkce: .make(), redirect: URL(string: "http://127.0.0.1:1/")!, requiredScope: ConnectorCatalog.gmailScope); XCTFail() }
@@ -414,75 +427,126 @@ final class VoiceTests: XCTestCase {
         func requestMicrophone() async -> Bool { micRequests += 1; microphone = grantMic ? .granted : .denied; return grantMic }
         func requestSpeech() async -> Bool { speech = grantSpeech ? .granted : .denied; return grantSpeech }
     }
-    final class Rec: AudioRecording {
-        var started = 0, cancelled = 0, duration: TimeInterval = 2
-        var file: URL?
-        func start() throws {
-            started += 1
-            let f = FileManager.default.temporaryDirectory.appendingPathComponent("wren-voice-\(UUID()).caf")
-            try Data([1, 2, 3]).write(to: f); file = f
-        }
-        func stop() -> (URL, TimeInterval)? { file.map { ($0, duration) } }
-        func cancel() { cancelled += 1 }
+    final class Stream: SpeechStreaming {
+        var onTranscript: ((String) -> Void)?
+        var onEnded: ((VoiceError?) -> Void)?
+        var isRunning = false
+        var starts = 0, stops = 0
+        var failStart: VoiceError?
+        func start() throws { if let failStart { throw failStart }; starts += 1; isRunning = true }
+        func stop() { if isRunning { stops += 1 }; isRunning = false }
+        func say(_ t: String) { onTranscript?(t) }
     }
-    struct Tx: SpeechTranscribing {
-        var result: Result<Transcript, VoiceError>
-        func transcribe(_ file: URL) async throws -> Transcript { try result.get() }
+    final class Clock { var t = Date(timeIntervalSince1970: 1_000_000) }
+
+    func make(perms: Perms = Perms()) -> (VoiceSession, Stream, Clock, [String]) {
+        let s = Stream(), c = Clock()
+        let v = VoiceSession(stream: s, permissions: perms, now: { c.t })
+        return (v, s, c, [])
     }
 
-    func make(_ tx: Result<Transcript, VoiceError>, perms: Perms = Perms()) -> (VoiceCapture, Perms, Rec) {
-        let r = Rec()
-        return (VoiceCapture(permissions: perms, recorder: r, transcriber: Tx(result: tx)), perms, r)
+    func testWakePhraseVariantsAndNonMatches() {
+        XCTAssertEqual(WakeWord.command(in: "Hey Wren, remind me to call Sam tomorrow at 10 AM"), "remind me to call Sam tomorrow at 10 AM")
+        XCTAssertEqual(WakeWord.command(in: "hey ren remind me"), "remind me")
+        XCTAssertEqual(WakeWord.command(in: "okay Wren"), "")
+        XCTAssertEqual(WakeWord.command(in: "so anyway hey wren what's due"), "what's due")
+        XCTAssertNil(WakeWord.command(in: "I saw a wren in the garden"))
+        XCTAssertNil(WakeWord.command(in: "hey when is the meeting"))
+        XCTAssertNil(WakeWord.command(in: "hey wrench"))
     }
 
-    func testHappyPathAsksOnceDeletesAudioAndHandsTextToPipeline() async throws {
-        let (v, p, r) = make(.success(Transcript(text: " Move the report to Friday ", confidence: 0.9, onDevice: true)))
-        await v.begin()
-        guard case .recording = v.state else { return XCTFail("\(v.state)") }
-        XCTAssertEqual(p.micRequests, 1)
-        await v.end()
-        XCTAssertEqual(v.state, .review(Transcript(text: "Move the report to Friday", confidence: 0.9, onDevice: true)))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: r.file!.path), "audio deleted after transcription")
-        let text = try XCTUnwrap(v.accept())
-        XCTAssertEqual(v.state, .idle)
-        // Same pipeline as typing: a command becomes a conversational proposal that needs confirmation.
-        let cal = calendar("Asia/Kolkata")
-        let h = try Harness(now: at(cal, 2026, 10, 8, 12), calendar: cal)
-        _ = try h.add("Write the quarterly report", deadline: at(cal, 2026, 10, 12))
-        guard case let .proposal(prop) = ContextResolver(calendar: cal).resolve(text, items: try h.store.all(), goals: [], context: .init(), now: h.clock.now)
-        else { return XCTFail() }
-        do { let s = await h.broker.submit(prop.request); XCTAssertEqual(s.status, .awaitingConfirmation) }
-        await v.begin(); XCTAssertEqual(p.micRequests, 1, "permission asked only the first time")
+    func testEndpointer() {
+        var e = CommandEndpointer(start: Date(timeIntervalSince1970: 0))
+        XCTAssertNil(e.check(Date(timeIntervalSince1970: 3)))
+        XCTAssertEqual(e.check(Date(timeIntervalSince1970: 7)), .nothingSaid)
+        e.transcript("remind me", at: Date(timeIntervalSince1970: 2))
+        XCTAssertNil(e.check(Date(timeIntervalSince1970: 3)))
+        XCTAssertEqual(e.check(Date(timeIntervalSince1970: 3.7)), .pause)
+        e.transcript("remind me to call", at: Date(timeIntervalSince1970: 3.5))
+        XCTAssertNil(e.check(Date(timeIntervalSince1970: 4)), "still talking")
+        XCTAssertEqual(e.check(Date(timeIntervalSince1970: 21)), .timeLimit)
     }
 
-    func testPermissionDenials() async {
-        let p1 = Perms(); p1.grantMic = false
-        let (v1, _, r1) = make(.success(Transcript(text: "x", confidence: nil, onDevice: true)), perms: p1)
-        await v1.begin(); XCTAssertEqual(v1.state, .failed(.microphoneDenied)); XCTAssertEqual(r1.started, 0)
-        let p2 = Perms(); p2.grantSpeech = false
-        let (v2, _, r2) = make(.success(Transcript(text: "x", confidence: nil, onDevice: true)), perms: p2)
-        await v2.begin(); XCTAssertEqual(v2.state, .failed(.speechDenied)); XCTAssertEqual(r2.started, 0)
+    func testHeyWrenCapturesOneCommandThenListensAgain() async {
+        let (v, s, c, _) = make()
+        var commands: [(String, VoiceSession.Trigger)] = []
+        v.onCommand = { commands.append(($0, $1)) }
+        let err = await v.setWakeWord(true)
+        XCTAssertNil(err); XCTAssertEqual(v.phase, .listening); XCTAssertEqual(s.starts, 1)
+        s.say("the weather is nice")
+        XCTAssertEqual(v.phase, .listening, "no wake phrase, nothing happens")
+        s.say("the weather is nice hey Wren remind me to call Sam")
+        XCTAssertEqual(v.phase, .capturing(.wakeWord))
+        s.say("the weather is nice hey Wren remind me to call Sam tomorrow at 10 AM")
+        XCTAssertEqual(v.liveCommand, "remind me to call Sam tomorrow at 10 AM")
+        c.t += 1; v.tick(); XCTAssertTrue(commands.isEmpty)
+        c.t += 1; v.tick()
+        XCTAssertEqual(commands.map(\.0), ["remind me to call Sam tomorrow at 10 AM"])
+        XCTAssertEqual(commands.first?.1, .wakeWord)
+        XCTAssertEqual(v.phase, .handling); XCTAssertFalse(s.isRunning, "recording stops when the command ends")
+        // More speech or ticks while handling can't produce a second command.
+        s.say("hey wren remind me again"); c.t += 5; v.tick()
+        XCTAssertEqual(commands.count, 1)
+        v.finishedHandling()
+        XCTAssertEqual(v.phase, .listening); XCTAssertTrue(s.isRunning)
     }
 
-    func testShortEmptyServerAndErrors() async {
-        let (a, _, ra) = make(.success(Transcript(text: "hi", confidence: nil, onDevice: true)))
-        ra.duration = 0.1; await a.begin(); await a.end(); XCTAssertEqual(a.state, .failed(.tooShort))
-        let (b, _, _) = make(.success(Transcript(text: "   ", confidence: nil, onDevice: true)))
-        await b.begin(); await b.end(); XCTAssertEqual(b.state, .failed(.nothingHeard))
-        let (c, _, _) = make(.success(Transcript(text: "hello", confidence: nil, onDevice: false)))
-        await c.begin(); await c.end()
-        guard case .failed(.onDeviceUnavailable) = c.state else { return XCTFail("server recognition is refused") }
-        let (d, _, _) = make(.failure(.transcriptionFailed("engine")))
-        await d.begin(); await d.end(); XCTAssertEqual(d.state, .failed(.transcriptionFailed("engine")))
-        await d.begin(); guard case .recording = d.state else { return XCTFail("retry works after a failure") }
+    func testShortcutUsesTheSamePipelineAndCanStopEarly() async {
+        let (v, s, c, _) = make()
+        var commands: [(String, VoiceSession.Trigger)] = []
+        v.onCommand = { commands.append(($0, $1)) }
+        await v.shortcut()
+        XCTAssertEqual(v.phase, .capturing(.shortcut))
+        s.say("snooze the current reminder for 30 minutes")
+        await v.shortcut()   // pressed again: done
+        XCTAssertEqual(commands.map(\.0), ["snooze the current reminder for 30 minutes"])
+        XCTAssertEqual(commands.first?.1, .shortcut)
+        v.finishedHandling()
+        XCTAssertEqual(v.phase, .off, "Hey Wren is off: microphone off afterwards"); XCTAssertFalse(s.isRunning)
+        _ = c
     }
 
-    func testCancelAndNoDoubleStart() async {
-        let (v, _, r) = make(.success(Transcript(text: "x", confidence: nil, onDevice: true)))
-        await v.begin(); await v.begin()
-        XCTAssertEqual(r.started, 1)
+    func testNothingSaidAndCancel() async {
+        let (v, s, c, _) = make()
+        var ended: [CommandEndpointer.End] = []
+        var commands = 0
+        v.onEndedWithoutCommand = { ended.append($0) }
+        v.onCommand = { _, _ in commands += 1 }
+        await v.shortcut()
+        c.t += 8; v.tick()
+        XCTAssertEqual(ended, [.nothingSaid]); XCTAssertEqual(v.phase, .off)
+        await v.shortcut(); s.say("remind me to")
         v.cancel()
-        XCTAssertEqual(r.cancelled, 1); XCTAssertEqual(v.state, .idle)
-        await v.end(); XCTAssertEqual(v.state, .idle, "end after cancel does nothing")
+        XCTAssertEqual(v.phase, .off); XCTAssertEqual(commands, 0); XCTAssertFalse(s.isRunning)
+    }
+
+    func testPermissionDenialsAndFailures() async {
+        let p = Perms(); p.grantMic = false
+        let (v, s, _, _) = make(perms: p)
+        let e = await v.setWakeWord(true)
+        XCTAssertEqual(e, .microphoneDenied); XCTAssertFalse(v.wakeWordEnabled); XCTAssertEqual(s.starts, 0)
+        XCTAssertEqual(v.phase, .failed(.microphoneDenied))
+        let p2 = Perms(); p2.grantSpeech = false
+        let (v2, _, _, _) = make(perms: p2)
+        let e2 = await v2.shortcut()
+        XCTAssertEqual(e2, .speechDenied)
+        // The recogniser reports an unavailable on-device model.
+        let (v3, s3, _, _) = make()
+        s3.failStart = .onDeviceUnavailable("en_US")
+        let e3 = await v3.setWakeWord(true)
+        XCTAssertEqual(e3, .onDeviceUnavailable("en_US"))
+    }
+
+    func testRecogniserLimitRestartsListeningAndQuitStopsEverything() async {
+        let (v, s, _, _) = make()
+        await v.setWakeWord(true)
+        s.isRunning = false; s.onEnded?(nil)
+        XCTAssertEqual(v.phase, .listening); XCTAssertEqual(s.starts, 2, "fresh recogniser after its time limit")
+        s.onEnded?(.recordingFailed("device gone"))
+        XCTAssertEqual(v.phase, .failed(.recordingFailed("device gone")))
+        await v.setWakeWord(true)
+        XCTAssertEqual(v.phase, .listening)
+        v.shutdown()
+        XCTAssertEqual(v.phase, .off); XCTAssertFalse(s.isRunning); XCTAssertFalse(v.wakeWordEnabled)
     }
 }

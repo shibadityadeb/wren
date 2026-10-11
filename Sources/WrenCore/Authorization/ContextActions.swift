@@ -45,7 +45,8 @@ public extension BuiltInAction {
             ClosureHandler(d(reschedule, "Change the deadline", "Deadline equals the requested date"),
                 execute: { r in
                     let c = try item(r)
-                    try store.reschedule(c, deadline: r.parameters.date("deadline"), hasTime: r.parameters.bool("hasTime") ?? false, now: n())
+                    try store.reschedule(c, deadline: r.parameters.date("deadline"), hasTime: r.parameters.bool("hasTime") ?? false,
+                                         reminderHour: BuiltInAction.defaultReminderHour(), calendar: clock.calendar, now: n())
                     return r.parameters.date("deadline").map { "to \(WrenStore.stamp($0))" }
                 }, verify: { r in itemNow(r)?.deadline == r.parameters.date("deadline") }),
             ClosureHandler(d(archive, "Archive (can be reopened)", "Item status is archived"),

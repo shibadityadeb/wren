@@ -2,6 +2,27 @@
 
 Versions follow [semantic versioning](https://semver.org). The `VERSION` file is the source of truth; release tags are `v<VERSION>` (stable) or `v<VERSION>-preview.N` (prerelease).
 
+## [Unreleased]
+
+- Every input in the capture panel is classified before anything happens: save, reminder, ask ChatGPT, change an item, question about your items, general question, or something to remember. "Can you check on GPT what is quantum physics" now asks ChatGPT instead of showing an unrelated waiting-items card.
+- Asking ChatGPT happens in the panel. It shows the question, sends it with your ChatGPT plan, and streams the real answer. If you're not connected or not allowed, it shows Connect ChatGPT and keeps your question. Usage limits, network errors and retry are explained. One request at a time.
+- A question that names no assistant lets you choose: local AI, ChatGPT, or save it as a note. "Note: …" or "Save this: …" always just saves.
+- The local model can no longer turn an unrelated sentence into an answer about your stored items.
+
+## [0.8.0]
+
+A complete Mac app, reminders you can rely on, and talking to Wren.
+
+- Wren is a regular Mac app: a Dock icon, a Wren menu with About, Settings, Hide and Quit, and exactly one bird in the menu bar, all in one process. ⌘Q quits for real; closing the window keeps Wren in the menu bar.
+- Only one Wren can run, and only one can use your data. This fixes extra birds in the menu bar when a second copy was running.
+- Reminders are scheduled with macOS, so they arrive even when Wren isn't running, and are re-checked at every start without duplicates. Completing, deleting, snoozing or moving a reminder updates its notification.
+- Repeating reminders ("every weekday at 3 PM") keep their local time through daylight saving and travel.
+- "Remind me to …" (typed or spoken) sets the reminder straight away and says exactly when. Wren asks when the time is missing or unclear, refuses times that have passed, and understands "snooze the current reminder for 30 minutes".
+- New reminder in the main window, and Repeat in each item.
+- "Hey Wren" (off until you turn it on) and the voice shortcut run the same voice command, recognised on your Mac. You see what Wren heard and what it did.
+- Connector states read: Available to connect, Missing permissions, Reauthorization required, Usage limit reached, Maintainer setup required, Not implemented.
+- Google sign-in no longer uses a client secret.
+
 ## [0.7.0]
 
 Connect your accounts by signing in. No keys, tokens or developer setup.

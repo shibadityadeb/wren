@@ -5,7 +5,8 @@ import WrenCore
 /// `broker.performExternal`; handoffs and API requests need an explicit confirmation each time.
 @MainActor
 final class ConnectorHub {
-    let credentials: CredentialStore = KeychainCredentialStore()
+    /// Private files in Wren's data folder (not the Keychain, so no Keychain password prompts).
+    let credentials: CredentialStore = FileCredentialStore.default
     let statusStore = DefaultsStatusStore()
     let registry = ConnectorRegistry()
     let gmail: GoogleConnector
@@ -38,10 +39,10 @@ final class ConnectorHub {
         [chatgpt, voice, gmail, calendar, notion, PlannedConnector(.localFiles), PlannedConnector(.shortcuts)].forEach(registry.register)
     }
 
-    /// Earlier development builds asked users for a Google client, a Notion integration token or an
-    /// OpenAI API key. Wren no longer uses any of them, so they're deleted rather than left behind.
+    /// Earlier builds kept an OpenAI model choice and status. Credentials earlier builds put in the
+    /// Keychain are deliberately not read or deleted here: touching them makes macOS ask for the
+    /// Keychain password. They're unused; remove them in Keychain Access if you like.
     static func removeLegacyCredentials(_ store: CredentialStore, settings: WrenSettings) {
-        for k in [GoogleSession.legacyConfigKey, NotionSession.legacyTokenKey, "openai.apiKey"] { try? store.delete(k) }
         UserDefaults.standard.removeObject(forKey: "openaiModel")
         UserDefaults.standard.removeObject(forKey: "connector.openaiAPI")
     }
@@ -170,11 +171,12 @@ extension AppModel {
     }
 
     /// Sign in with ChatGPT. `reconsent` shows OpenAI's permission screen again (to allow plan usage).
-    func connectChatGPT(reconsent: Bool = false) {
+    func connectChatGPT(reconsent: Bool = false, then done: (() -> Void)? = nil) {
         Task {
             await hub.chatgpt.connect(reconsent: reconsent) { NSWorkspace.shared.open($0) }
             NSApp.activate(ignoringOtherApps: true)
             connectorsChanged()
+            done?()
         }
     }
 

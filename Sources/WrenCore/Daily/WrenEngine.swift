@@ -17,6 +17,9 @@ public final class WrenEngine {
     public var clearPause: () -> Void = {}
     /// Read-only highlights from connected services for the briefing (nil when none connected).
     public var externalBriefing: (() async -> ExternalBriefing?)?
+    /// True when macOS holds a scheduled notification for the item's current reminder time
+    /// (set by the app to `ReminderScheduler.isScheduledByMacOS`). Those are recorded, not re-sent.
+    public var scheduledByMacOS: (Commitment) -> Bool = { _ in false }
     private var running = false
 
     public init(store: WrenStore, broker: ActionBroker, clock: WrenClock, notifier: WrenNotifier?, settings: @escaping () -> DailySettings,
@@ -62,11 +65,15 @@ public final class WrenEngine {
             report.summarizedAfterPause = await deliverPauseSummary(since: p.since)
         }
 
-        // 1. Reminders, through the broker, as the scheduler under the auto-remind rule.
+        // 1. Reminders, through the broker, as the scheduler under the auto-remind rule. Ones that
+        // macOS showed from its schedule (possibly while Wren wasn't running) are only recorded;
+        // anything not scheduled (notifications were off, or it was created while paused) is sent now.
         let canDeliver = await notifier?.canDeliver() ?? false
         if canDeliver, let due = try? ReminderPolicy.due(store.pending(), now: clock.now) {
             for c in due {
-                let r = ActionRequest(action: BuiltInAction.deliverReminder, target: c.targetRef, origin: .system("reminders"), createdAt: clock.now)
+                let byMacOS = scheduledByMacOS(c)
+                let r = ActionRequest(action: BuiltInAction.deliverReminder, target: c.targetRef,
+                                      parameters: byMacOS ? ["byMacOS": .bool(true)] : [:], origin: .system("reminders"), createdAt: clock.now)
                 let result = await broker.submit(r)
                 if result.status == .succeeded { report.remindersDelivered += 1 } else { report.remindersUndelivered += 1 }
             }

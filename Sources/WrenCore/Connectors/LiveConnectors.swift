@@ -53,9 +53,11 @@ public class BaseConnector {
     func stateFor(_ e: Error) -> ConnectorState {
         let m = failed(e)
         switch e {
-        case ConnectorError.unauthorized, OAuthError.invalidClient: onPermissions(false); return .permissionDenied(m)
-        case ConnectorError.forbidden: return .permissionDenied(m)
-        case OAuthError.denied, OAuthError.scopeNotGranted: onPermissions(false); return .permissionDenied(m)
+        case ConnectorError.unauthorized: onPermissions(false); return .reauthorizationRequired(m)
+        // The provider rejected this build's own registration: the maintainers have to fix it.
+        case OAuthError.invalidClient: onPermissions(false); return .notAvailableInBuild(m)
+        case ConnectorError.forbidden: return .missingPermissions(m)
+        case OAuthError.denied, OAuthError.scopeNotGranted: onPermissions(false); return .missingPermissions(m)
         default: return .temporarilyUnavailable(m)
         }
     }

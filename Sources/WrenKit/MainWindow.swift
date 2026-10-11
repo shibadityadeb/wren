@@ -99,6 +99,7 @@ struct MainWindowView: View {
 }
 
 struct OverviewView: View {
+    @State private var showNewReminder = false
     @Bindable var model: AppModel
 
     var body: some View {
@@ -137,8 +138,12 @@ struct OverviewView: View {
             }
             Spacer(minLength: 0)
             VStack(alignment: .trailing, spacing: 6) {
-                Button { model.openCapturePanel() } label: { Label("New capture", systemImage: "square.and.pencil") }
-                    .buttonStyle(.borderedProminent).tint(WrenTheme.accent)
+                HStack {
+                    Button { showNewReminder = true } label: { Label("New reminder", systemImage: "bell.badge") }
+                    Button { model.openCapturePanel() } label: { Label("New capture", systemImage: "square.and.pencil") }
+                        .buttonStyle(.borderedProminent).tint(WrenTheme.accent)
+                }
+                .sheet(isPresented: $showNewReminder) { NewReminderSheet(model: model) }
                 if model.hotKeyEnabled {
                     Text("or press \(model.hotKeyDisplay) anywhere").font(.caption).foregroundStyle(.secondary)
                 }

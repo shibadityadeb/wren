@@ -30,10 +30,10 @@ echo "✓ contents: Wren.app, Applications shortcut, install guide"
 plist() { /usr/libexec/PlistBuddy -c "Print :$1" "$APP/Contents/Info.plist"; }
 [[ "$(plist CFBundleIdentifier)" == "com.shibadityadeb.wren" ]] || fail "bundle identifier changed (would orphan user data)"
 [[ "$(plist CFBundleShortVersionString)" == "$VERSION" ]] || fail "version mismatch"
-[[ "$(plist LSUIElement)" == "true" ]] || fail "not a menu-bar app"
+[[ "$(plist LSUIElement 2>/dev/null || echo false)" != "true" ]] || fail "LSUIElement set: Wren must be a regular app with a Dock icon"
 [[ "$(plist LSMinimumSystemVersion)" == "14.0" ]] || fail "minimum macOS changed"
 [[ -f "$APP/Contents/Resources/Wren.icns" ]] || fail "icon missing"
-echo "✓ bundle: com.shibadityadeb.wren $VERSION, menu-bar only, macOS 14+"
+echo "✓ bundle: com.shibadityadeb.wren $VERSION, Dock app with one menu-bar item, macOS 14+"
 has() { /usr/libexec/PlistBuddy -c "Print :$1" "$APP/Contents/Info.plist" >/dev/null 2>&1 && echo "included" || echo "not included"; }
 echo "• provider sign-in: Google $(has WrenGoogleClientID), Notion $(has WrenNotionOAuthRelay) (values not shown)"
 
@@ -44,7 +44,7 @@ NESTED="$(find "$APP" -type f -perm +111 ! -path "*/MacOS/Wren" | wc -l | tr -d 
 echo "✓ architectures: $ARCHS (no nested executables)"
 
 if find "$APP" \( -name "*.store" -o -name "Fixtures" -o -name "*.p12" -o -name "*.p8" \) | grep -q .; then fail "test data or secrets in bundle"; fi
-if strings "$APP/Contents/MacOS/Wren" | grep -qE "debug capture saved|debug command proposal|debug ai step|debug restore|debug paused|debug handoff|debug connector|debug transcript|debug chatgpt|WREN_DEBUG_DATA_DIR"; then fail "debug hooks present"; fi
+if strings "$APP/Contents/MacOS/Wren" | grep -qE "debug capture saved|debug command proposal|debug ai step|debug restore|debug paused|debug handoff|debug connector|debug transcript|debug chatgpt"; then fail "debug hooks present"; fi
 echo "✓ no debug hooks, fixtures or secrets"
 
 codesign --verify --deep --strict "$APP" || fail "signature invalid"

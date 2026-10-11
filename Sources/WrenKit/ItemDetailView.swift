@@ -14,6 +14,7 @@ struct ItemDetailView: View {
     @State private var deadlineHasTime = false
     @State private var hasReminder = false
     @State private var reminder = Date()
+    @State private var repeatChoice = RepeatChoice.never
     @State private var showHistory = false
     @State private var waitingOn = ""
     @State private var expected = ""
@@ -66,10 +67,21 @@ struct ItemDetailView: View {
                             DatePicker("", selection: $reminder, displayedComponents: [.date, .hourAndMinute])
                                 .labelsHidden().disabled(!hasReminder || item.status != .pending)
                         }
+                        GridRow {
+                            Text("Repeat")
+                            Picker("", selection: $repeatChoice) {
+                                ForEach(RepeatChoice.allCases) { Text($0.label(for: reminder)).tag($0) }
+                            }
+                            .labelsHidden().fixedSize().disabled(!hasReminder || item.status != .pending)
+                        }
                     }
                     .font(.callout)
 
-                    if hasReminder && reminder <= .now && item.status == .pending {
+                    if let rule = item.recurrence, item.status == .pending {
+                        Label("\(rule.label())\(item.nextReminderAt.map { " · next \(DueText.describe($0, hasTime: true))" } ?? "")", systemImage: "repeat")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    if hasReminder && reminder <= .now && item.status == .pending && repeatChoice == .never {
                         Text("This time has passed, so the reminder will be sent right away.").font(.caption).foregroundStyle(.orange)
                     }
 
@@ -211,8 +223,9 @@ struct ItemDetailView: View {
         hasDeadline = item.deadline != nil
         deadline = item.deadline ?? Calendar.current.startOfDay(for: .now)
         deadlineHasTime = item.deadlineHasTime
-        hasReminder = item.nextReminderAt != nil
+        hasReminder = item.nextReminderAt != nil || item.recurrence != nil
         reminder = item.nextReminderAt ?? Date().addingTimeInterval(3600)
+        repeatChoice = RepeatChoice.from(item.recurrence)
         waitingOn = item.waitingOn ?? ""
         expected = item.expectedResponse ?? ""
         hasFollowUp = item.followUpAt != nil
@@ -221,9 +234,11 @@ struct ItemDetailView: View {
 
     func save() {
         let d = hasDeadline ? (deadlineHasTime ? deadline : Calendar.current.startOfDay(for: deadline)) : nil
+        let rule = hasReminder ? repeatChoice.rule(at: reminder) : nil
         model.save(item, .init(title: title, details: details, kind: kind, priority: priority,
                                deadline: d, deadlineHasTime: hasDeadline && deadlineHasTime,
-                               nextReminderAt: item.status == .pending && hasReminder ? reminder : nil))
+                               nextReminderAt: item.status == .pending && hasReminder ? reminder : nil),
+                   repeat: item.status == .pending && rule != item.recurrence ? .some(rule) : nil)
     }
 
     static func describe(_ k: EventKind) -> String {
@@ -248,6 +263,7 @@ struct ItemDetailView: View {
         case .followUpScheduled: "Follow-up set"
         case .followedUp: "Followed up"
         case .postponementReviewed: "Reviewed after several moves"
+        case .occurrenceDone: "Done for this time (keeps repeating)"
         }
     }
 }

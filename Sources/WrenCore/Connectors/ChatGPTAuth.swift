@@ -5,7 +5,7 @@ import Security
 /// protocol (https://developers.openai.com/cookbook/articles/sign-in-with-chatgpt). Wren registers
 /// itself dynamically on first sign-in, so there is no API key, no client secret and no manually
 /// registered client. The user signs in on OpenAI's own page in their browser; Wren only ever sees
-/// the tokens OpenAI hands back, which live in the Keychain.
+/// the tokens OpenAI hands back, which are kept in a private file in Wren's data folder.
 public enum SIWC {
     public static let issuer = "https://auth.openai.com"
     public static let resource = "https://api.openai.com/v1"
@@ -20,7 +20,7 @@ public enum SIWC {
                                                   "refresh_token_invalidated", "refresh_token_reused"]
 }
 
-/// Everything Wren keeps about a ChatGPT connection, stored as one Keychain item.
+/// Everything Wren keeps about a ChatGPT connection, stored as one private file.
 public struct ChatGPTConnection: Codable, Equatable, Sendable {
     /// The client ID OpenAI issued to this copy of Wren at registration (`oaiapp_…`).
     public var clientID: String

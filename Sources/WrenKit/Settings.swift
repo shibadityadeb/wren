@@ -65,6 +65,11 @@ final class WrenSettings {
         get { d.bool(forKey: "voiceEnabled") }
         set { d.set(newValue, forKey: "voiceEnabled") }
     }
+    /// Listen for "Hey Wren" in the background (opt-in, off by default).
+    var wakeWordEnabled: Bool {
+        get { d.bool(forKey: "wakeWordEnabled") }
+        set { d.set(newValue, forKey: "wakeWordEnabled") }
+    }
     var voiceHotKey: HotKeySpec {
         get { (d.data(forKey: "voiceHotKey")).flatMap { try? JSONDecoder().decode(HotKeySpec.self, from: $0) } ?? .optionShiftSpace }
         set { d.set(try? JSONEncoder().encode(newValue), forKey: "voiceHotKey") }
@@ -95,7 +100,7 @@ final class WrenSettings {
     /// Every preference key Wren writes. "Reset preferences" removes exactly these.
     static let allKeys = ["hotKeyEnabled", "hotKey", "ollamaModel", "useModel", "dateOnlyReminderHour", "captureDraft",
                           "dailySettings", "launchAtLogin", "insightSettings", "notificationPause", "lastAutomaticBackup",
-                          "voiceEnabled", "voiceHotKey", "chatgptEnabled", "chatgptDestination", "chatgptModel", "openaiModel", "gmailCacheEnabled", "importantSenders"]
+                          "voiceEnabled", "voiceHotKey", "wakeWordEnabled", "chatgptEnabled", "chatgptDestination", "chatgptModel", "openaiModel", "gmailCacheEnabled", "importantSenders"]
 
     func resetAll() { Self.allKeys.forEach(d.removeObject(forKey:)) }
 

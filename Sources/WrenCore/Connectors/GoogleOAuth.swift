@@ -4,12 +4,11 @@ import Network
 
 /// Wren's Google OAuth client (type "Desktop app"), registered by Wren's maintainers and injected into
 /// the app bundle at build time (see `ProviderConfig`). Never entered by a user and never committed.
-/// Google treats a desktop client's secret as non-confidential, but its token endpoint still expects
-/// it for that client type.
+/// It's a public client: the installed-app flow (loopback redirect + PKCE) doesn't need a client
+/// secret (Google documents `client_secret` as optional for it), so none is shipped or sent.
 public struct GoogleOAuthConfig: Codable, Equatable, Sendable {
     public var clientID: String
-    public var clientSecret: String?
-    public init(clientID: String, clientSecret: String?) { self.clientID = clientID; self.clientSecret = clientSecret }
+    public init(clientID: String) { self.clientID = clientID }
     public var isPlausible: Bool { clientID.hasSuffix(".apps.googleusercontent.com") && clientID.count > 40 }
 }
 
@@ -143,7 +142,6 @@ public struct GoogleOAuth: Sendable {
     public func exchange(code: String, pkce: PKCE, redirect: URL, requiredScope: String) async throws -> OAuthTokens {
         var p = [("code", code), ("client_id", config.clientID), ("code_verifier", pkce.verifier),
                  ("redirect_uri", redirect.absoluteString), ("grant_type", "authorization_code")]
-        if let s = config.clientSecret, !s.isEmpty { p.append(("client_secret", s)) }
         let t = try tokens(from: try await postForm(Self.tokenURL, p), requiredScope: requiredScope, previousRefresh: nil)
         guard t.refreshToken != nil else { throw OAuthError.noRefreshToken }
         return t
@@ -152,7 +150,6 @@ public struct GoogleOAuth: Sendable {
     public func refresh(_ t: OAuthTokens) async throws -> OAuthTokens {
         guard let rt = t.refreshToken else { throw OAuthError.noRefreshToken }
         var p = [("client_id", config.clientID), ("refresh_token", rt), ("grant_type", "refresh_token")]
-        if let s = config.clientSecret, !s.isEmpty { p.append(("client_secret", s)) }
         var n = try tokens(from: try await postForm(Self.tokenURL, p), requiredScope: nil, previousRefresh: rt)
         n.account = t.account
         if n.scope.isEmpty { n.scope = t.scope }

@@ -24,6 +24,9 @@ public enum StoreError: Error, LocalizedError, Equatable {
 /// methods here so a future Action Broker has one seam to wrap.
 @MainActor
 public final class WrenStore {
+    /// Called after every successful save that changed user data (the app reconciles
+    /// scheduled notifications from it). Not called by `saveQuietly`.
+    public var onChange: (() -> Void)?
     public let container: ModelContainer
     public var context: ModelContext { container.mainContext }
     public let storeURL: URL?
@@ -33,15 +36,10 @@ public final class WrenStore {
         AuditRecord.self, PermissionGrantRecord.self, StandingRuleRecord.self, DenialRecord.self,
     ]
 
+    /// `~/Library/Application Support/Wren` (or `Wren Dev` for the development identity).
     public static var defaultDirectory: URL {
-        #if DEBUG
-        // Debug builds only: test against a throwaway folder instead of the real data.
-        if let dir = ProcessInfo.processInfo.environment["WREN_DEBUG_DATA_DIR"], dir.hasPrefix("/") {
-            return URL(fileURLWithPath: dir, isDirectory: true)
-        }
-        #endif
-        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Wren", isDirectory: true)
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(AppIdentity.dataFolderName, isDirectory: true)
     }
 
     /// - Parameter url: nil for an in-memory store (tests and previews).
@@ -69,7 +67,7 @@ public final class WrenStore {
     }
 
     /// Bumped whenever models are added or changed.
-    nonisolated public static let schemaVersion = 4
+    nonisolated public static let schemaVersion = 5
 
     public enum StartupRestore: Equatable, Sendable {
         case none
@@ -317,9 +315,10 @@ public final class WrenStore {
 
     /// Records that a reminder was handed to the notification system.
     /// Clears nextReminderAt in the same save, so a restart cannot send it twice.
-    public func markReminderSent(_ c: Commitment, now: Date = .now, note: String? = nil) throws {
+    public func markReminderSent(_ c: Commitment, now: Date = .now, note: String? = nil, calendar: Calendar = .current) throws {
         c.lastReminderAt = now
-        c.nextReminderAt = nil
+        // A repeating reminder moves on to its next occurrence; a one-off one is finished.
+        c.nextReminderAt = c.recurrence?.next(after: now, calendar: calendar)
         c.reminderFromDeadline = false
         log(c, .reminderSent, at: now, note: note)
         try save()
@@ -343,6 +342,15 @@ public final class WrenStore {
     }
 
     func save() throws {
+        do { try context.save() } catch {
+            context.rollback()
+            throw StoreError.saveFailed(error.localizedDescription)
+        }
+        onChange?()
+    }
+
+    /// Saves bookkeeping (such as scheduled notification identifiers) without notifying `onChange`.
+    func saveQuietly() throws {
         do { try context.save() } catch {
             context.rollback()
             throw StoreError.saveFailed(error.localizedDescription)

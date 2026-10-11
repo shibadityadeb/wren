@@ -19,7 +19,7 @@ public struct NotionOAuthConfig: Equatable, Sendable {
     public var redirectURI: URL { relay.appendingPathComponent("notion/callback") }
 }
 
-/// What Wren keeps (in the Keychain) after the user authorizes Wren in Notion.
+/// What Wren keeps (in its private credentials file) after the user authorizes Wren in Notion.
 public struct NotionTokens: Codable, Equatable, Sendable {
     public var accessToken: String
     public var refreshToken: String?

@@ -21,8 +21,12 @@ public enum ConnectorState: Equatable, Sendable {
     case partiallyConnected(String)
     /// Was working; the last check failed for a reason that may pass.
     case temporarilyUnavailable(String)
-    /// The provider or macOS refused access (revoked, denied).
-    case permissionDenied(String)
+    /// A permission Wren needs wasn't granted (unticked on a consent screen, or refused in macOS).
+    case missingPermissions(String)
+    /// The sign-in expired or was revoked; connecting again fixes it.
+    case reauthorizationRequired(String)
+    /// The provider's allowance for this account is used up for now.
+    case usageLimitReached(String)
     /// You disconnected it; credentials and cached data were removed.
     case disconnected
     /// Not implemented yet.
@@ -30,22 +34,25 @@ public enum ConnectorState: Equatable, Sendable {
 
     public var label: String {
         switch self {
-        case .available: "Not connected"
+        case .available: "Available to connect"
         case .setupRequired: "Setup required"
-        case .notAvailableInBuild: "Not available in this build"
+        case .notAvailableInBuild: "Maintainer setup required"
         case .connecting: "Connecting"
         case .connected: "Connected"
         case .partiallyConnected: "Partially connected"
         case .temporarilyUnavailable: "Temporarily unavailable"
-        case .permissionDenied: "Permission denied"
+        case .missingPermissions: "Missing permissions"
+        case .reauthorizationRequired: "Reauthorization required"
+        case .usageLimitReached: "Usage limit reached"
         case .disconnected: "Disconnected"
-        case .planned: "Planned"
+        case .planned: "Not implemented"
         }
     }
 
     public var detail: String? {
         switch self {
-        case let .setupRequired(s), let .notAvailableInBuild(s), let .partiallyConnected(s), let .temporarilyUnavailable(s), let .permissionDenied(s): s
+        case let .setupRequired(s), let .notAvailableInBuild(s), let .partiallyConnected(s), let .temporarilyUnavailable(s), let .missingPermissions(s),
+             let .reauthorizationRequired(s), let .usageLimitReached(s): s
         case let .connected(a): a
         default: nil
         }
@@ -61,8 +68,8 @@ public enum ConnectorState: Equatable, Sendable {
     public var bucket: Bucket {
         switch self {
         case .connected, .partiallyConnected: .connected
-        case .setupRequired, .connecting: .needsSetup
-        case .temporarilyUnavailable, .permissionDenied, .notAvailableInBuild: .unavailable
+        case .setupRequired, .connecting, .missingPermissions, .reauthorizationRequired: .needsSetup
+        case .temporarilyUnavailable, .usageLimitReached, .notAvailableInBuild: .unavailable
         case .available, .disconnected: .notConnected
         case .planned: .planned
         }
@@ -149,18 +156,19 @@ public enum ConnectorCatalog {
                              .init(name: "Import an answer, summarise it locally, propose follow-ups", implemented: true, external: false),
                              .init(name: "Use your plan from background tasks", implemented: false, external: true)],
               permissions: [.externalAI, .chatgptHandoff],
-              privacy: "You sign in on OpenAI's page in your browser; Wren never sees your password. Wren keeps your account email and the sign-in tokens in the macOS Keychain, never in its database, exports, backups, logs or on screen. Each request shows the exact text first and is sent only after you confirm. It counts against your ChatGPT plan's allowance and never switches to paid API billing. Requests are sent with storage off. Wren can't see your ChatGPT conversations, memories or custom instructions.",
-              cleanup: "Disconnecting revokes the sign-in with OpenAI and deletes the tokens from the Keychain. You can also remove Wren under ChatGPT Settings.",
+              privacy: "You sign in on OpenAI's page in your browser; Wren never sees your password. Wren keeps your account email and the sign-in tokens in a private file in Wren's data folder that only your macOS account can read, never in its database, exports, backups, logs or on screen. Each request shows the exact text first and is sent only after you confirm. It counts against your ChatGPT plan's allowance and never switches to paid API billing. Requests are sent with storage off. Wren can't see your ChatGPT conversations, memories or custom instructions.",
+              cleanup: "Disconnecting revokes the sign-in with OpenAI and deletes the tokens from this Mac. You can also remove Wren under ChatGPT Settings.",
               hosts: ["auth.openai.com", "api.openai.com", "chatgpt.com"], isPlanned: false),
         .init(id: .voice, name: "Voice", systemImage: "mic",
-              summary: "Hold a shortcut and speak. Apple's on-device speech recognition turns it into text, which goes through the same preview as typing.",
+              summary: "Say “Hey Wren” or press the voice shortcut, then say what you need, for example “remind me to call Sam tomorrow at 10 AM”. Wren shows what it heard and what it did.",
               auth: .macOSPermission(["Microphone", "Speech Recognition"]),
-              capabilities: [.init(name: "Push-to-talk recording", implemented: true, external: false),
+              capabilities: [.init(name: "“Hey Wren” wake phrase (opt-in)", implemented: true, external: false),
+                             .init(name: "Voice shortcut (default ⌥⇧ Space)", implemented: true, external: false),
                              .init(name: "On-device transcription", implemented: true, external: false),
-                             .init(name: "Always listening", implemented: false, external: false)],
+                             .init(name: "Run the spoken command (reminders, snooze, questions)", implemented: true, external: false)],
               permissions: [.microphone],
-              privacy: "Audio is recorded only while you hold the key, transcribed on this Mac (on-device mode is required; Wren refuses server recognition), and the temporary recording is deleted right after.",
-              cleanup: "Turning it off stops recording. Revoke the macOS permissions in System Settings › Privacy & Security.",
+              privacy: "Speech is recognised on this Mac (on-device mode is required; Wren refuses server recognition) and no audio is stored or sent anywhere. With “Hey Wren” on, the microphone stays open in the background and only the wake phrase starts a command; recording stops when the command ends.",
+              cleanup: "Turning it off stops listening. Quitting Wren stops the microphone. Revoke the macOS permissions in System Settings › Privacy & Security.",
               hosts: [], isPlanned: false),
         .init(id: .gmail, name: "Gmail", systemImage: "envelope",
               summary: "Read-only: search mail, flag what needs attention (requests, deadlines, bills, interviews, security alerts), summarise it, add it to the morning briefing, and suggest tasks you review first.",
@@ -171,8 +179,8 @@ public enum ConnectorCatalog {
                              .init(name: "Suggest tasks (you review them)", implemented: true, external: false),
                              .init(name: "Send, archive, delete, mark read", implemented: false, external: true)],
               permissions: [.emailRead],
-              privacy: "Read-only access. Messages are fetched on demand; by default nothing is stored on disk. Optional 7-day local cache of headers and snippets. Tokens are in the Keychain. Instructions inside emails are treated as text, never as commands.",
-              cleanup: "Disconnecting revokes Wren's access with Google, deletes the token from the Keychain and deletes any cached mail.",
+              privacy: "Read-only access. Messages are fetched on demand; by default nothing is stored on disk. Optional 7-day local cache of headers and snippets. Tokens are kept in a private file in Wren's data folder that only your macOS account can read. Instructions inside emails are treated as text, never as commands.",
+              cleanup: "Disconnecting revokes Wren's access with Google, deletes the token from this Mac and deletes any cached mail.",
               hosts: ["gmail.googleapis.com", "oauth2.googleapis.com", "accounts.google.com"], isPlanned: false),
         .init(id: .notion, name: "Notion", systemImage: "doc.text",
               summary: "Connect your Notion workspace and choose, on Notion's own screen, which pages Wren may use. Search and read those pages, include them in a request, and create a page after you confirm.",
@@ -181,8 +189,8 @@ public enum ConnectorCatalog {
                              .init(name: "Read page content", implemented: true, external: true),
                              .init(name: "Create a page (asks first)", implemented: true, external: true)],
               permissions: [.notionRead, .notionWrite],
-              privacy: "Wren sees only the pages you pick when you connect. Page content is fetched when you ask and not stored. Sign-in finishes through a small Wren service that holds Wren's Notion app secret; it passes the token to Wren and keeps nothing. The token is stored in the Keychain.",
-              cleanup: "Disconnecting revokes the token with Notion and deletes it from the Keychain.",
+              privacy: "Wren sees only the pages you pick when you connect. Page content is fetched when you ask and not stored. Sign-in finishes through a small Wren service that holds Wren's Notion app secret; it passes the token to Wren and keeps nothing. The token is kept in a private file in Wren's data folder that only your macOS account can read.",
+              cleanup: "Disconnecting revokes the token with Notion and deletes it from this Mac.",
               hosts: ["api.notion.com"], isPlanned: false),
         .init(id: .googleCalendar, name: "Google Calendar", systemImage: "calendar",
               summary: "Read-only: today's schedule, upcoming events, search, questions like “what meetings do I have tomorrow?”, events in the morning briefing, and reminders from events.",
@@ -192,8 +200,8 @@ public enum ConnectorCatalog {
                              .init(name: "Create a Wren reminder from an event", implemented: true, external: false),
                              .init(name: "Create or change events", implemented: false, external: true)],
               permissions: [.calendarRead],
-              privacy: "Read-only. Events are fetched when needed and not stored. Tokens are in the Keychain.",
-              cleanup: "Disconnecting revokes the token with Google and deletes it from the Keychain.",
+              privacy: "Read-only. Events are fetched when needed and not stored. Tokens are kept in a private file in Wren's data folder that only your macOS account can read.",
+              cleanup: "Disconnecting revokes the token with Google and deletes it from this Mac.",
               hosts: ["www.googleapis.com", "oauth2.googleapis.com", "accounts.google.com"], isPlanned: false),
         .init(id: .localFiles, name: "Local files", systemImage: "folder",
               summary: "Planned: search and summarise documents in folders you choose, through macOS's file picker. No Full Disk Access.",
