@@ -44,6 +44,7 @@ public struct Answer: Sendable, Equatable {
     public var title: String
     public var lines: [AnswerLine]
     public var basis: String
+    public init(title: String, lines: [AnswerLine], basis: String) { self.title = title; self.lines = lines; self.basis = basis }
 }
 
 /// Questions Wren can answer from its own data.

@@ -34,6 +34,15 @@ extension AppModel {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return .failed("Nothing to save.") }
         reload()
+        // "Ask ChatGPT to …" opens the delegation panel with a preview; nothing is sent from here.
+        if let h = HandoffRequest.detect(trimmed) {
+            delegationDraft = (h.task, h.depth)
+            route = .delegate
+            openMainWindow()
+            return .resolution(.answer(Answer(title: "Prepared a ChatGPT handoff", lines: [AnswerLine(h.task, recordID: nil)],
+                                              basis: "Review the exact prompt in Wren's window. Nothing has left your Mac.")))
+        }
+        if let r = await connectorAnswer(trimmed) { return .resolution(r) }
         let all = (try? store?.all()) ?? []
         let result = resolver.resolve(trimmed, items: all, goals: goals, context: conversation, now: clock.now)
         switch result {

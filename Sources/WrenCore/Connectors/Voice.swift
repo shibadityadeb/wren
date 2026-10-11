@@ -7,6 +7,7 @@ public struct Transcript: Equatable, Sendable {
     /// 0…1 when the engine reports it.
     public var confidence: Double?
     public var onDevice: Bool
+    public init(text: String, confidence: Double?, onDevice: Bool) { self.text = text; self.confidence = confidence; self.onDevice = onDevice }
 }
 
 public enum VoiceError: Error, Equatable, LocalizedError {

@@ -9,6 +9,8 @@ public struct HotKeySpec: Codable, Equatable {
     public var display: String
 
     public static let optionSpace = HotKeySpec(keyCode: UInt32(kVK_Space), carbonModifiers: UInt32(optionKey), display: "⌥ Space")
+    /// Default push-to-talk: hold ⌥⇧Space.
+    public static let optionShiftSpace = HotKeySpec(keyCode: UInt32(kVK_Space), carbonModifiers: UInt32(optionKey | shiftKey), display: "⌥⇧ Space")
 }
 
 /// User preferences, persisted in UserDefaults. Personal data never goes here.
@@ -59,9 +61,39 @@ final class WrenSettings {
         get { d.object(forKey: "lastAutomaticBackup") as? Date }
         set { d.set(newValue, forKey: "lastAutomaticBackup") }
     }
+    var voiceEnabled: Bool {
+        get { d.bool(forKey: "voiceEnabled") }
+        set { d.set(newValue, forKey: "voiceEnabled") }
+    }
+    var voiceHotKey: HotKeySpec {
+        get { (d.data(forKey: "voiceHotKey")).flatMap { try? JSONDecoder().decode(HotKeySpec.self, from: $0) } ?? .optionShiftSpace }
+        set { d.set(try? JSONEncoder().encode(newValue), forKey: "voiceHotKey") }
+    }
+    var chatgptEnabled: Bool {
+        get { d.bool(forKey: "chatgptEnabled") }
+        set { d.set(newValue, forKey: "chatgptEnabled") }
+    }
+    /// "app" (ChatGPT for Mac, if installed) or "browser".
+    var chatgptDestination: String {
+        get { d.string(forKey: "chatgptDestination") ?? "browser" }
+        set { d.set(newValue, forKey: "chatgptDestination") }
+    }
+    var openaiModel: String? {
+        get { d.string(forKey: "openaiModel") }
+        set { d.set(newValue, forKey: "openaiModel") }
+    }
+    var gmailCacheEnabled: Bool {
+        get { d.bool(forKey: "gmailCacheEnabled") }
+        set { d.set(newValue, forKey: "gmailCacheEnabled") }
+    }
+    var importantSenders: [String] {
+        get { d.stringArray(forKey: "importantSenders") ?? [] }
+        set { d.set(newValue, forKey: "importantSenders") }
+    }
     /// Every preference key Wren writes. "Reset preferences" removes exactly these.
     static let allKeys = ["hotKeyEnabled", "hotKey", "ollamaModel", "useModel", "dateOnlyReminderHour", "captureDraft",
-                          "dailySettings", "launchAtLogin", "insightSettings", "notificationPause", "lastAutomaticBackup"]
+                          "dailySettings", "launchAtLogin", "insightSettings", "notificationPause", "lastAutomaticBackup",
+                          "voiceEnabled", "voiceHotKey", "chatgptEnabled", "chatgptDestination", "openaiModel", "gmailCacheEnabled", "importantSenders"]
 
     func resetAll() { Self.allKeys.forEach(d.removeObject(forKey:)) }
 

@@ -15,6 +15,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var panel: CapturePanel!
     private let captureState = CaptureState()
     private var hotKeys: HotKeyService!
+    private var voiceKeys: HotKeyService!
+    private var voice: VoiceCapture!
+    private var voiceTimer: Timer?
     #if DEBUG
     private var debugProposal: ContextProposal?
     #endif
@@ -69,7 +72,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                         confirm: { [weak self] in self?.confirmProposal($0) },
                         choose: { [weak self] c, p in self?.chooseCandidate(c, p) },
                         saveAsNew: { [weak self] in self?.saveAsNew($0) },
-                        openAISetup: { [weak self] in self?.openAISetup() })
+                        openAISetup: { [weak self] in self?.openAISetup() },
+                        toggleVoice: { [weak self] in self?.toggleVoice() })
         }
         panel.onCancel = { [weak self] in self?.cancelCapture() }
         panel.onResign = { [weak self] in
@@ -82,6 +86,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         model.showPopover = { [weak self] in self?.openPopover() }
         model.applyHotKey = { [weak self] in self?.applyHotKey() }
         model.openMainWindow = { [weak self] in self?.popover.performClose(nil); self?.mainWindow.show() }
+        voice = VoiceCapture(permissions: model.hub.voicePermissions, recorder: SystemRecorder(), transcriber: OnDeviceTranscriber())
+        voice.onChange = { [weak self] st in self?.voiceChanged(st) }
+        voiceKeys = HotKeyService(id: 2, onPress: { [weak self] in self?.voiceDown() }, onRelease: { [weak self] in self?.voiceUp() })
+        model.applyVoiceHotKey = { [weak self] in self?.applyVoiceHotKey() }
+        model.prefillCapture = { [weak self] t in self?.captureState.text = t }
+        applyVoiceHotKey()
         applyHotKey()
         model.start()
         if !launchedAsLoginItem {
@@ -104,6 +114,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
     }
 
+    // MARK: Push-to-talk
+
+    private func applyVoiceHotKey() {
+        captureState.voiceEnabled = model.settings.voiceEnabled
+        guard model.settings.voiceEnabled else { voiceKeys.unregister(); return }
+        if let e = voiceKeys.register(model.settings.voiceHotKey) { model.banner = "Push-to-talk: " + e }
+    }
+
+    private func voiceDown() {
+        guard model.settings.voiceEnabled else { return }
+        showCapture()
+        Task { await voice.begin() }
+    }
+
+    private func voiceUp() { Task { await voice.end() } }
+
+    private func toggleVoice() {
+        if case .recording = voice.state { voiceUp() } else { Task { await voice.begin() } }
+    }
+
+    private func voiceChanged(_ st: VoiceCapture.State) {
+        voiceTimer?.invalidate()
+        switch st {
+        case .idle: captureState.recording = false; captureState.voiceStatus = nil
+        case .recording:
+            captureState.recording = true
+            captureState.voiceStatus = "Recording… release the shortcut (or Stop) when done"
+            voiceTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    if self.voice.overLimit { self.voiceUp(); self.captureState.voiceStatus = "Stopped at the 60-second limit." }
+                }
+            }
+        case .transcribing: captureState.recording = false; captureState.voiceStatus = "Transcribing on this Mac…"
+        case let .review(t):
+            captureState.recording = false
+            captureState.text = t.text
+            let low = (t.confidence ?? 1) < 0.5
+            captureState.voiceStatus = low ? "Transcribed on this Mac, but it wasn't sure. Check the text, then press Return." : "Transcribed on this Mac. Check it, then press Return."
+            _ = voice.accept()
+        case let .failed(e):
+            captureState.recording = false
+            captureState.voiceStatus = e.localizedDescription
+        }
+    }
+
     // MARK: Capture panel
 
     func showCapture() {
@@ -111,6 +167,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         captureState.text = model.settings.captureDraft
         captureState.status = ""
         captureState.aiAvailable = model.ai.usableModel != nil
+        captureState.voiceEnabled = model.settings.voiceEnabled
         captureState.presentations += 1
         panel.present()
     }
@@ -158,6 +215,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     private func cancelCapture() {
+        voice?.cancel()
         if case let .proposal(p)? = captureState.reply { model.cancelProposal(p) }
         closeCapture()
     }
@@ -313,6 +371,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 let r = await broker.submit(req, confirmation: broker.confirm(req))
                 appLog.notice("debug restore confirmed=\(r.status.rawValue, privacy: .public) \(r.message ?? "", privacy: .public)")
                 if r.status == .succeeded { model.relaunch() }
+            }
+        case "/connectors":
+            Task {
+                await model.hub.registry.refreshAll()
+                for d in ConnectorCatalog.all { appLog.notice("debug connector \(d.id.rawValue, privacy: .public): \(self.model.hub.registry.state(d.id).label, privacy: .public) \(self.model.hub.registry.state(d.id).detail ?? "", privacy: .public)") }
+                appLog.notice("debug speech auth=\(self.model.hub.voicePermissions.speech.rawValue, privacy: .public) mic=\(self.model.hub.voicePermissions.microphone.rawValue, privacy: .public) onDevice=\(OnDeviceTranscriber.availability() ?? "available", privacy: .public)")
+            }
+        case "/handoff":
+            // Debug only: same path as pressing "Copy and open ChatGPT" on the preview.
+            let task = q.first(where: { $0.name == "task" })?.value ?? "Brainstorm ten names for a personal assistant app"
+            model.hub.chatgpt.enabled = true
+            Task {
+                let draft = HandoffDraft(task: task, depth: .deep)
+                guard let r = model.newDelegation(task, destination: .chatgptHandoff, depth: .deep) else { return }
+                let err = await model.handOff(draft, record: r)
+                appLog.notice("debug handoff error=\(err ?? "none", privacy: .public) status=\(r.status.rawValue, privacy: .public) promptChars=\(r.prompt?.count ?? 0, privacy: .public)")
+            }
+        case "/chatgpt-off":
+            model.hub.chatgpt.enabled = false
+            try? model.policyStore?.setGrant(.chatgptHandoff, granted: false)
+            model.connectorsChanged()
+            appLog.notice("debug chatgpt handoff off: \(self.model.hub.chatgpt.state.label, privacy: .public)")
+        case "/transcribe":
+            // Debug only: on-device transcription of a given audio file (only if already authorized).
+            guard let path = q.first(where: { $0.name == "file" })?.value else { break }
+            guard model.hub.voicePermissions.speech == .granted else { appLog.notice("debug transcribe skipped: speech auth=\(self.model.hub.voicePermissions.speech.rawValue, privacy: .public)"); break }
+            Task {
+                do { let t = try await OnDeviceTranscriber().transcribe(URL(fileURLWithPath: path)); appLog.notice("debug transcript onDevice=\(t.onDevice, privacy: .public): \(t.text, privacy: .public)") }
+                catch { appLog.notice("debug transcribe failed: \(error.localizedDescription, privacy: .public)") }
             }
         case "/window-state":
             appLog.notice("debug window visible=\(self.mainWindow.isVisible, privacy: .public) active=\(NSApp.isActive, privacy: .public) route=\(String(describing: self.model.route), privacy: .public)")
