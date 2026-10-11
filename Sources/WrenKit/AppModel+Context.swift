@@ -30,10 +30,13 @@ extension AppModel {
     // MARK: Capture panel entry point
 
     /// A command about an existing item gets a preview or question; anything else is saved as a new capture.
-    func submitFromCapture(_ text: String) async -> CaptureReply {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    func submitFromCapture(_ text: String, channel: UserChannel = .hotkey) async -> CaptureReply {
+        // A spoken command may still start with "Hey Wren,"; it isn't part of the request.
+        let spoken = channel == .voice ? ReminderCommand.stripAddress(text) : text
+        let trimmed = spoken.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return .failed("Nothing to save.") }
         reload()
+        if let r = await reminderRequest(trimmed, channel: channel) { return r }
         // "Ask ChatGPT to …" opens the delegation panel with a preview; nothing is sent from here.
         if let h = HandoffRequest.detect(trimmed) {
             delegationDraft = (h.task, h.depth)
@@ -51,11 +54,92 @@ extension AppModel {
             if ContextResolver.mightBeCommandOrQuestion(trimmed), let r = await modelInterpretation(trimmed, all: all) { return .resolution(r) }
             return capture(trimmed, source: .hotkey) ? .saved : .failed("Couldn't save. Your text is still here.")
         case let .notFound(msg):
-            if let r = await modelInterpretation(trimmed, all: all) { return .resolution(r) }
+            // The model may only help if it found something real; an empty answer would hide the reason.
+            if let r = await modelInterpretation(trimmed, all: all) {
+                if case let .answer(a) = r, a.lines.isEmpty {} else { return .resolution(r) }
+            }
             return .resolution(.notFound(msg))
         default:
             return .resolution(result)
         }
+    }
+
+    // MARK: Reminders from words
+
+    /// "Remind me to …": an explicit request creates the reminder at once (audited, persisted, scheduled
+    /// with macOS) and says exactly what was set. A missing or ambiguous time is asked about; the
+    /// next answer completes the same request.
+    func reminderRequest(_ text: String, channel: UserChannel) async -> CaptureReply? {
+        let cal = clock.calendar, now = clock.now
+        var candidate = text
+        let isNewRequest = ReminderCommand.parse(text, now: now, calendar: cal, defaultHour: reminderHour) != nil
+        if !isNewRequest, let prefix = reminderFollowUp {
+            let looksLikeAnswer = DateParser(calendar: cal).parse(text, now: now) != nil
+                || RecurrenceRule.find(in: text, calendar: cal) != nil
+                || text.range(of: #"^\s*(a\.?m\.?|p\.?m\.?)\s*$"#, options: [.regularExpression, .caseInsensitive]) != nil
+            reminderFollowUp = nil
+            guard looksLikeAnswer else { return nil }
+            candidate = prefix + " " + text
+        }
+        // "Remind me about the dentist on Friday" may mean an item that already exists.
+        let lower = candidate.lowercased()
+        if lower.hasPrefix("remind me about ") || lower.hasPrefix("remind me of ") {
+            let r = resolver.resolve(candidate, items: (try? store?.all()) ?? [], goals: goals, context: conversation, now: now)
+            switch r {
+            case .proposal, .clarify: return .resolution(r)
+            default: break
+            }
+        }
+        guard let cmd = ReminderCommand.parse(candidate, now: now, calendar: cal, defaultHour: reminderHour) else { return nil }
+        switch cmd {
+        case let .create(title, when, explanation):
+            reminderFollowUp = nil
+            return await createReminder(text: candidate, title: title, when: when, explanation: explanation, channel: channel)
+        case let .clarify(title, question):
+            reminderFollowUp = question.hasPrefix("Is that") ? candidate : "remind me to " + title
+            return .resolution(.needsDate(question))
+        case let .past(title, message):
+            reminderFollowUp = "remind me to " + title
+            return .resolution(.needsDate(message))
+        }
+    }
+
+    func createReminder(text: String, title: String, when: ReminderWhen, explanation: String?, channel: UserChannel) async -> CaptureReply {
+        if notificationStatus == .notDetermined {
+            // First reminder: this is when macOS asks for permission, with Wren's reason in the prompt.
+            _ = await notifications.requestPermission()
+            notificationStatus = notifications.status
+        }
+        let id = UUID()
+        let source: CaptureSource = channel == .voice ? .voice : .hotkey
+        let req = ActionRequest(action: BuiltInAction.createReminder, target: TargetRef(kind: "commitment", id: id.uuidString, label: title),
+                                parameters: BuiltInAction.createReminderParameters(text: text, title: title, when: when, source: source),
+                                origin: .user(channel), createdAt: clock.now)
+        let result = await run(req)
+        guard let result, result.status == .succeeded || result.status == .unverified, let c = item(id) else {
+            return .failed(result?.message ?? "The reminder wasn't saved.")
+        }
+        noteRecent(id)
+        let report = await reconcileReminders()
+        var lines: [AnswerLine] = []
+        switch when {
+        case let .once(d): lines.append(AnswerLine(DueText.describe(d, hasTime: true, now: clock.now, calendar: clock.calendar).capitalizedFirstLetter, recordID: id))
+        case let .repeating(rule):
+            lines.append(AnswerLine(rule.label(calendar: clock.calendar) + (c.nextReminderAt.map { " · first \(DueText.describe($0, hasTime: true, now: clock.now, calendar: clock.calendar))" } ?? ""), recordID: id))
+        }
+        if let explanation { lines.append(AnswerLine(explanation, recordID: nil)) }
+        let status: String
+        if !c.scheduledNotificationIDs.isEmpty {
+            status = "Scheduled with macOS: it will appear even if Wren is closed."
+        } else if !report.authorized {
+            status = "Saved, but notifications are off for Wren, so it will only show inside Wren. Turn them on in System Settings › Notifications."
+        } else if report.paused {
+            status = "Saved. Notifications are paused; it will be included when they resume."
+        } else {
+            status = "Saved, but macOS didn't accept the notification. Wren will try again and show it in the app."
+        }
+        lines.append(AnswerLine(status, recordID: nil))
+        return .resolution(.answer(Answer(title: "Reminder set: \(title)", lines: lines, basis: "From your words: “\(text)”")))
     }
 
     /// Model-assisted understanding. Any failure falls back to the non-AI path; nothing is lost.
@@ -159,4 +243,8 @@ extension AppModel {
         settings.insights = insightSettings
         reload()
     }
+}
+
+extension String {
+    var capitalizedFirstLetter: String { prefix(1).uppercased() + dropFirst() }
 }

@@ -68,15 +68,20 @@ public enum WrenMark {
     }
 
     /// Menu-bar template image. Template images are tinted by macOS for light, dark and highlighted states.
-    public static func menuBarImage(pointSize: CGFloat = 18) -> NSImage {
+    /// `listening`: a small dot marks that Wren is listening for "Hey Wren" (or capturing).
+    public static func menuBarImage(pointSize: CGFloat = 18, listening: Bool = false) -> NSImage {
         let img = NSImage(size: NSSize(width: pointSize, height: pointSize), flipped: true) { rect in
             guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
-            var t = transform(into: rect, inset: 0.02)
+            var t = transform(into: rect, inset: listening ? 0.12 : 0.02)
             if let p = compactPath.copy(using: &t) { ctx.addPath(p); ctx.setFillColor(NSColor.black.cgColor); ctx.fillPath(using: .evenOdd) }
+            if listening {
+                let d = rect.width * 0.3
+                ctx.fillEllipse(in: CGRect(x: rect.maxX - d, y: rect.maxY - d, width: d, height: d))
+            }
             return true
         }
         img.isTemplate = true
-        img.accessibilityDescription = "Wren"
+        img.accessibilityDescription = listening ? "Wren, listening for Hey Wren" : "Wren"
         return img
     }
 }

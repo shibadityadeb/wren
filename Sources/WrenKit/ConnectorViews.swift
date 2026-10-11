@@ -33,10 +33,10 @@ struct ConnectorsView: View {
         let s = reg.summary
         return HStack(spacing: 10) {
             chip("\(s[.connected] ?? 0) connected", WrenTheme.accent)
-            chip("\(s[.needsSetup] ?? 0) need setup", .orange)
+            chip("\(s[.needsSetup] ?? 0) need your attention", .orange)
             chip("\(s[.unavailable] ?? 0) unavailable", .red)
-            chip("\(s[.notConnected] ?? 0) not connected", .secondary)
-            chip("\(s[.planned] ?? 0) planned", .secondary)
+            chip("\(s[.notConnected] ?? 0) available to connect", .secondary)
+            chip("\(s[.planned] ?? 0) not implemented", .secondary)
         }
         .font(.caption)
     }
@@ -93,6 +93,8 @@ struct ConnectorDetailView: View {
     @Bindable var model: AppModel
     let id: ConnectorID
     @State private var working = false
+    @State private var recordingVoiceKey = false
+    @State private var voiceKeyMonitor: Any?
 
     var descriptor: ConnectorDescriptor { ConnectorCatalog.descriptor(id) }
 
@@ -119,7 +121,7 @@ struct ConnectorDetailView: View {
                     }
                     Text(descriptor.summary).font(.callout).fixedSize(horizontal: false, vertical: true)
                     if descriptor.isPlanned {
-                        Notice(text: "Planned for a later version. There's nothing to connect yet.", systemImage: "clock")
+                        Notice(text: "Not implemented yet. There's nothing to connect, and Wren doesn't offer it anywhere until it works.", systemImage: "clock")
                             .clipShape(RoundedRectangle(cornerRadius: 6))
                     } else {
                         setup(state)
@@ -194,7 +196,7 @@ struct ConnectorDetailView: View {
 
     /// A provider this build doesn't include: say so plainly, with nothing for the user to configure.
     func notInBuild(_ state: ConnectorState) -> some View {
-        Notice(text: state.detail ?? "Not available in this build.", systemImage: "shippingbox")
+        Notice(text: state.detail ?? "Maintainer setup required.", systemImage: "shippingbox")
             .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 
@@ -223,7 +225,7 @@ struct ConnectorDetailView: View {
                 HStack {
                     Button(state == .connecting ? "Waiting for Google…" : (c.google.tokens == nil ? "Connect with Google" : "Reconnect")) { model.connectGoogle(c) }
                         .disabled(state == .connecting).buttonStyle(.borderedProminent).tint(WrenTheme.accent)
-                    if case .permissionDenied = state { Button("Disconnect", role: .destructive) { model.disconnect(id) } }
+                    if state.bucket == .needsSetup && state != .connecting { Button("Disconnect", role: .destructive) { model.disconnect(id) } }
                 }
             }
         }
@@ -245,7 +247,7 @@ struct ConnectorDetailView: View {
                 HStack {
                     Button(state == .connecting ? "Waiting for Notion…" : (n.notion.tokens == nil ? "Connect Notion" : "Reconnect")) { model.connectNotion() }
                         .disabled(state == .connecting).buttonStyle(.borderedProminent).tint(WrenTheme.accent)
-                    if case .permissionDenied = state { Button("Disconnect", role: .destructive) { model.disconnect(id) } }
+                    if state.bucket == .needsSetup && state != .connecting { Button("Disconnect", role: .destructive) { model.disconnect(id) } }
                 }
             }
             if let note = n.disconnectNote { Text(note).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
@@ -318,9 +320,27 @@ struct ConnectorDetailView: View {
     }
 
     @ViewBuilder func voiceSetup(_ state: ConnectorState) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Toggle("Push-to-talk (hold \(model.settings.voiceHotKey.display))", isOn: Binding(get: { model.settings.voiceEnabled }, set: { model.setVoiceEnabled($0) }))
-            Text("Hold the shortcut, speak, release. The text appears in the capture panel for you to correct before it's saved or acted on. You can also click the microphone in the capture panel.")
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle("Listen for “Hey Wren”", isOn: Binding(get: { model.settings.wakeWordEnabled }, set: { model.setWakeWord($0) }))
+            Text("Off by default. While on, Wren keeps the microphone open in the background and listens only for “Hey Wren”, on this Mac. macOS shows the orange microphone indicator, and Wren's menu-bar bird gets a dot. After it hears “Hey Wren”, Wren captures your request until you pause, then stops recording.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Toggle("Voice shortcut", isOn: Binding(get: { model.settings.voiceEnabled }, set: { model.setVoiceEnabled($0) }))
+            HStack {
+                Text(recordingVoiceKey ? "Press the new shortcut…" : model.settings.voiceHotKey.display)
+                    .font(.body.monospaced()).padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 5))
+                Button(recordingVoiceKey ? "Cancel" : "Change…") { recordingVoiceKey ? stopVoiceKeyRecording() : startVoiceKeyRecording() }
+                    .disabled(!model.settings.voiceEnabled)
+                Button("Reset") { model.setVoiceHotKey(.optionShiftSpace) }.disabled(!model.settings.voiceEnabled)
+            }
+            if let e = model.voiceHotKeyError { Text(e).font(.caption).foregroundStyle(.orange) }
+            Text("Press the shortcut, speak, and pause; or press it again to finish. It runs the same voice command as “Hey Wren”. Escape cancels.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 6) {
+                Circle().fill(voiceDotColor).frame(width: 8, height: 8)
+                Text(voiceStatusText).font(.caption)
+            }
+            Text("Everything is processed on this Mac with Apple's on-device speech recognition. Wren refuses server recognition and never sends audio anywhere. What you said is shown before and after Wren acts on it.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
                 Text("Microphone: \(model.hub.voicePermissions.microphone.rawValue)").font(.caption)
@@ -330,6 +350,42 @@ struct ConnectorDetailView: View {
             }
             .foregroundStyle(.secondary)
         }
+    }
+
+    var voiceDotColor: Color {
+        switch model.voicePhase {
+        case .listening: WrenTheme.accent
+        case .capturing: .red
+        case .failed: .orange
+        default: .secondary
+        }
+    }
+
+    var voiceStatusText: String {
+        switch model.voicePhase {
+        case .off: model.settings.wakeWordEnabled ? "Starting…" : "Not listening"
+        case .listening: "Listening for “Hey Wren”"
+        case .capturing: "Capturing a command"
+        case .handling: "Working on your command"
+        case let .failed(e): e.localizedDescription
+        }
+    }
+
+    func startVoiceKeyRecording() {
+        recordingVoiceKey = true
+        model.voiceHotKeyError = nil
+        voiceKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            if event.keyCode == 53 { stopVoiceKeyRecording(); return nil }
+            if let spec = HotKeyService.spec(from: event) { model.setVoiceHotKey(spec); stopVoiceKeyRecording() }
+            else { model.voiceHotKeyError = "Include ⌘, ⌥ or ⌃ in the shortcut." }
+            return nil
+        }
+    }
+
+    func stopVoiceKeyRecording() {
+        if let voiceKeyMonitor { NSEvent.removeMonitor(voiceKeyMonitor) }
+        voiceKeyMonitor = nil
+        recordingVoiceKey = false
     }
 }
 

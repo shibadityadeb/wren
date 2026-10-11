@@ -34,6 +34,13 @@ final class AppModel {
     @ObservationIgnored let log = Logger(subsystem: "com.shibadityadeb.wren", category: "app")
     @ObservationIgnored private var schedulerTimer: Timer?
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
+    /// Keeps macOS's scheduled reminder notifications in line with the store.
+    @ObservationIgnored var reminders: ReminderScheduler?
+    @ObservationIgnored private var reconcileTask: Task<Void, Never>?
+    /// Result of the last reconcile, for Settings and confirmations.
+    var reminderSync = ReconcileReport()
+    /// After Wren asked "When should I remind you…?", the start of the request the answer completes.
+    var reminderFollowUp: String?
     @ObservationIgnored let loginItems: LoginItemController
 
     let store: WrenStore?
@@ -84,6 +91,11 @@ final class AppModel {
     @ObservationIgnored var applyHotKey: () -> Void = {}
     @ObservationIgnored var openMainWindow: () -> Void = {}
     @ObservationIgnored var applyVoiceHotKey: () -> Void = {}
+    /// Turns "Hey Wren" on or off in the voice service (set by the app delegate).
+    @ObservationIgnored var setWakeWordInService: (Bool) async -> VoiceError? = { _ in nil }
+    /// The voice service's phase, for Settings and the menu.
+    var voicePhase: VoiceSession.Phase = .off
+    var voiceHotKeyError: String?
     /// Puts text in the capture panel for the user to review (never saves by itself).
     @ObservationIgnored var prefillCapture: ((String) -> Void)?
     @ObservationIgnored var hub: ConnectorHub!
@@ -115,6 +127,10 @@ final class AppModel {
                                insightSettings: { settingsRef.insights })
             e.pause = { settingsRef.pause }
             engine = e
+            let scheduler = ReminderScheduler(store: s, center: notifications, clock: clock, pause: { settingsRef.pause })
+            e.scheduledByMacOS = { scheduler.isScheduledByMacOS($0) }
+            reminders = scheduler
+            BuiltInAction.defaultReminderHour = { settingsRef.dateOnlyReminderHour }
         } else {
             policyStore = nil; broker = nil; engine = nil
             if s != nil { err = "Couldn't load permissions." }
@@ -131,6 +147,8 @@ final class AppModel {
         engine?.externalBriefing = { [weak self] in await self?.externalBriefing() }
         reload()
         notifications.onResponse = { [weak self] r in self?.handle(r) }
+        // Any change to stored items (from any path) re-syncs scheduled notifications shortly after.
+        store?.onChange = { [weak self] in self?.scheduleReconcile() }
         engine?.clearPause = { [weak self] in self?.settings.pause = nil; self?.pause = nil }
         registerAppActions()
         switch restoreOutcome {
@@ -164,9 +182,40 @@ final class AppModel {
         })
         for name in [Notification.Name.NSSystemClockDidChange, .NSSystemTimeZoneDidChange, .NSCalendarDayChanged] {
             observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.scheduleTick() }
+                MainActor.assumeIsolated { self?.clockOrZoneChanged() }
             })
         }
+        // Notification permission can change in System Settings while Wren runs.
+        observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.scheduleReconcile() }
+        })
+    }
+
+    /// Repeating reminders keep their wall-clock time in the new zone; then everything re-syncs.
+    func clockOrZoneChanged() {
+        var cal = Calendar.current; cal.timeZone = TimeZone.current
+        _ = try? store?.refreshRecurrences(calendar: cal, now: clock.now)
+        scheduleReconcile()
+        scheduleTick()
+    }
+
+    func scheduleReconcile() {
+        reconcileTask?.cancel()
+        reconcileTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled else { return }
+            await self?.reconcileReminders()
+        }
+    }
+
+    @discardableResult
+    func reconcileReminders() async -> ReconcileReport {
+        guard let reminders else { return ReconcileReport() }
+        let r = await reminders.reconcile()
+        reminderSync = r
+        notificationStatus = notifications.status
+        if !r.failed.isEmpty { log.error("reminder scheduling failed for \(r.failed.count, privacy: .public) request(s)") }
+        return r
     }
 
     func reload() {
@@ -192,6 +241,7 @@ final class AppModel {
     func tick() async {
         schedulerTimer?.invalidate()
         guard let engine else { return }
+        await reconcileReminders()
         let report = await engine.tick()
         notificationStatus = notifications.status
         if report.summarizedAfterPause > 0 { resumeNote = "\(report.summarizedAfterPause) reminder\(report.summarizedAfterPause == 1 ? "" : "s") came due while notifications were paused." }
@@ -271,11 +321,17 @@ final class AppModel {
         ensureNotificationPermission()
         Task { await run(request(BuiltInAction.scheduleReminder, c, .popover, ["at": time(date)])) }
     }
-    func save(_ c: Commitment, _ edit: WrenStore.Edit) {
-        if edit.nextReminderAt != nil { ensureNotificationPermission() }
+    /// `repeat`: nil leaves repeating as it is; `.some(nil)` stops it; `.some(rule)` sets it.
+    func save(_ c: Commitment, _ edit: WrenStore.Edit, repeat newRule: RecurrenceRule?? = nil) {
+        if edit.nextReminderAt != nil || newRule != nil { ensureNotificationPermission() }
         Task {
             let r = await run(request(BuiltInAction.edit, c, .popover, edit.parameters))
-            if r?.status == .succeeded { route = .list }
+            guard r?.status == .succeeded else { return }
+            if let newRule {
+                let r2 = await run(request(BuiltInAction.setRepeat, c, .popover, BuiltInAction.setRepeatParameters(newRule)))
+                guard r2?.status == .succeeded else { return }
+            }
+            route = .list
         }
     }
     /// "Leave for tomorrow": a reminder at tomorrow's briefing time. Doesn't touch the deadline.
@@ -402,7 +458,12 @@ final class AppModel {
         reload()
         func pendingItem(_ id: UUID) -> Commitment? { item(id).flatMap { $0.status == .pending ? $0 : nil } }
         switch r {
-        case let .done(id): noteRecent(id); if let c = pendingItem(id) { complete(c, via: .notificationAction) }
+        case let .done(id):
+            noteRecent(id)
+            guard let c = pendingItem(id) else { return }
+            // "Done" on a repeating reminder finishes this time; the series continues.
+            if c.recurrence != nil { Task { await run(request(BuiltInAction.completeOccurrence, c, .notificationAction)) } }
+            else { complete(c, via: .notificationAction) }
         case let .snoozeHour(id): if let c = pendingItem(id) { snooze(c, until: clock.now.addingTimeInterval(3600), via: .notificationAction) }
         case let .tomorrow(id): if let c = pendingItem(id) { leaveForTomorrow(c, via: .notificationAction) }
         case let .later(id, text):
@@ -550,5 +611,23 @@ final class AppModel {
     // MARK: Shortcut
 
     func setHotKeyEnabled(_ on: Bool) { settings.hotKeyEnabled = on; hotKeyEnabled = on; applyHotKey() }
-    func setHotKey(_ spec: HotKeySpec) { settings.hotKey = spec; hotKeyDisplay = spec.display; applyHotKey() }
+    func setHotKey(_ spec: HotKeySpec) {
+        if settings.voiceEnabled, spec == settings.voiceHotKey { hotKeyError = "\(spec.display) is already Wren's voice shortcut. Choose another."; return }
+        settings.hotKey = spec; hotKeyDisplay = spec.display; applyHotKey()
+    }
+    func setVoiceHotKey(_ spec: HotKeySpec) {
+        if hotKeyEnabled, spec == settings.hotKey { voiceHotKeyError = "\(spec.display) is already Wren's capture shortcut. Choose another."; return }
+        settings.voiceHotKey = spec; voiceHotKeyError = nil; applyVoiceHotKey(); connectorsChanged()
+    }
+    func setWakeWord(_ on: Bool) {
+        settings.wakeWordEnabled = on
+        hub.voice.wakeWord = on
+        Task {
+            if let e = await setWakeWordInService(on) {
+                settings.wakeWordEnabled = false; hub.voice.wakeWord = false
+                banner = "“Hey Wren” is off: \(e.localizedDescription)"
+            }
+            connectorsChanged()
+        }
+    }
 }

@@ -30,12 +30,21 @@ extension WrenStore {
     // MARK: Items
 
     /// Changes only the deadline. Moving it later is recorded as a postponement.
-    public func reschedule(_ c: Commitment, deadline: Date?, hasTime: Bool, now: Date = .now) throws {
+    /// Moves the deadline. If the item had a reminder, the reminder moves with it (to the new time,
+    /// or `reminderHour` on the new day when no time was given), so moving never silently drops it.
+    public func reschedule(_ c: Commitment, deadline: Date?, hasTime: Bool, reminderHour: Int = 10, calendar: Calendar = .current, now: Date = .now) throws {
         try requirePending(c, "reschedule")
+        if c.recurrence != nil { throw StoreError.invalidTransition(from: c.status, action: "move a repeating reminder (change its schedule instead)") }
         let later = Self.isLater(deadline, than: c.deadline)
+        let hadReminder = c.nextReminderAt != nil || c.reminderFromDeadline
         c.deadline = deadline
         c.deadlineHasTime = hasTime
-        if c.reminderFromDeadline { c.nextReminderAt = nil; c.reminderFromDeadline = false }
+        if hadReminder {
+            let when = deadline.flatMap { d in hasTime ? d : calendar.date(bySettingHour: reminderHour, minute: 0, second: 0, of: d) }
+            c.nextReminderAt = when.flatMap { $0 > now ? $0 : nil }
+            c.reminderFromDeadline = c.nextReminderAt != nil
+            if let w = c.nextReminderAt { log(c, .reminderScheduled, at: now, note: "moved with the deadline, \(Self.stamp(w))") }
+        }
         log(c, later ? .deadlineMoved : .edited, at: now, note: deadline.map { "deadline \(Self.stamp($0))" } ?? "deadline removed")
         try save()
     }

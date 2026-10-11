@@ -6,18 +6,22 @@ import UserNotifications
 
 private let appLog = Logger(subsystem: "com.shibadityadeb.wren", category: "app")
 
-/// Menu-bar agent: a status item with a popover, a global shortcut, and the capture panel.
+/// One regular Mac app: a Dock icon and main window, exactly one menu-bar item with a popover,
+/// a global shortcut, the capture panel, reminders and the voice service, all in this process.
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSMenuDelegate {
     private var model: AppModel!
-    private var statusItem: NSStatusItem!
+    private var statusItem: NSStatusItem?
+    /// Exclusive lock on the data folder, held for the life of the process.
+    private var dataLock: DataDirectoryLock?
     private let popover = NSPopover()
     private var panel: CapturePanel!
     private let captureState = CaptureState()
     private var hotKeys: HotKeyService!
     private var voiceKeys: HotKeyService!
-    private var voice: VoiceCapture!
+    private var voice: VoiceSession!
     private var voiceTimer: Timer?
+    private var autoClose: DispatchWorkItem?
     #if DEBUG
     private var debugProposal: ContextProposal?
     #endif
@@ -34,12 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         // One Wren at a time: a login launch plus a manual open must not run two schedulers.
         // A relaunch (to finish a restore) waits for the previous copy to quit first.
         let isRelaunch = CommandLine.arguments.contains("--relaunch")
-        var isolatedDebugData = false
-        #if DEBUG
-        // A debug build pointed at a throwaway data folder can run beside the installed copy.
-        isolatedDebugData = ProcessInfo.processInfo.environment["WREN_DEBUG_DATA_DIR"] != nil
-        #endif
-        if let id = Bundle.main.bundleIdentifier, !isolatedDebugData {
+        if let id = Bundle.main.bundleIdentifier {
             var waited: TimeInterval = 0
             while true {
                 let others = NSRunningApplication.runningApplications(withBundleIdentifier: id).contains { $0.processIdentifier != getpid() }
@@ -57,14 +56,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 break
             }
         }
+        // Whatever the bundle identifier or install location, only one process may use the data.
+        var waitedForLock: TimeInterval = 0
+        while dataLock == nil {
+            do { dataLock = try DataDirectoryLock.acquire(directory: WrenStore.defaultDirectory) } catch {
+                if isRelaunch, waitedForLock < 10 { Thread.sleep(forTimeInterval: 0.25); waitedForLock += 0.25; continue }
+                appLog.notice("data folder in use by another Wren: \(error.localizedDescription, privacy: .public); exiting")
+                if case let DataDirectoryLock.Failure.heldByAnotherProcess(pid?) = error {
+                    NSRunningApplication(processIdentifier: pid)?.activate()
+                }
+                NSApp.terminate(nil)
+                return
+            }
+        }
+        AppMenu.install(target: self)
         model = AppModel()
         mainWindow = MainWindowController(model: model)
 
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.button?.image = WrenMark.menuBarImage()
-        statusItem.button?.action = #selector(togglePopover)
-        statusItem.button?.target = self
-        statusItem.button?.setAccessibilityLabel("Wren")
+        // Exactly one status item per process, created once here and removed on quit.
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        item.button?.image = WrenMark.menuBarImage()
+        item.button?.action = #selector(statusItemClicked)
+        item.button?.target = self
+        item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        item.button?.setAccessibilityLabel("Wren")
+        statusItem = item
 
         popover.behavior = .transient
         popover.animates = false
@@ -91,14 +107,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         model.showPopover = { [weak self] in self?.openPopover() }
         model.applyHotKey = { [weak self] in self?.applyHotKey() }
         model.openMainWindow = { [weak self] in self?.popover.performClose(nil); self?.mainWindow.show() }
-        voice = VoiceCapture(permissions: model.hub.voicePermissions, recorder: SystemRecorder(), transcriber: OnDeviceTranscriber())
-        voice.onChange = { [weak self] st in self?.voiceChanged(st) }
-        voiceKeys = HotKeyService(id: 2, onPress: { [weak self] in self?.voiceDown() }, onRelease: { [weak self] in self?.voiceUp() })
+        // One voice service: "Hey Wren" and the voice shortcut feed the same capture and command path.
+        voice = VoiceSession(stream: LiveSpeechStream(), permissions: model.hub.voicePermissions)
+        // Note: nothing here touches the microphone; it opens only when "Hey Wren" or the shortcut is used.
+        voice.onPhase = { [weak self] p in self?.voicePhaseChanged(p) }
+        voice.onLiveCommand = { [weak self] t in self?.captureState.text = t }
+        voice.onCommand = { [weak self] t, trigger in self?.runVoiceCommand(t, trigger) }
+        voice.onEndedWithoutCommand = { [weak self] end in
+            self?.captureState.voiceStatus = end == .timeLimit ? "Stopped after 20 seconds." : "Didn't hear a command. Try again and say what you need."
+        }
+        voiceKeys = HotKeyService(id: 2, onPress: { [weak self] in self?.voiceShortcut() })
         model.applyVoiceHotKey = { [weak self] in self?.applyVoiceHotKey() }
+        model.setWakeWordInService = { [weak self] on in await self?.voice.setWakeWord(on) }
         model.prefillCapture = { [weak self] t in self?.captureState.text = t }
         applyVoiceHotKey()
         applyHotKey()
         model.start()
+        if model.settings.wakeWordEnabled { model.setWakeWord(true) }
         if !launchedAsLoginItem {
             mainWindow.show()
             appLog.notice("main window shown at launch")
@@ -119,50 +144,121 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
     }
 
-    // MARK: Push-to-talk
+    // MARK: Voice: "Hey Wren" and the voice shortcut
 
     private func applyVoiceHotKey() {
-        captureState.voiceEnabled = model.settings.voiceEnabled
-        guard model.settings.voiceEnabled else { voiceKeys.unregister(); return }
-        if let e = voiceKeys.register(model.settings.voiceHotKey) { model.banner = "Push-to-talk: " + e }
+        captureState.voiceEnabled = model.settings.voiceEnabled || model.settings.wakeWordEnabled
+        guard model.settings.voiceEnabled else { voiceKeys.unregister(); model.voiceHotKeyError = nil; return }
+        if model.hotKeyEnabled, model.settings.voiceHotKey == model.settings.hotKey {
+            voiceKeys.unregister()
+            model.voiceHotKeyError = "The voice shortcut is the same as the capture shortcut. Choose another."
+            return
+        }
+        model.voiceHotKeyError = voiceKeys.register(model.settings.voiceHotKey)
     }
 
-    private func voiceDown() {
+    private func voiceShortcut() {
         guard model.settings.voiceEnabled else { return }
-        showCapture()
-        Task { await voice.begin() }
+        startOrStopVoice()
     }
 
-    private func voiceUp() { Task { await voice.end() } }
-
-    private func toggleVoice() {
-        if case .recording = voice.state { voiceUp() } else { Task { await voice.begin() } }
+    /// The shortcut, the Speak button and the menu all do the same thing.
+    private func startOrStopVoice() {
+        if case .capturing = voice.phase {} else { showCapture() }
+        Task {
+            if let e = await voice.shortcut() { captureState.voiceStatus = e.localizedDescription }
+        }
     }
 
-    private func voiceChanged(_ st: VoiceCapture.State) {
-        voiceTimer?.invalidate()
-        switch st {
-        case .idle: captureState.recording = false; captureState.voiceStatus = nil
-        case .recording:
+    private func toggleVoice() { startOrStopVoice() }
+
+    private func voicePhaseChanged(_ p: VoiceSession.Phase) {
+        model.voicePhase = p
+        model.hub.voice.phase = p
+        statusItem?.button?.image = WrenMark.menuBarImage(listening: p != .off && !isFailed(p))
+        voiceTimer?.invalidate(); voiceTimer = nil
+        switch p {
+        case let .capturing(trigger):
+            autoClose?.cancel()
+            if !panel.isVisible { showCapture() }
+            captureState.reply = nil
+            captureState.text = voice.liveCommand
             captureState.recording = true
-            captureState.voiceStatus = "Recording… release the shortcut (or Stop) when done"
-            voiceTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    guard let self else { return }
-                    if self.voice.overLimit { self.voiceUp(); self.captureState.voiceStatus = "Stopped at the 60-second limit." }
-                }
+            captureState.voiceStatus = trigger == .wakeWord ? "Listening… (heard “Hey Wren”). Pause when you're done." : "Listening… Pause when you're done, or press the shortcut again."
+            voiceTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.voice.tick() }
             }
-        case .transcribing: captureState.recording = false; captureState.voiceStatus = "Transcribing on this Mac…"
-        case let .review(t):
+        case .handling:
             captureState.recording = false
-            captureState.text = t.text
-            let low = (t.confidence ?? 1) < 0.5
-            captureState.voiceStatus = low ? "Transcribed on this Mac, but it wasn't sure. Check the text, then press Return." : "Transcribed on this Mac. Check it, then press Return."
-            _ = voice.accept()
+            captureState.voiceStatus = "Transcribed on this Mac."
+        case .listening, .off:
+            captureState.recording = false
         case let .failed(e):
             captureState.recording = false
             captureState.voiceStatus = e.localizedDescription
+            appLog.notice("voice failed: \(e.localizedDescription, privacy: .public)")
         }
+        model.connectorVersion += 1
+    }
+
+    private func isFailed(_ p: VoiceSession.Phase) -> Bool { if case .failed = p { true } else { false } }
+
+    /// A finished spoken command goes through exactly the same handling as typed text, as the user.
+    private func runVoiceCommand(_ text: String, _ trigger: VoiceSession.Trigger) {
+        appLog.notice("voice command received via \(trigger.rawValue, privacy: .public) (\(text.count, privacy: .public) characters)")
+        if !panel.isVisible { showCapture() }
+        captureState.text = text
+        captureState.voiceStatus = "You said: “\(text)”"
+        captureState.busy = true
+        Task {
+            let reply = await model.submitFromCapture(text, channel: .voice)
+            captureState.busy = false
+            appLog.notice("voice command result: \(Self.describe(reply), privacy: .public)")
+            switch reply {
+            case .saved:
+                captureState.status = "Saved"
+                captureState.voiceStatus = "Saved “\(text)” as a new item."
+                closeAfter(3)
+            case let .resolution(r):
+                captureState.reply = r
+                if case .answer = r { closeAfter(12) }
+            case let .failed(m):
+                captureState.status = m
+            }
+            voice.finishedHandling()
+        }
+    }
+
+    /// Kind of result only (never the words), for diagnostics.
+    static func describe(_ r: CaptureReply) -> String {
+        switch r {
+        case .saved: return "saved as a new item"
+        case let .failed(m): return "failed: \(m)"
+        case let .resolution(res):
+            switch res {
+            case let .answer(a): return "answer: \(a.title.hasPrefix("Reminder set") ? "reminder set" : "\(a.lines.count) lines")"
+            case .proposal: return "proposal awaiting confirmation"
+            case .clarify: return "asked which item"
+            case let .needsDate(q): return "asked: \(q)"
+            case let .notFound(m): return "not found: \(m)"
+            case .notACommand: return "not a command"
+            }
+        }
+    }
+
+    /// Closes the panel after a spoken command's result has been visible for a while,
+    /// unless the user started typing or another command began.
+    private func closeAfter(_ seconds: TimeInterval) {
+        autoClose?.cancel()
+        let snapshot = captureState.text
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.captureState.text == snapshot, !self.captureState.recording else { return }
+                self.closeCapture()
+            }
+        }
+        autoClose = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: work)
     }
 
     // MARK: Capture panel
@@ -221,6 +317,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     private func cancelCapture() {
         voice?.cancel()
+        autoClose?.cancel()
         if case let .proposal(p)? = captureState.reply { model.cancelProposal(p) }
         closeCapture()
     }
@@ -231,8 +328,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.isShown ? popover.performClose(nil) : openPopover()
     }
 
+    /// Left click: the popover. Right click or Control-click: a menu with Open, Capture, Settings and Quit.
+    @objc private func statusItemClicked() {
+        let ev = NSApp.currentEvent
+        if ev?.type == .rightMouseUp || ev?.modifierFlags.contains(.control) == true {
+            popover.performClose(nil)
+            let menu = statusMenu()
+            statusItem?.menu = menu
+            statusItem?.button?.performClick(nil)
+            statusItem?.menu = nil
+        } else {
+            togglePopover()
+        }
+    }
+
+    private func statusMenu() -> NSMenu {
+        let m = NSMenu()
+        m.addItem(withTitle: "Open Wren", action: #selector(openMainWindowAction), keyEquivalent: "").target = self
+        m.addItem(withTitle: "New Capture", action: #selector(newCaptureAction), keyEquivalent: "").target = self
+        m.addItem(.separator())
+        m.addItem(withTitle: "Settings…", action: #selector(openSettingsAction), keyEquivalent: "").target = self
+        m.addItem(.separator())
+        m.addItem(withTitle: "Quit Wren", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
+        return m
+    }
+
+    @objc func openMainWindowAction() { popover.performClose(nil); mainWindow.show() }
+    @objc func newCaptureAction() { popover.performClose(nil); showCapture() }
+    @objc func openSettingsAction() { popover.performClose(nil); model.route = .settings; mainWindow.show() }
+    @objc func showAboutAction() {
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.orderFrontStandardAboutPanel(options: [.credits: NSAttributedString(string: "Local-first personal assistant. Your data stays on this Mac.")])
+    }
+
+    @objc func openHelpAction() {
+        NSWorkspace.shared.open(URL(string: "https://github.com/shibadityadeb/wren#readme")!)
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        // Quit means quit: microphone and "Hey Wren" off. Scheduled reminders stay with macOS.
+        voice?.shutdown()
+        voiceTimer?.invalidate()
+        hotKeys?.unregister()
+        voiceKeys?.unregister()
+        if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }
+        statusItem = nil
+        dataLock?.release()
+        appLog.notice("quit: status item removed, shortcuts released, data unlocked")
+    }
+
     func openPopover() {
-        guard let button = statusItem.button else { return }
+        guard let button = statusItem?.button else { return }
         model.reload()
         Task { await model.refreshAI(); model.notificationStatus = await model.notifications.refreshStatus() }
         NSApp.activate(ignoringOtherApps: true)
@@ -255,7 +401,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     // MARK: URL scheme fallback: `open wren://capture`
 
     func application(_ application: NSApplication, open urls: [URL]) {
-        for url in urls where url.scheme == "wren" {
+        for url in urls where AppIdentity.urlSchemes.contains(url.scheme ?? "") {
             switch url.host {
             case "capture": showCapture()
             case "open": mainWindow.show()
@@ -381,7 +527,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             Task {
                 await model.hub.registry.refreshAll()
                 for d in ConnectorCatalog.all { appLog.notice("debug connector \(d.id.rawValue, privacy: .public): \(self.model.hub.registry.state(d.id).label, privacy: .public) \(self.model.hub.registry.state(d.id).detail ?? "", privacy: .public)") }
-                appLog.notice("debug speech auth=\(self.model.hub.voicePermissions.speech.rawValue, privacy: .public) mic=\(self.model.hub.voicePermissions.microphone.rawValue, privacy: .public) onDevice=\(OnDeviceTranscriber.availability() ?? "available", privacy: .public)")
+                appLog.notice("debug speech auth=\(self.model.hub.voicePermissions.speech.rawValue, privacy: .public) mic=\(self.model.hub.voicePermissions.microphone.rawValue, privacy: .public) onDevice=\(LiveSpeechStream.availability() ?? "available", privacy: .public) voice=\(String(describing: self.model.voicePhase), privacy: .public)")
             }
         case "/handoff":
             // Debug only: same path as pressing "Copy and open ChatGPT" on the preview.
@@ -416,13 +562,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 await model.sendToChatGPT(HandoffDraft(task: task, depth: .normal), record: r) { _ in }
                 appLog.notice("debug chatgpt ask status=\(r.status.rawValue, privacy: .public) chars=\(r.response?.count ?? 0, privacy: .public) source=\(r.responseSource ?? "-", privacy: .public) error=\(r.error ?? "none", privacy: .public) account=\(self.model.hub.chatgpt.account.title, privacy: .public)")
             }
-        case "/transcribe":
-            // Debug only: on-device transcription of a given audio file (only if already authorized).
-            guard let path = q.first(where: { $0.name == "file" })?.value else { break }
-            guard model.hub.voicePermissions.speech == .granted else { appLog.notice("debug transcribe skipped: speech auth=\(self.model.hub.voicePermissions.speech.rawValue, privacy: .public)"); break }
+        case "/voice-command":
+            // Debug only: the step after transcription, with this text as if it had been spoken.
+            if let text = q.first(where: { $0.name == "text" })?.value { runVoiceCommand(text, .shortcut) }
+        case "/voice":
+            // Debug only: same as pressing the voice shortcut (the microphone really starts).
+            startOrStopVoice()
+        case "/wake":
+            model.setWakeWord(q.first(where: { $0.name == "on" })?.value == "1")
+        case "/reminders":
             Task {
-                do { let t = try await OnDeviceTranscriber().transcribe(URL(fileURLWithPath: path)); appLog.notice("debug transcript onDevice=\(t.onDevice, privacy: .public): \(t.text, privacy: .public)") }
-                catch { appLog.notice("debug transcribe failed: \(error.localizedDescription, privacy: .public)") }
+                let r = await model.reconcileReminders()
+                appLog.notice("debug reminders authorized=\(r.authorized, privacy: .public) scheduled=\(r.scheduled, privacy: .public) cancelled=\(r.cancelled, privacy: .public) unchanged=\(r.unchanged, privacy: .public) failed=\(r.failed.count, privacy: .public)")
+                for (id, next) in await model.notifications.pendingReminderSummary() {
+                    appLog.notice("debug pending \(id, privacy: .public) next=\(next?.description ?? "-", privacy: .public)")
+                }
             }
         case "/window-state":
             appLog.notice("debug window visible=\(self.mainWindow.isVisible, privacy: .public) active=\(NSApp.isActive, privacy: .public) route=\(String(describing: self.model.route), privacy: .public)")
@@ -480,7 +634,8 @@ public enum WrenMain {
         let d = AppDelegate()
         delegate = d
         app.delegate = d
-        app.setActivationPolicy(.accessory)
+        // A regular app: Dock icon, app menu, Cmd+Q. The menu-bar item is part of the same process.
+        app.setActivationPolicy(.regular)
         app.run()
     }
 }
