@@ -98,6 +98,10 @@ final class AppModel {
     /// The voice service's phase, for Settings and the menu.
     var voicePhase: VoiceSession.Phase = .off
     var voiceHotKeyError: String?
+    /// Why the last "Connect Google" didn't finish (cancelled, denied, timed out…).
+    var googleError: String?
+    /// Waiting for the user on Google's page.
+    var googleConnecting = false
     /// Puts text in the capture panel for the user to review (never saves by itself).
     @ObservationIgnored var prefillCapture: ((String) -> Void)?
     @ObservationIgnored var hub: ConnectorHub!

@@ -89,7 +89,7 @@ public enum ConnectorAuth: Equatable, Sendable {
         case .none: "None"
         case let .macOSPermission(p): "macOS permission: \(p.joined(separator: ", "))"
         case .chatgptSignIn: "Sign in with ChatGPT in your browser. No API key; uses your ChatGPT plan, not API billing."
-        case let .googleOAuth(s): "Sign in with Google in your browser. Read-only: \(s.map(OAuthError.plain).joined(separator: ", "))."
+        case let .googleOAuth(s): "Connect Google (one sign-in for Gmail and Calendar) on Google's own page. This part needs \(s.map(OAuthError.plain).joined(separator: ", "))."
         case .notionOAuth: "Connect Notion in your browser and choose the pages Wren may use."
         case .planned: "Not decided yet"
         }

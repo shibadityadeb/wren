@@ -149,8 +149,8 @@ Each connector shows its real state (Available to connect, Connecting, Connected
 |---|---|---|
 | ChatGPT | **Continue with ChatGPT**, sign in, approve Wren | Send requests you confirm and get the answer back, using your ChatGPT plan |
 | Voice | Turn it on; allow Microphone and Speech Recognition when macOS asks | Push-to-talk capture, transcribed on your Mac |
-| Gmail | **Connect with Google** | Read-only: search, what needs attention, morning briefing |
-| Google Calendar | **Connect with Google** | Read-only: schedule questions, briefing, reminders from events |
+| Gmail | **Connect Google** (one sign-in for both) | Read-only: search, what needs attention, morning briefing |
+| Google Calendar | **Connect Google** (same sign-in) | Read-only: schedule questions, briefing, reminders from events |
 | Notion | **Connect Notion**, pick the pages Wren may use | Search and read those pages, create a page after you confirm |
 | Local files, Apple Shortcuts | — | Planned |
 
@@ -194,18 +194,30 @@ If on-device recognition isn't installed for your language, turn on Dictation on
 
 ### Gmail and Google Calendar
 
-**Connect with Google** opens Google's sign-in page. Choose your account and approve one read-only permission. Gmail and Calendar are connected separately and each asks only for its own:
+One **Connect Google** covers both. In Connectors › Gmail or Google Calendar:
 
-| Connector | Permission (scope) |
+1. Tick what Wren may read. Wren explains each option first.
+2. Press **Connect Google**.
+3. Google's own sign-in page opens in your browser. Choose your account and review the permissions; you can untick one there too.
+4. Approve. Wren comes back to the front by itself.
+
+| Permission | What it lets Wren do |
 |---|---|
-| Gmail | Read your email: `https://www.googleapis.com/auth/gmail.readonly` |
-| Google Calendar | See your calendars: `https://www.googleapis.com/auth/calendar.readonly` |
+| Read your email, read-only (`gmail.readonly`) | Search mail, answer questions such as "anything from the recruiter?", summarise mail and suggest tasks |
+| See your calendars, read-only (`calendar.readonly`) | Read upcoming events, answer schedule questions, and add events to the briefing |
 
-Wren checks which permission Google actually granted. If you unticked it, the connector says what's missing instead of claiming to work. Wren can't send, archive, delete or mark mail, or create or change events.
+Afterwards Wren shows:
+- the Google account it's connected to;
+- which permissions Google actually granted;
+- **Add…** for a permission you skipped, plus **Reconnect** and **Disconnect Google**.
+
+Gmail or Calendar only switches on when Google granted its permission and a real read with it worked. Wren can't send, archive, delete or mark mail, or create or change events. Your Google password goes only to Google.
+
+**While Google is still reviewing Wren's app**, Google shows an "unverified app" warning. Only test accounts that Wren's maintainers added can connect, and Wren says so on the Connect Google screen.
 
 What you get: search mail ("Anything from the recruiter?"), "What needs my attention today?" (overdue Wren items + today's events + mail flagged as a request, deadline, bill, interview, security notice, Gmail-important or from your important senders), today's events and mail on the Overview, both in the morning briefing (Connectors › Gmail › "Include in the morning briefing"), "What meetings do I have tomorrow?", and "Remind me" on any event. Suggested tasks from email open in the capture panel for you to edit first.
 
-Mail is fetched when needed and **not stored** unless you turn on the 7-day cache of headers and previews. Text in an email is treated as data: it can't trigger any action. **Disconnect** revokes Wren's access with Google, removes the token from this Mac and deletes cached mail.
+Mail is fetched when needed and **not stored** unless you turn on the 7-day cache of headers and previews. Text in an email is treated as data: it can't trigger any action. **Disconnect Google** revokes Wren's access to both Gmail and Calendar at Google, removes the sign-in from this Mac and deletes cached mail.
 
 ### Notion
 

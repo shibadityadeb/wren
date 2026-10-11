@@ -9,6 +9,8 @@ final class ConnectorHub {
     let credentials: CredentialStore = FileCredentialStore.default
     let statusStore = DefaultsStatusStore()
     let registry = ConnectorRegistry()
+    /// The one Google sign-in behind Gmail and Calendar.
+    let google: GoogleAccount
     let gmail: GoogleConnector
     let calendar: GoogleConnector
     let notion: NotionConnector
@@ -20,9 +22,10 @@ final class ConnectorHub {
 
     init(settings: WrenSettings, policy: PolicyStoring?) {
         Self.removeLegacyCredentials(credentials, settings: settings)
-        gmail = GoogleConnector(.gmail, config: providers.google, store: credentials, statusStore: statusStore)
+        google = GoogleAccount(config: providers.google, store: credentials)
+        gmail = GoogleConnector(.gmail, account: google, statusStore: statusStore)
         gmail.emailCache = settings.gmailCacheEnabled ? EmailCache(directory: WrenStore.defaultDirectory) : nil
-        calendar = GoogleConnector(.googleCalendar, config: providers.google, store: credentials, statusStore: statusStore)
+        calendar = GoogleConnector(.googleCalendar, account: google, statusStore: statusStore)
         notion = NotionConnector(config: providers.notion, store: credentials, statusStore: statusStore)
         chatgpt = ChatGPTConnector(store: credentials, statusStore: statusStore, handoffEnabled: settings.chatgptHandoffEnabled,
                                    selectedModel: settings.chatgptModel, destination: { ConnectorHub.destinationName(settings) })
@@ -154,10 +157,40 @@ extension AppModel {
 
     // MARK: Connections
 
-    func connectGoogle(_ c: GoogleConnector) {
+    /// Connect Google with the chosen permissions (added to any already granted). Wren comes back to
+    /// the front when Google sends the browser back, and both features re-check with real reads.
+    func connectGoogle(scopes: [String]) {
+        guard !scopes.isEmpty else { banner = "Choose at least one permission."; return }
         Task {
-            await c.connect { NSWorkspace.shared.open($0) }
+            googleError = nil
+            googleConnecting = true
+            do { try await hub.google.connect(scopes: scopes) { NSWorkspace.shared.open($0) } }
+            catch { googleError = Self.googleProblem(error) }
+            googleConnecting = false
             NSApp.activate(ignoringOtherApps: true)
+            openMainWindow()
+            await hub.gmail.refresh(); await hub.calendar.refresh()
+            connectorsChanged()
+        }
+    }
+
+    func connectGoogle(_ c: GoogleConnector) { connectGoogle(scopes: [c.scope]) }
+
+    /// Plain words for why Connect Google didn't finish.
+    static func googleProblem(_ e: Error) -> String {
+        switch e {
+        case OAuthError.timedOut: return "Sign-in wasn't finished in Google's page, so nothing changed. Choose Connect Google to try again."
+        case OAuthError.denied: return "You chose not to allow access on Google's page, so nothing was connected."
+        case OAuthError.scopeNotGranted: return "No permission was ticked on Google's page, so nothing was connected. Connect again and tick what Wren may read."
+        case OAuthError.stateMismatch: return "The sign-in response didn't match this request, so Wren ignored it. Try again."
+        default: return (e as? LocalizedError)?.errorDescription ?? "\(e)"
+        }
+    }
+
+    func disconnectGoogle() {
+        Task {
+            await hub.gmail.disconnect()
+            await hub.calendar.refresh()
             connectorsChanged()
         }
     }

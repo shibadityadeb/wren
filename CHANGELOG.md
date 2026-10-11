@@ -4,6 +4,11 @@ Versions follow [semantic versioning](https://semver.org). The `VERSION` file is
 
 ## [Unreleased]
 
+- One **Connect Google** for Gmail and Calendar. It explains what Wren can read, opens Google's own sign-in and permission page, and brings Wren back afterwards. Wren then shows the account, the permissions Google granted, Add for a skipped permission, Reconnect, and Disconnect Google.
+- Only the features whose permission Google granted switch on, after a real read.
+- Wren says plainly when Google hasn't finished reviewing its app, and that only test accounts can connect until then.
+- Fixed: closing Google's (or ChatGPT's or Notion's) sign-in page without finishing no longer leaves Wren waiting forever.
+
 - Every input in the capture panel is classified before anything happens: save, reminder, ask ChatGPT, change an item, question about your items, general question, or something to remember. "Can you check on GPT what is quantum physics" now asks ChatGPT instead of showing an unrelated waiting-items card.
 - Asking ChatGPT happens in the panel. It shows the question, sends it with your ChatGPT plan, and streams the real answer. If you're not connected or not allowed, it shows Connect ChatGPT and keeps your question. Usage limits, network errors and retry are explained. One request at a time.
 - A question that names no assistant lets you choose: local AI, ChatGPT, or save it as a note. "Note: …" or "Save this: …" always just saves.

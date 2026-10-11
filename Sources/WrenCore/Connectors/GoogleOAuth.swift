@@ -83,7 +83,8 @@ public struct GoogleOAuth: Sendable {
         self.now = now
     }
 
-    public func authorizationURL(scopes: [String], redirect: URL, state: String, pkce: PKCE) -> URL {
+    /// `include_granted_scopes` makes a later "add Calendar" keep the Gmail permission already given.
+    public func authorizationURL(scopes: [String], redirect: URL, state: String, pkce: PKCE, loginHint: String? = nil) -> URL {
         var c = URLComponents(url: Self.authorizeURL, resolvingAgainstBaseURL: false)!
         c.queryItems = [
             .init(name: "client_id", value: config.clientID),
@@ -95,7 +96,9 @@ public struct GoogleOAuth: Sendable {
             .init(name: "state", value: state),
             .init(name: "access_type", value: "offline"),
             .init(name: "prompt", value: "consent"),
+            .init(name: "include_granted_scopes", value: "true"),
         ]
+        if let loginHint { c.queryItems?.append(.init(name: "login_hint", value: loginHint)) }
         return c.url!
     }
 
@@ -128,21 +131,25 @@ public struct GoogleOAuth: Sendable {
         }
     }
 
-    func tokens(from v: JSONValue, requiredScope: String?, previousRefresh: String?) throws -> OAuthTokens {
+    /// `anyOf`: at least one of these must have been granted (the user may untick some on Google's screen).
+    func tokens(from v: JSONValue, anyOf requested: [String], previousRefresh: String?) throws -> OAuthTokens {
         guard let access = v["access_token"]?.string else { throw ConnectorError.badResponse("no access token") }
         let scope = v["scope"]?.string ?? ""
-        if let required = requiredScope, !scope.split(separator: " ").map(String.init).contains(required) {
-            throw OAuthError.scopeNotGranted(required)
-        }
+        let granted = Set(scope.split(separator: " ").map(String.init))
+        if !requested.isEmpty, granted.isDisjoint(with: requested) { throw OAuthError.scopeNotGranted(requested[0]) }
         let expires = v["expires_in"]?.number ?? 3600
         return OAuthTokens(accessToken: access, refreshToken: v["refresh_token"]?.string ?? previousRefresh,
                            expiresAt: now().addingTimeInterval(expires), scope: scope, account: nil)
     }
 
     public func exchange(code: String, pkce: PKCE, redirect: URL, requiredScope: String) async throws -> OAuthTokens {
-        var p = [("code", code), ("client_id", config.clientID), ("code_verifier", pkce.verifier),
+        try await exchange(code: code, pkce: pkce, redirect: redirect, requestedScopes: [requiredScope])
+    }
+
+    public func exchange(code: String, pkce: PKCE, redirect: URL, requestedScopes: [String]) async throws -> OAuthTokens {
+        let p = [("code", code), ("client_id", config.clientID), ("code_verifier", pkce.verifier),
                  ("redirect_uri", redirect.absoluteString), ("grant_type", "authorization_code")]
-        let t = try tokens(from: try await postForm(Self.tokenURL, p), requiredScope: requiredScope, previousRefresh: nil)
+        let t = try tokens(from: try await postForm(Self.tokenURL, p), anyOf: requestedScopes, previousRefresh: nil)
         guard t.refreshToken != nil else { throw OAuthError.noRefreshToken }
         return t
     }
@@ -150,10 +157,19 @@ public struct GoogleOAuth: Sendable {
     public func refresh(_ t: OAuthTokens) async throws -> OAuthTokens {
         guard let rt = t.refreshToken else { throw OAuthError.noRefreshToken }
         var p = [("client_id", config.clientID), ("refresh_token", rt), ("grant_type", "refresh_token")]
-        var n = try tokens(from: try await postForm(Self.tokenURL, p), requiredScope: nil, previousRefresh: rt)
+        var n = try tokens(from: try await postForm(Self.tokenURL, p), anyOf: [], previousRefresh: rt)
         n.account = t.account
         if n.scope.isEmpty { n.scope = t.scope }
         return n
+    }
+
+    /// True when Google confirmed the revocation (or the token was already invalid).
+    public func revokeConfirmed(_ token: String) async -> Bool {
+        do {
+            let (_, resp) = try await http.raw(Self.revokeURL, method: "POST", headers: ["Content-Type": "application/x-www-form-urlencoded"],
+                                               body: Self.form([("token", token)]))
+            return resp.statusCode == 200 || resp.statusCode == 400
+        } catch { return false }
     }
 
     /// Best effort: revoking an already-invalid token is not an error.
@@ -171,9 +187,13 @@ public final class GoogleSession: @unchecked Sendable {
     /// Where an earlier development build kept a user-entered client. Only read to delete it.
     public static let legacyConfigKey = "google.oauth.client"
 
-    public init(connector: ConnectorID, store: CredentialStore) { key = "google.\(connector.rawValue).tokens"; self.store = store }
+    /// One Google sign-in shared by Gmail and Calendar.
+    public static let accountKey = "google.account.tokens"
+    public init(store: CredentialStore) { key = Self.accountKey; self.store = store }
 
     public var tokens: OAuthTokens? { store.readJSON(key, as: OAuthTokens.self) }
+    /// Scopes Google says it granted.
+    public var grantedScopes: Set<String> { Set((tokens?.scope ?? "").split(separator: " ").map(String.init)) }
     public func save(_ t: OAuthTokens) throws { try store.writeJSON(key, t) }
     public func clear() throws { try store.delete(key) }
 
@@ -200,6 +220,8 @@ public final class LoopbackReceiver: @unchecked Sendable {
     private var settled = false
     /// A callback that arrived before `waitForRedirect` started waiting.
     private var early: URL?
+    /// Set by `stop()`: a waiter is released with `timedOut` instead of hanging.
+    private var stopped = false
     public private(set) var port: UInt16 = 0
     public let path: String
     /// When set, the callback must carry exactly this `state`.
@@ -238,7 +260,9 @@ public final class LoopbackReceiver: @unchecked Sendable {
     public func waitForRedirect(timeout: TimeInterval = 300) async throws -> URL {
         try await withThrowingTaskGroup(of: URL.self) { g in
             g.addTask { try await withCheckedThrowingContinuation { c in self.queue.async {
-                if let u = self.early { self.early = nil; c.resume(returning: u) } else { self.continuation = c }
+                if let u = self.early { self.early = nil; c.resume(returning: u) }
+                else if self.stopped { c.resume(throwing: OAuthError.timedOut) }
+                else { self.continuation = c }
             } } }
             g.addTask { try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000)); throw OAuthError.timedOut }
             defer { g.cancelAll(); stop() }
@@ -246,7 +270,15 @@ public final class LoopbackReceiver: @unchecked Sendable {
         }
     }
 
-    public func stop() { listener?.cancel(); listener = nil }
+    /// Closes the listener and releases anyone still waiting (otherwise a timeout or cancel would
+    /// leave the wait hanging forever).
+    public func stop() {
+        listener?.cancel(); listener = nil
+        queue.async {
+            self.stopped = true
+            if let c = self.continuation { self.continuation = nil; c.resume(throwing: OAuthError.timedOut) }
+        }
+    }
 
     public enum Verdict: Equatable { case accept, notFound, badState }
 

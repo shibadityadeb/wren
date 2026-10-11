@@ -8,11 +8,15 @@ import Foundation
 public struct ProviderConfig: Equatable, Sendable {
     public var google: GoogleOAuthConfig?
     public var notion: NotionOAuthConfig?
+    /// Whether Google has verified Wren's app for the Gmail and Calendar permissions. Until then Google
+    /// shows an "unverified app" warning and only test accounts the maintainers added can sign in.
+    public var googleVerified = false
 
     public init(google: GoogleOAuthConfig? = nil, notion: NotionOAuthConfig? = nil) { self.google = google; self.notion = notion }
 
     public enum Key {
         public static let googleClientID = "WrenGoogleClientID"
+        public static let googleVerified = "WrenGoogleVerified"
         public static let notionClientID = "WrenNotionClientID"
         public static let notionRelay = "WrenNotionOAuthRelay"
     }
@@ -28,6 +32,7 @@ public struct ProviderConfig: Equatable, Sendable {
             let c = GoogleOAuthConfig(clientID: id)
             if c.isPlausible { out.google = c }
         }
+        out.googleVerified = value(Key.googleVerified) == "1"
         if let id = value(Key.notionClientID), let relay = value(Key.notionRelay).flatMap(URL.init(string:)) {
             let c = NotionOAuthConfig(clientID: id, relay: relay)
             if c.isPlausible { out.notion = c }
