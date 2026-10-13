@@ -1,4 +1,4 @@
-# Provider sign-in setup (maintainers only)
+# Maintainer setup: provider sign-in, releases and signing
 
 Wren's users connect their accounts by signing in on each provider's own page. They never create
 OAuth clients, copy secrets, paste API keys or tokens, or edit configuration. Everything on this page
@@ -197,3 +197,31 @@ tokens or request text.
 
 Use a separate macOS user or a backup when testing a newer build: a newer Wren upgrades the database,
 and older versions refuse to open it.
+
+## Releases
+
+1. Update `VERSION` and add a section to `CHANGELOG.md`.
+2. Commit, then tag: `git tag v0.4.0-preview.1` (prerelease) or `git tag v0.4.0` (stable), and push the tag.
+3. The **Release** workflow runs the full tests on Apple Silicon and Intel, builds the universal app, packages and verifies the DMG on both architectures, signs and notarizes when credentials exist, and publishes a GitHub Release with notes and checksums.
+
+Rules: the tag must match `VERSION`. A **stable** tag is only published if the build is signed and notarized; unsigned builds can only be published under a `-preview`/`-beta`/`-rc` tag, marked as prerelease. **Run workflow** (manual dispatch) builds a release candidate as a downloadable artifact and never publishes.
+
+Local packaging: `scripts/package-dmg.sh` (runs tests, builds universal, packages, verifies). `scripts/verify-dmg.sh <dmg>` re-checks any DMG.
+
+### Provider sign-in
+
+Google sign-in needs one app registration made by the maintainers and injected at build time. ChatGPT and Notion need none, because Wren registers itself with them. See the sections above. A build without them still works and shows Gmail and Google Calendar (direct) as "Maintainer setup required".
+
+### Signing and notarization
+
+Required for a frictionless public release. Add these **repository secrets** (Settings › Secrets and variables › Actions). Never commit them.
+
+| Secret | What |
+|---|---|
+| `MACOS_CERTIFICATE_P12_BASE64` | Your **Developer ID Application** certificate and private key, exported from Keychain Access as .p12, then `base64 -i cert.p12 \| pbcopy` |
+| `MACOS_CERTIFICATE_PASSWORD` | The password you set when exporting the .p12 |
+| `NOTARY_KEY_P8_BASE64` | An App Store Connect API key (Users and Access › Integrations › Team Keys, role Developer), the downloaded `AuthKey_XXXX.p8`, base64-encoded |
+| `NOTARY_KEY_ID` | That key's ID |
+| `NOTARY_ISSUER_ID` | The issuer ID shown above the keys list |
+
+You need a paid Apple Developer Program membership to create a Developer ID Application certificate. The workflow imports the certificate into a temporary keychain, signs with the hardened runtime and a secure timestamp (no extra entitlements are needed), submits the DMG with `notarytool`, waits, staples the ticket and verifies it with `stapler validate` and `spctl` before publishing.

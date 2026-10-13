@@ -14,6 +14,7 @@ Wren as a personal executor: explicitly started voice, honest GPT thinking and r
 - Fixed: "Move that reminder to Sunday" right after setting a reminder said no reminder had gone off yet; "that/this reminder" now means the one you were just talking about.
 - Settings › **Voice, GPT and Gmail** shows each tool's real state in one place (voice model and permissions, ChatGPT account, Google scopes) with email alert frequency, quiet hours and the morning email digest.
 - `wren-tools live-check chatgpt` reports effort and web-search evidence; new read-only `wren-tools live-check gmail`.
+- **Real testing:** `scripts/try-wren.sh` builds and opens a side-by-side Wren Dev and records a content-free diagnostic log; docs/TESTING_GUIDE.md is a 30-minute hands-on checklist with expected results. The README is now a short front page; the full reference moved to docs/USER_GUIDE.md, and release and signing setup to docs/MAINTAINER_SETUP.md.
 - Data version 7 (new GPT request fields; a backup is made before the upgrade). Wren 0.9 won't open 0.10 data.
 
 ## [0.9.0] (unreleased)
