@@ -145,6 +145,8 @@ public struct MailItem: Codable, Equatable, Sendable, Identifiable {
     /// The user dismissed Wren's alert. Gmail is unchanged.
     public var dismissedAt: Date?
     public var snoozedUntil: Date?
+    /// The user chose "Snooze alert": alert once more when the snooze ends (if still unread).
+    public var alertSnoozed: Bool?
     public var lastActionError: String?
     public var id: String { message.id }
 
@@ -233,11 +235,13 @@ public struct MailboxStore: Sendable {
         return (try? Data(contentsOf: url)).flatMap { try? d.decode(MailboxState.self, from: $0) } ?? MailboxState()
     }
 
+    /// Protected until the first login after boot, not "complete": Wren keeps checking mail while the
+    /// screen is locked, and complete protection made every save fail then (losing alert bookkeeping).
     public func save(_ s: MailboxState) throws {
         let dir = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let e = JSONEncoder(); e.dateEncodingStrategy = .iso8601
-        try e.encode(s).write(to: url, options: [.atomic, .completeFileProtection])
+        try e.encode(s).write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 
@@ -408,6 +412,14 @@ public struct MailAlertDecision: Equatable, Sendable {
 /// Decides which newly arrived messages deserve an alert: above the user's threshold, unread, not
 /// dismissed or snoozed, once per message, and once per conversation unless it became more urgent.
 public enum MailAlertPolicy {
+    /// "Snooze alert" from a notification or the message view: Wren's alert only, Gmail is unchanged.
+    public static func snooze(_ state: inout MailboxState, id: String, until: Date) {
+        guard state.items[id] != nil else { return }
+        state.items[id]?.snoozedUntil = until
+        state.items[id]?.alertSnoozed = true
+        state.items[id]?.heldForQuietHours = false
+    }
+
     public static let maxIndividual = 3
     /// Within this time, another message in an alerted conversation doesn't alert again unless more urgent.
     public static let threadQuiet: TimeInterval = 6 * 3600
@@ -418,7 +430,9 @@ public enum MailAlertPolicy {
         let inQuiet = quiet.contains(now, calendar: calendar)
         // Held messages come back once quiet hours are over.
         let held = inQuiet ? [] : state.items.values.filter(\.heldForQuietHours).map(\.id)
-        var pool = Array(Set(candidates + held))
+        // Snoozed alerts come back once their snooze ends.
+        let snoozed = state.items.values.filter { $0.alertSnoozed == true && !$0.isSnoozed(at: now) }.map(\.id)
+        var pool = Array(Set(candidates + held + snoozed))
         pool.sort { (state.items[$0]?.classification.score ?? 0) > (state.items[$1]?.classification.score ?? 0) }
         var chosen: [String] = []
         for id in pool {
@@ -427,14 +441,15 @@ public enum MailAlertPolicy {
             defer { state.items[id] = item }
             let c = item.classification.category
             guard item.message.unread, item.dismissedAt == nil, !item.isSnoozed(at: now), level.includes(c) else { continue }
-            if let prev = item.alertedCategory, !(c < prev) { continue }   // already alerted, no new evidence
-            let sameThread = state.items.values.contains {
+            let wasSnoozed = item.alertSnoozed == true
+            if !wasSnoozed, let prev = item.alertedCategory, !(c < prev) { continue }   // already alerted, no new evidence
+            let sameThread = !wasSnoozed && state.items.values.contains {
                 $0.id != id && $0.message.threadId == item.message.threadId && $0.alertedAt.map { now.timeIntervalSince($0) < threadQuiet } == true
                     && !(c < ($0.alertedCategory ?? .informational))
             }
             if sameThread { continue }
             if inQuiet { item.heldForQuietHours = true; out.held.append(id); continue }
-            item.alertedAt = now; item.alertedCategory = c
+            item.alertedAt = now; item.alertedCategory = c; item.alertSnoozed = nil
             chosen.append(id)
         }
         out.individual = Array(chosen.prefix(maxIndividual))
@@ -575,5 +590,26 @@ public enum MailCorrections {
         for (id, item) in state.items where item.message.senderAddress == s && !item.classification.corrected {
             state.items[id]?.classification = MailTriage.classify(item.message, settings: t, now: now, calendar: calendar)
         }
+    }
+}
+
+// MARK: Alert text
+
+/// The words of a new-mail alert: who, the subject, and Wren's reason. Never the body.
+public enum MailAlertText {
+    public static func make(_ item: MailItem) -> (title: String, body: String) {
+        let c = item.classification
+        let who = item.message.senderName.isEmpty ? "a sender" : item.message.senderName
+        let kind: String
+        switch c.category {
+        case .urgent, .timeSensitive: kind = "Important email"
+        case .needsResponse: kind = "Email needing a reply"
+        case .professional: kind = "Professional email"
+        case .financial: kind = "Account or payment email"
+        case .informational: kind = "Email"
+        }
+        let subject = item.message.subject.trimmingCharacters(in: .whitespacesAndNewlines)
+        let why = c.reasons.first.map { "Why: \($0)" } ?? c.category.label
+        return ("\(kind) from \(who)", (subject.isEmpty ? "(no subject)" : "“\(subject)”") + "\n" + why)
     }
 }

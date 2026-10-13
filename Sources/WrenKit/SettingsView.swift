@@ -50,6 +50,10 @@ struct SettingsView: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
 
+                    section("Voice, GPT and Gmail") {
+                        ExecutorSettings(model: model)
+                    }
+
                     section("Startup") {
                         Toggle("Open Wren when I log in", isOn: Binding(get: { model.settings.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
                         HStack {
@@ -57,7 +61,7 @@ struct SettingsView: View {
                             Spacer()
                             Button("Login Items…") { SystemLoginItemService.openSystemSettings() }.controlSize(.small)
                         }
-                        Text("Closing Wren's window keeps it running in the menu bar, so “Hey Wren”, the shortcuts, the briefing and the check-in keep working. Quit with ⌘Q or Wren › Quit Wren to stop everything, including the microphone. Reminders are scheduled with macOS, so they still arrive after you quit.")
+                        Text("Closing Wren's window keeps it running in the menu bar, so the shortcuts, the Voice button, email checks, the briefing and the check-in keep working. Quit with ⌘Q or Wren › Quit Wren to stop everything: any recording, email checks and running work. Reminders are scheduled with macOS, so they still arrive after you quit.")
                             .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
 
@@ -172,6 +176,9 @@ struct SettingsView: View {
                                 }
                             }
                         }
+                        Toggle("Play notification sounds", isOn: Binding(get: { model.settings.notificationSounds }, set: { model.settings.notificationSounds = $0; model.connectorsChanged() }))
+                        Text("Applies to reminders, GPT results, email alerts and digests. Reminders macOS already has keep the setting they were scheduled with until they're next rescheduled.")
+                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         Stepper("Date-only deadlines remind at \(reminderHour):00", value: $reminderHour, in: 6...21)
                             .onChange(of: reminderHour) { model.settings.dateOnlyReminderHour = reminderHour }
                         Text(reminderSyncText).font(.caption).foregroundStyle(model.reminderSync.authorized && model.reminderSync.failed.isEmpty ? Color.secondary : Color.orange)
@@ -347,6 +354,58 @@ struct ResetControls: View {
             }
             Text("Wren can't reliably tell test entries from real ones, so it doesn't offer a one-click “clear test data”. Drop or archive those items individually.")
                 .font(.caption2).foregroundStyle(.tertiary)
+        }
+    }
+}
+
+/// One place to see and change how Wren's tools are set up: voice, the ChatGPT plan, Google and
+/// email alerts. Every state shown comes from the connector's real result, not a guess.
+struct ExecutorSettings: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        let _ = model.connectorVersion
+        let speech = LocalSpeechModel.status()
+        VStack(alignment: .leading, spacing: 10) {
+            row("Voice", detail: model.settings.voiceEnabled ? "Shortcut \(model.settings.voiceHotKey.display) · Voice button in the panel and popover" : "Shortcut off · Voice button in the panel and popover",
+                state: speech.isReady ? "Ready" : speech.label, ok: speech.isReady, open: .voice)
+            Text("Microphone: \(model.hub.voicePermissions.microphone.rawValue) · Speech recognition: \(model.hub.voicePermissions.speech.rawValue) · Model: \(speech.label). Wren never listens in the background; there's no setting for that.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            let gpt = model.hub.chatgpt.state
+            row("ChatGPT", detail: model.hub.chatgpt.email.map { "Signed in as \($0)" } ?? "Sign in with ChatGPT; uses your plan's allowance, never an API key",
+                state: gpt.label, ok: gpt.isUsable, open: .chatgpt)
+            if let d = gpt.detail { Text(d).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+            let google = model.hub.gmail.state
+            row("Google", detail: scopesText, state: google.label, ok: google.isUsable, open: .gmail)
+            if model.gmailUsable {
+                DisclosureGroup("Email alerts, quiet hours and morning email digest") { MailSettingsView(model: model).padding(.top, 4) }
+                    .font(.callout)
+            } else {
+                Text("Email alerts, quiet hours and the morning email digest appear here once Google is connected.").font(.caption).foregroundStyle(.secondary)
+            }
+            Text("Notion and Slack are listed under Connectors as coming soon; they aren't implemented yet.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    var scopesText: String {
+        let g = model.hub.google
+        guard !g.grantedScopes.isEmpty else { return "Not connected" }
+        var parts: [String] = []
+        if g.canReadMail { parts.append(g.canMarkRead ? "Gmail: read and Mark as read" : "Gmail: read-only") }
+        if g.grantedScopes.contains(ConnectorCatalog.calendarScope) { parts.append("Calendar: read-only") }
+        return parts.joined(separator: " · ")
+    }
+
+    func row(_ name: String, detail: String, state: String, ok: Bool, open: ConnectorID) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name).font(.callout.weight(.medium))
+                Text(detail).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text(state).font(.caption.weight(.semibold)).foregroundStyle(ok ? WrenTheme.accent : .orange)
+            Button("Manage…") { model.route = .connector(open) }.controlSize(.small)
         }
     }
 }

@@ -16,10 +16,11 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Wre
         case openBriefing = "WREN_OPEN_BRIEFING", review = "WREN_REVIEW", dismissCheckIn = "WREN_DISMISS_CHECKIN"
         case viewResult = "WREN_VIEW_RESULT"
         case openMail = "WREN_OPEN_MAIL", markRead = "WREN_MARK_READ", dismissMail = "WREN_DISMISS_MAIL", openDigest = "WREN_OPEN_DIGEST"
+        case snoozeMail = "WREN_SNOOZE_MAIL"
     }
 
     /// What a click on a mail alert asked for. Mark as read is only offered when Google granted it.
-    enum MailResponse: Equatable { case open(String), markRead(String), dismiss(String), openDigest(String) }
+    enum MailResponse: Equatable { case open(String), markRead(String), dismiss(String), snooze(String), openDigest(String) }
 
     enum Response {
         case done(UUID), snoozeHour(UUID), later(UUID, String), tomorrow(UUID), open(UUID)
@@ -32,6 +33,9 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Wre
     private var center: UNUserNotificationCenter { UNUserNotificationCenter.current() }
     private let log = Logger(subsystem: "com.shibadityadeb.wren", category: "notifications")
     var onResponse: ((Response) -> Void)?
+    /// The Notification sounds preference. Off: banners stay, sounds don't play.
+    var soundsEnabled: () -> Bool = { true }
+    private var sound: UNNotificationSound? { soundsEnabled() ? .default : nil }
     private(set) var status: UNAuthorizationStatus = .notDetermined
 
     /// Registers the delegate and action buttons. Called once by the running app.
@@ -45,7 +49,8 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Wre
         let open = UNNotificationAction(identifier: Action.openBriefing.rawValue, title: "Open briefing", options: [.foreground])
         let review = UNNotificationAction(identifier: Action.review.rawValue, title: "Review", options: [.foreground])
         let dismiss = UNNotificationAction(identifier: Action.dismissCheckIn.rawValue, title: "Dismiss for today")
-        let openMail = UNNotificationAction(identifier: Action.openMail.rawValue, title: "Open in Wren", options: [.foreground])
+        let openMail = UNNotificationAction(identifier: Action.openMail.rawValue, title: "Open email", options: [.foreground])
+        let snoozeMail = UNNotificationAction(identifier: Action.snoozeMail.rawValue, title: "Snooze alert for 1 hour")
         let markRead = UNNotificationAction(identifier: Action.markRead.rawValue, title: "Mark as read in Gmail")
         let dismissMail = UNNotificationAction(identifier: Action.dismissMail.rawValue, title: "Dismiss alert")
         center.setNotificationCategories([
@@ -55,8 +60,8 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Wre
             UNNotificationCategory(identifier: Category.checkInItem.rawValue, actions: [done, tomorrow, later, dismiss], intentIdentifiers: []),
             UNNotificationCategory(identifier: Category.delegation.rawValue,
                                    actions: [UNNotificationAction(identifier: Action.viewResult.rawValue, title: "View result", options: [.foreground])], intentIdentifiers: []),
-            UNNotificationCategory(identifier: Category.mail.rawValue, actions: [openMail, dismissMail], intentIdentifiers: []),
-            UNNotificationCategory(identifier: Category.mailWithRead.rawValue, actions: [openMail, markRead, dismissMail], intentIdentifiers: []),
+            UNNotificationCategory(identifier: Category.mail.rawValue, actions: [openMail, snoozeMail, dismissMail], intentIdentifiers: []),
+            UNNotificationCategory(identifier: Category.mailWithRead.rawValue, actions: [openMail, markRead, snoozeMail, dismissMail], intentIdentifiers: []),
             UNNotificationCategory(identifier: Category.digest.rawValue,
                                    actions: [UNNotificationAction(identifier: Action.openDigest.rawValue, title: "Open digest", options: [.foreground])], intentIdentifiers: []),
         ])
@@ -90,7 +95,7 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Wre
         let content = UNMutableNotificationContent()
         content.title = p.title
         content.body = p.body
-        content.sound = .default
+        content.sound = sound
         content.categoryIdentifier = Category.reminder.rawValue
         content.userInfo = ["commitmentID": p.id.uuidString]
         content.threadIdentifier = "reminders"
@@ -102,7 +107,7 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Wre
         let content = UNMutableNotificationContent()
         content.title = b.title
         content.body = b.notificationBody
-        content.sound = .default
+        content.sound = sound
         content.categoryIdentifier = Category.briefing.rawValue
         content.userInfo = ["kind": "briefing", "day": b.day]
         content.threadIdentifier = "daily"
@@ -113,7 +118,7 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Wre
         let content = UNMutableNotificationContent()
         content.title = c.title
         content.body = c.notificationBody
-        content.sound = .default
+        content.sound = sound
         content.threadIdentifier = "daily"
         if let item = c.singleItem {
             content.categoryIdentifier = Category.checkInItem.rawValue
@@ -131,7 +136,7 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Wre
         content.title = "While notifications were paused"
         let names = items.prefix(3).map { "“\($0.title)”" }.joined(separator: ", ")
         content.body = items.count == 1 ? "\(names) came due." : "\(items.count) reminders came due, including \(names). Open Wren to review."
-        content.sound = .default
+        content.sound = sound
         content.userInfo = ["kind": "pauseSummary"]
         content.threadIdentifier = "reminders"
         return await add("pause-summary-\(Int(Date().timeIntervalSince1970))", content)
@@ -142,12 +147,12 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Wre
         let content = UNMutableNotificationContent()
         let q = String(r.task.prefix(90)) + (r.task.count > 90 ? "…" : "")
         switch r.status {
-        case .completed: content.title = "GPT finished: \(q)"; content.body = "View result."
+        case .completed: content.title = "GPT has finished"; content.body = DelegationText.notificationLine(r)
         case .partial: content.title = "GPT stopped early: \(q)"; content.body = "Part of the answer was kept. View result or retry."
         case .cancelled: content.title = "GPT request cancelled: \(q)"; content.body = "View request."
         default: content.title = "GPT request failed: \(q)"; content.body = (r.error.map { String($0.prefix(140)) } ?? "View details.") + (r.canRetry ? " You can retry it." : "")
         }
-        content.sound = .default
+        content.sound = sound
         content.categoryIdentifier = Category.delegation.rawValue
         content.userInfo = ["kind": "delegation", "delegationID": r.id.uuidString]
         content.threadIdentifier = "delegations"
@@ -157,7 +162,7 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Wre
     /// One new-mail alert: sender, subject and Wren's reason (never the body).
     func deliverMailAlert(id: String, title: String, body: String, canMarkRead: Bool) async -> Bool {
         let content = UNMutableNotificationContent()
-        content.title = title; content.body = body; content.sound = .default
+        content.title = title; content.body = body; content.sound = sound
         content.categoryIdentifier = (canMarkRead ? Category.mailWithRead : Category.mail).rawValue
         content.userInfo = ["kind": "mail", "messageID": id]
         content.threadIdentifier = "mail"
@@ -166,7 +171,7 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Wre
 
     func deliverDigest(key: String, title: String, body: String) async -> Bool {
         let content = UNMutableNotificationContent()
-        content.title = title; content.body = body; content.sound = .default
+        content.title = title; content.body = body; content.sound = sound
         content.categoryIdentifier = Category.digest.rawValue
         content.userInfo = ["kind": "digest", "digestKey": key]
         content.threadIdentifier = "daily"
@@ -196,7 +201,7 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Wre
         let content = UNMutableNotificationContent()
         content.title = r.title
         content.body = r.body
-        content.sound = .default
+        content.sound = sound
         content.categoryIdentifier = Category.reminder.rawValue
         content.userInfo = ["commitmentID": r.commitmentID.uuidString]
         content.threadIdentifier = "reminders"
@@ -261,6 +266,7 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Wre
                 switch actionID {
                 case Action.markRead.rawValue: onResponse?(.mail(.markRead(messageID)))
                 case Action.dismissMail.rawValue: onResponse?(.mail(.dismiss(messageID)))
+                case Action.snoozeMail.rawValue: onResponse?(.mail(.snooze(messageID)))
                 case Action.openMail.rawValue, UNNotificationDefaultActionIdentifier: onResponse?(.mail(.open(messageID)))
                 default: break
                 }

@@ -425,3 +425,38 @@ final class MailIntelligenceTests: XCTestCase {
         XCTAssertNil(ProviderConfig.from(["WrenGoogleClientID": String(repeating: "1", count: 30) + ".apps.googleusercontent.com"]).google?.clientSecret)
     }
 }
+
+extension MailIntelligenceTests {
+    func testSnoozedAlertComesBackOnceAfterTheSnoozeEnds() {
+        let urgent = mail("u", from: "Sam Lee <sam@acme.com>", subject: "Proposal confirmation requested today", snippet: "Please confirm by 5pm")
+        var s = state(with: [urgent])
+        let off = QuietHours(enabled: false)
+        XCTAssertEqual(MailAlertPolicy.decide(&s, candidates: ["u"], level: .important, quiet: off, now: now, calendar: cal).individual, ["u"])
+        MailAlertPolicy.snooze(&s, id: "u", until: now.addingTimeInterval(3600))
+        XCTAssertTrue(MailAlertPolicy.decide(&s, candidates: [], level: .important, quiet: off, now: now.addingTimeInterval(1800), calendar: cal).individual.isEmpty, "still snoozed")
+        XCTAssertEqual(MailAlertPolicy.decide(&s, candidates: [], level: .important, quiet: off, now: now.addingTimeInterval(3700), calendar: cal).individual, ["u"], "back after the snooze")
+        XCTAssertTrue(MailAlertPolicy.decide(&s, candidates: [], level: .important, quiet: off, now: now.addingTimeInterval(4000), calendar: cal).individual.isEmpty, "once, not every check")
+        // Read in the meantime: no alert.
+        MailAlertPolicy.snooze(&s, id: "u", until: now.addingTimeInterval(5000))
+        s.items["u"]?.message.labels = ["INBOX"]
+        XCTAssertTrue(MailAlertPolicy.decide(&s, candidates: [], level: .important, quiet: off, now: now.addingTimeInterval(6000), calendar: cal).individual.isEmpty)
+    }
+
+    func testAlertTextNamesTheSenderSubjectAndReasonButNeverTheBody() {
+        let m = mail("u", from: "Sam Lee <sam@acme.com>", subject: "Proposal confirmation requested today", snippet: "SECRET body text: please confirm by 5pm")
+        let item = MailItem(message: m, classification: classify(m), firstSeenAt: now, baseline: false)
+        let t = MailAlertText.make(item)
+        XCTAssertEqual(t.title, "Important email from Sam Lee")
+        XCTAssertTrue(t.body.contains("Proposal confirmation requested today"))
+        XCTAssertTrue(t.body.contains("Why:"))
+        XCTAssertFalse(t.body.contains("SECRET"))
+    }
+
+    func testOlderMailboxFilesWithoutTheSnoozeFieldStillLoad() throws {
+        var s = state(with: [mail("u", subject: "Security alert", snippet: "New sign-in")])
+        s.items["u"]?.alertSnoozed = nil
+        let data = try JSONEncoder().encode(s)
+        XCTAssertFalse(String(decoding: data, as: UTF8.self).contains("alertSnoozed"))
+        XCTAssertNoThrow(try JSONDecoder().decode(MailboxState.self, from: data))
+    }
+}

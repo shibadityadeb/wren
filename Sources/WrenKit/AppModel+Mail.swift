@@ -93,9 +93,8 @@ extension AppModel {
         for id in d.individual {
             guard let item = mailbox.items[id] else { continue }
             let c = item.classification
-            _ = await notifications.deliverMailAlert(id: id, title: "\(c.category.shortLabel): \(item.message.senderName)",
-                                                     body: "\(item.message.subject)\nWhy: \(c.reasons.first ?? c.category.label)",
-                                                     canMarkRead: canMarkRead)
+            let n = MailAlertText.make(item)
+            _ = await notifications.deliverMailAlert(id: id, title: n.title, body: n.body, canMarkRead: canMarkRead)
         }
         if !d.summarized.isEmpty {
             _ = await notifications.deliverMailAlert(id: "summary-\(Int(clock.now.timeIntervalSince1970))",
@@ -133,6 +132,7 @@ extension AppModel {
         case let .open(id): openMail(id)
         case let .markRead(id): Task { await markRead(id) }
         case let .dismiss(id): dismissMailAlert(id)
+        case let .snooze(id): snoozeMail(id, hours: 1)
         case .openDigest: route = .inbox; openMainWindow()
         }
     }
@@ -150,8 +150,12 @@ extension AppModel {
     }
 
     func snoozeMail(_ id: String, hours: Double) {
-        mailbox.items[id]?.snoozedUntil = clock.now.addingTimeInterval(hours * 3600)
+        MailAlertPolicy.snooze(&mailbox, id: id, until: clock.now.addingTimeInterval(hours * 3600))
         notifications.withdrawMailAlert(id: id)
+        // Check again when the snooze ends, so the alert comes back on time even between polls.
+        DispatchQueue.main.asyncAfter(deadline: .now() + hours * 3600 + 1) { [weak self] in
+            MainActor.assumeIsolated { guard let self else { return }; Task { await self.deliverMailAlerts(newIDs: []); self.saveMailbox() } }
+        }
         saveMailbox()
     }
 

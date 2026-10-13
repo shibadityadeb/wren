@@ -28,51 +28,27 @@ final class SystemVoicePermissions: VoicePermissions {
     var hasMicrophone: Bool { AVCaptureDevice.default(for: .audio) != nil }
 }
 
-/// The audio thread's side of `LiveSpeechStream`: loudness, the voice-activity gate, a short
-/// pre-roll so the start of "Hey Wren" isn't cut off, and the request buffers are fed to. Locked,
-/// because the tap runs on Core Audio's thread.
+/// The audio thread's side of `LiveSpeechStream`: loudness for the recording indicator, and the
+/// recognition request buffers are fed to. Locked, because the tap runs on Core Audio's thread.
+/// Audio is passed straight to the on-device recogniser and never kept or written anywhere.
 final class AudioTapState: @unchecked Sendable {
     private let lock = NSLock()
-    private var gate = VoiceActivityGate()
-    private var gated = true
     private var request: SFSpeechAudioBufferRecognitionRequest?
-    private var preroll: [AVAudioPCMBuffer] = []
-    private var prerollFrames: AVAudioFrameCount = 0
-    private var prerollLimit: AVAudioFrameCount = 19_200
     private var lastLevelSent: TimeInterval = 0
     private let started = Date()
 
-    func reset(gated: Bool, sampleRate: Double) {
-        lock.withLock {
-            gate = VoiceActivityGate(); self.gated = gated; request = nil; preroll = []; prerollFrames = 0
-            prerollLimit = AVAudioFrameCount(sampleRate * 0.8)
-        }
-    }
-    func setGated(_ on: Bool) { lock.withLock { gated = on } }
-    func attach(_ r: SFSpeechAudioBufferRecognitionRequest) {
-        lock.withLock { preroll.forEach(r.append); preroll = []; prerollFrames = 0; request = r }
-    }
+    func attach(_ r: SFSpeechAudioBufferRecognitionRequest) { lock.withLock { request = r } }
     func detach() -> SFSpeechAudioBufferRecognitionRequest? { lock.withLock { defer { request = nil }; return request } }
 
-    struct Result { var event: VoiceActivityGate.Event?; var level: Float?; var db: Float }
-
-    /// Called for every microphone buffer.
-    func process(_ buffer: AVAudioPCMBuffer) -> Result {
+    /// Called for every microphone buffer. Returns a loudness level about 20 times a second.
+    func process(_ buffer: AVAudioPCMBuffer) -> Float? {
         let db = Self.level(buffer)
         let t = Date().timeIntervalSince(started)
         return lock.withLock {
-            var event: VoiceActivityGate.Event?
-            let e = gate.feed(level: db, at: t)
-            // While capturing a command the gate never closes; only idle listening is gated.
-            if gated { event = e }
-            if let request { request.append(buffer) }
-            else if let copy = Self.copy(buffer) {
-                preroll.append(copy); prerollFrames += copy.frameLength
-                while prerollFrames > prerollLimit, let first = preroll.first { prerollFrames -= first.frameLength; preroll.removeFirst() }
-            }
-            var level: Float?
-            if t - lastLevelSent >= 0.05 { lastLevelSent = t; level = min(1, max(0, (db + 60) / 50)) }
-            return Result(event: event, level: level, db: db)
+            request?.append(buffer)
+            guard t - lastLevelSent >= 0.05 else { return nil }
+            lastLevelSent = t
+            return min(1, max(0, (db + 60) / 50))
         }
     }
 
@@ -84,53 +60,71 @@ final class AudioTapState: @unchecked Sendable {
         let rms = (sum / Float(n)).squareRoot()
         return rms > 0 ? max(-90, 20 * log10(rms)) : -90
     }
+}
 
-    static func copy(_ b: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
-        guard let src = b.floatChannelData, let out = AVAudioPCMBuffer(pcmFormat: b.format, frameCapacity: b.frameLength),
-              let dst = out.floatChannelData else { return nil }
-        out.frameLength = b.frameLength
-        for c in 0..<Int(b.format.channelCount) { dst[c].update(from: src[c], count: Int(b.frameLength)) }
-        return out
+/// Whether this Mac can transcribe speech locally for the current language. The speech model is
+/// Apple's on-device model, installed and updated by macOS (System Settings › Keyboard › Dictation);
+/// Wren doesn't download, bundle or delete a model of its own and never uses server recognition.
+enum LocalSpeechModel {
+    enum Status: Equatable {
+        case ready(String)
+        case notInstalled(String)
+        case unsupportedLanguage(String)
+        case temporarilyUnavailable
+
+        var label: String {
+            switch self {
+            case let .ready(l): "Installed: Apple on-device speech (\(l))"
+            case let .notInstalled(l): "Not installed for \(l)"
+            case let .unsupportedLanguage(l): "No on-device model for \(l)"
+            case .temporarilyUnavailable: "Temporarily unavailable"
+            }
+        }
+        var isReady: Bool { if case .ready = self { true } else { false } }
     }
+
+    static func status(locale: Locale = .current) -> Status {
+        let l = locale.identifier
+        guard let r = SFSpeechRecognizer(locale: locale) else { return .unsupportedLanguage(l) }
+        guard r.supportsOnDeviceRecognition else { return .notInstalled(l) }
+        return r.isAvailable ? .ready(l) : .temporarilyUnavailable
+    }
+
+    static let dictationSettingsURL = URL(string: "x-apple.systempreferences:com.apple.Keyboard-Settings.extension")!
 }
 
 /// Live microphone audio into Apple's speech recogniser, on-device only (`requiresOnDeviceRecognition`):
 /// audio never leaves the Mac, and Wren refuses to run if the on-device model isn't installed.
-///
-/// Two modes. Capturing a command (`wakeListening == false`): recognition runs from `start()` until
-/// `stop()`. Waiting for "Hey Wren" (`wakeListening == true`): the microphone is open (macOS shows its
-/// indicator, which no app can avoid while listening for a phrase), but only loudness is measured;
-/// speech recognition starts when someone speaks and stops after a few seconds of quiet. Silence and
-/// background noise are never transcribed, and nothing is stored.
+/// Recognition runs from `start()` until `stop()`; the microphone is closed at every other time.
 @MainActor
 final class LiveSpeechStream: SpeechStreaming {
     var onTranscript: ((String) -> Void)?
     var onEnded: ((VoiceError?) -> Void)?
-    /// Input loudness 0…1, about 20 times a second (for the listening animation).
+    /// Input loudness 0…1, about 20 times a second (for the recording indicator).
     var onLevel: ((Float) -> Void)?
     private(set) var isRunning = false
-    var wakeListening = false { didSet { tap.setGated(wakeListening) } }
-    private let engine = AVAudioEngine()
+    /// Replaced on every start: after a device or sample-rate change the old engine keeps a stale
+    /// input format, and installing a tap with it raises an Objective-C exception that ends the app.
+    private var engine = AVAudioEngine()
     private let tap = AudioTapState()
     private var recognizer: SFSpeechRecognizer?
     private var task: SFSpeechRecognitionTask?
     private var generation = 0
-    private var burst = 0
     private var startedAt = Date.distantPast
     private var configObserver: NSObjectProtocol?
     /// Only touch the input node after it was set up: merely reading `inputNode` opens the audio
     /// input (and can make macOS ask for the microphone), which must never happen just by quitting.
     private var tapInstalled = false
     var locale: Locale = .current
-    /// For diagnostics: how many recognition bursts ran while waiting for "Hey Wren".
-    private(set) var gatedBursts = 0
 
     static func availability(locale: Locale = .current) -> String? {
-        guard let r = SFSpeechRecognizer(locale: locale) else { return "Speech recognition doesn't support \(locale.identifier)." }
-        guard r.supportsOnDeviceRecognition else {
+        switch LocalSpeechModel.status(locale: locale) {
+        case .ready: return nil
+        case .unsupportedLanguage: return "Speech recognition doesn't support \(locale.identifier)."
+        case .notInstalled:
             return "On-device recognition isn't installed for \(locale.identifier). Turn on Dictation in System Settings › Keyboard once so macOS downloads it."
+        case .temporarilyUnavailable: return "Speech recognition is temporarily unavailable."
         }
-        return r.isAvailable ? nil : "Speech recognition is temporarily unavailable."
     }
 
     func start() throws {
@@ -138,26 +132,24 @@ final class LiveSpeechStream: SpeechStreaming {
         guard let r = SFSpeechRecognizer(locale: locale), r.supportsOnDeviceRecognition else { throw VoiceError.onDeviceUnavailable(locale.identifier) }
         guard AVCaptureDevice.default(for: .audio) != nil else { throw VoiceError.noMicrophone }
         recognizer = r
+        engine = AVAudioEngine()
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else { throw VoiceError.noMicrophone }
-        tap.reset(gated: wakeListening, sampleRate: format.sampleRate)
+        // The tap must match the hardware rate; a mismatch is an exception, not a Swift error.
+        guard input.inputFormat(forBus: 0).sampleRate == format.sampleRate else {
+            throw VoiceError.recordingFailed("The microphone changed. Try again in a moment.")
+        }
         generation += 1
         let gen = generation
         let state = tap
         input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            let r = state.process(buffer)
-            guard r.event != nil || r.level != nil else { return }
+            guard let level = state.process(buffer) else { return }
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     guard let self, gen == self.generation else { return }
-                    if let l = r.level { self.onLevel?(l) }
-                    switch r.event {
-                    case .open?: self.beginRecognition()
-                    case .close?: self.endBurst()
-                    case nil: break
-                    }
+                    self.onLevel?(level)
                 }
             }
         }
@@ -170,15 +162,13 @@ final class LiveSpeechStream: SpeechStreaming {
         }
         startedAt = Date()
         isRunning = true
-        // Capturing a command: recognise right away. Waiting for the wake phrase: wait for speech.
-        if !wakeListening { beginRecognition() }
+        beginRecognition()
         // A new microphone, AirPods connecting, or a sample-rate change invalidates the engine.
         configObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { guard let self, self.isRunning else { return }; self.finishTask(nil) }
         }
     }
 
-    /// Starts one recognition request (fed the pre-roll first).
     private func beginRecognition() {
         guard isRunning, task == nil, let r = recognizer else { return }
         let req = SFSpeechAudioBufferRecognitionRequest()
@@ -186,10 +176,8 @@ final class LiveSpeechStream: SpeechStreaming {
         req.shouldReportPartialResults = true
         req.addsPunctuation = true
         req.taskHint = .dictation
-        req.contextualStrings = ["Hey Wren", "Wren", "remind me", "snooze", "GPT", "ChatGPT"]
-        burst += 1
-        if wakeListening { gatedBursts += 1 }
-        let gen = generation, b = burst
+        req.contextualStrings = ["Wren", "remind me", "snooze", "GPT", "ChatGPT", "Gmail"]
+        let gen = generation
         task = r.recognitionTask(with: req) { [weak self] result, error in
             let text = result?.bestTranscription.formattedString
             let final = result?.isFinal ?? false
@@ -197,25 +185,13 @@ final class LiveSpeechStream: SpeechStreaming {
             let ended = error != nil || final
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
-                    guard let self, gen == self.generation, b == self.burst else { return }
+                    guard let self, gen == self.generation else { return }
                     if let text, !text.isEmpty { self.onTranscript?(text) }
-                    guard ended else { return }
-                    if self.wakeListening && failure == nil {
-                        // A burst of speech ended without the wake phrase: keep the microphone, drop the recogniser.
-                        self.task = nil
-                    } else {
-                        self.finishTask(failure)
-                    }
+                    if ended { self.finishTask(failure) }
                 }
             }
         }
         tap.attach(req)
-    }
-
-    /// The speaker went quiet while waiting for the wake phrase: finish this burst's recognition.
-    private func endBurst() {
-        guard wakeListening else { return }
-        tap.detach()?.endAudio()
     }
 
     /// "No speech" and cancellations are normal ends, not failures.
@@ -227,14 +203,8 @@ final class LiveSpeechStream: SpeechStreaming {
     }
 
     private func finishTask(_ failure: VoiceError?) {
-        let quick = Date().timeIntervalSince(startedAt) < 1
         teardown()
-        // Avoid a tight restart loop when the recogniser ends immediately.
-        if quick && failure == nil {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in MainActor.assumeIsolated { self?.onEnded?(nil) } }
-        } else {
-            onEnded?(failure)
-        }
+        onEnded?(failure)
     }
 
     func stop() {
@@ -260,14 +230,12 @@ final class VoiceConnector: Connector {
     let permissions: SystemVoicePermissions
     /// The voice shortcut is on.
     var enabled: Bool
-    /// "Hey Wren" is on.
-    var wakeWord: Bool = false
     /// The live session's phase, set by the app.
     var phase: VoiceSession.Phase = .off
     init(permissions: SystemVoicePermissions, enabled: Bool) { self.permissions = permissions; self.enabled = enabled }
 
     var state: ConnectorState {
-        guard enabled || wakeWord else { return .available }
+        guard enabled else { return .available }
         if case let .failed(e) = phase { return e == .microphoneDenied || e == .speechDenied ? .missingPermissions(e.localizedDescription) : .temporarilyUnavailable(e.localizedDescription) }
         if !permissions.hasMicrophone { return .temporarilyUnavailable("No microphone found.") }
         if permissions.microphone == .denied || permissions.microphone == .restricted { return .missingPermissions(VoiceError.microphoneDenied.localizedDescription) }
@@ -276,9 +244,10 @@ final class VoiceConnector: Connector {
         if permissions.microphone == .notDetermined || permissions.speech == .notDetermined {
             return .partiallyConnected("Ready. macOS will ask for Microphone and Speech Recognition the first time Wren listens.")
         }
-        let mode = phase == .listening ? "listening for “Hey Wren”" : (wakeWord ? "“Hey Wren” on" : "shortcut only")
+        let mode = isCapturing ? "recording a command" : "microphone off until you press the shortcut or Voice"
         return .connected(account: "On-device, \(Locale.current.identifier), \(mode)")
     }
     func refresh() async {}
-    func disconnect() async { enabled = false; wakeWord = false }
+    var isCapturing: Bool { if case .capturing = phase { true } else { false } }
+    func disconnect() async { enabled = false }
 }

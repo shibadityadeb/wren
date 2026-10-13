@@ -11,9 +11,11 @@ struct CaptureView: View {
     var saveAsNew: (String) -> Void = { _ in }
     var openAISetup: () -> Void = {}
     var toggleVoice: () -> Void = {}
+    /// Discard the transcript and record the command again (wrong transcription).
+    var retryVoice: () -> Void = {}
     /// Actions on the Ask card (run, connect, retry, copy…).
     var askAction: (AskAction) -> Void = { _ in }
-    /// The user started typing while Wren was still listening: stop listening, keep the text.
+    /// The user started typing while Wren was recording: stop recording, keep the text.
     var editedWhileListening: () -> Void = {}
     @FocusState private var focused: Bool
 
@@ -29,11 +31,13 @@ struct CaptureView: View {
                 if state.voiceEnabled {
                     if state.recording {
                         Button("Cancel", role: .cancel) { cancel() }.buttonStyle(.borderless).font(.caption)
-                            .help("Stop listening without doing anything (Escape)")
+                            .help("Stop recording without doing anything (Escape)")
                     } else {
-                        Button { toggleVoice() } label: { Label("Speak", systemImage: "mic").foregroundStyle(.secondary) }
-                            .buttonStyle(.borderless).font(.caption)
-                            .help("Or press the voice shortcut, or say “Hey Wren”")
+                        Button { toggleVoice() } label: { Label("Voice", systemImage: "mic.fill") }
+                            .buttonStyle(.bordered).controlSize(.small).tint(WrenTheme.accent)
+                            .disabled(state.busy)
+                            .help("Record one spoken command. The microphone turns off when you stop speaking. You can also press the voice shortcut.")
+                            .accessibilityLabel("Start a voice command")
                     }
                 }
                 if !state.aiAvailable {
@@ -65,17 +69,22 @@ struct CaptureView: View {
                     ListeningOrb(level: state.voiceLevel)
                         .frame(width: 44, height: 44)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Listening…").font(.headline)
+                        HStack(spacing: 5) {
+                            Circle().fill(.red).frame(width: 7, height: 7)
+                            Text("Recording…").font(.headline)
+                        }
                         Text(state.voiceStatus ?? "Say what you need, then pause.").font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button("Done") { toggleVoice() }.controlSize(.small).help("Stop listening now")
+                    Button("Stop") { toggleVoice() }.controlSize(.small).help("Stop recording and use what Wren heard")
                 }
                 .transition(.opacity)
             } else if state.reviewingVoice {
                 HStack(spacing: 8) {
                     Image(systemName: "waveform.badge.checkmark").foregroundStyle(WrenTheme.accent)
-                    Text("Transcribed. Edit it if you like, then press Return. Esc cancels.").font(.caption).foregroundStyle(.secondary)
+                    Text("Transcribed on this Mac. Fix any wrong words, then press Return. Esc cancels.").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Record again") { retryVoice() }.controlSize(.small).help("Discard this transcript and say the command again")
                 }
             } else if let v = state.voiceStatus {
                 Text(v).font(.caption).foregroundStyle(.secondary)
@@ -165,10 +174,10 @@ final class CaptureState {
     /// Wren's answer to a command (preview, question, list), shown under the field.
     var reply: ContextResolution?
     var aiAvailable = true
-    var voiceEnabled = false
+    var voiceEnabled = true
     var recording = false
     var voiceStatus: String?
-    /// Input loudness 0…1 while listening (drives the animation).
+    /// Input loudness 0…1 while recording (drives the animation).
     var voiceLevel: Float = 0
     /// Text the voice service last wrote into the field (to tell it apart from typing).
     var lastVoiceText = ""
@@ -208,7 +217,7 @@ struct AskCardView: View {
                         Button("Save as a note") { act(.saveAsNote) }
                     }.controlSize(.small)
                 } else {
-                    Text("Sends only this text, using your ChatGPT plan.").font(.caption).foregroundStyle(.secondary)
+                    Text(Self.planNote(card.request)).font(.caption).foregroundStyle(.secondary)
                     HStack { Button("Ask ChatGPT") { act(.run(.chatgpt)) }; Button("Save as a note instead") { act(.saveAsNote) } }.controlSize(.small)
                 }
             case .sending:
@@ -241,6 +250,9 @@ struct AskCardView: View {
             case let .needsReview(m):
                 Text(m).font(.caption).foregroundStyle(.orange)
                 Button("Review in Delegate") { act(.openDelegate) }.controlSize(.small)
+            case let .unsupported(m):
+                Text(m).font(.caption).foregroundStyle(.orange)
+                HStack { Button("Run with standard settings") { act(.runStandard) }; Button("Open result") { act(.openAnswer) } }.controlSize(.small)
             case let .failed(m, retryable):
                 Text(m).font(.caption).foregroundStyle(.orange)
                 HStack {
@@ -254,6 +266,14 @@ struct AskCardView: View {
         .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
     }
 
+    /// What will be asked of ChatGPT, in plain words, before anything is sent.
+    static func planNote(_ r: AIRequest) -> String {
+        var parts = ["Sends only this text, using your ChatGPT plan."]
+        if r.wantsHighEffort { parts.append("Asks for high reasoning effort.") }
+        if r.wantsWebSearch { parts.append("Offers ChatGPT web search for sources (if your account allows it; Wren will say whether it ran).") }
+        return parts.joined(separator: " ")
+    }
+
     func answerText(_ t: String) -> some View {
         ScrollView { Text(t).font(.callout).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
             .frame(maxHeight: 260)
@@ -261,7 +281,7 @@ struct AskCardView: View {
 }
 
 
-/// Siri-style listening indicator: soft, overlapping coloured rings that swell with your voice.
+/// Recording indicator: soft, overlapping coloured rings that swell with your voice.
 struct ListeningOrb: View {
     var level: Float
     @Environment(\.colorScheme) private var scheme
@@ -275,7 +295,7 @@ struct ListeningOrb: View {
                 Circle().fill(scheme == .dark ? Color.white.opacity(0.9) : Color.purple.opacity(0.85)).frame(width: dot, height: dot).blur(radius: 1)
             }
         }
-        .accessibilityLabel("Listening")
+        .accessibilityLabel("Recording")
     }
 
     var l: CGFloat { CGFloat(level) }

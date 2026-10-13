@@ -173,7 +173,7 @@ final class SIWCProtocolTests: XCTestCase {
         guard case .temporarilyUnavailable = e(503, "subscription_sharing_user_unavailable") else { return XCTFail() }
         guard case .reauthorizationRequired = e(401, "subscription_sharing_invalid_user") else { return XCTFail() }
         guard case .reauthorizationRequired = e(401, nil) else { return XCTFail() }
-        guard case .unsupportedRequest = e(400, "subscription_sharing_unsupported_capability") else { return XCTFail() }
+        guard case .unsupportedCapability = e(400, "subscription_sharing_unsupported_capability") else { return XCTFail() }
         guard case .reauthorizationRequired = ChatGPTError.from(status: 400, body: Data(#"{"error":"refresh_token_reused"}"#.utf8), duringRefresh: true) else { return XCTFail() }
         XCTAssertEqual(ChatGPTError.from(status: 401, body: Data(#"{"error":"invalid_client"}"#.utf8)), .clientRejected)
         guard case .temporarilyUnavailable = e(500, nil) else { return XCTFail() }

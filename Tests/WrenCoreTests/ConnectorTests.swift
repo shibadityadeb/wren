@@ -418,7 +418,6 @@ final class VoiceTests: XCTestCase {
         var isRunning = false
         var starts = 0, stops = 0
         var failStart: VoiceError?
-        var wakeListening = false
         func start() throws { if let failStart { throw failStart }; starts += 1; isRunning = true }
         func stop() { if isRunning { stops += 1 }; isRunning = false }
         func say(_ t: String) { onTranscript?(t) }
@@ -431,16 +430,6 @@ final class VoiceTests: XCTestCase {
         return (v, s, c, [])
     }
 
-    func testWakePhraseVariantsAndNonMatches() {
-        XCTAssertEqual(WakeWord.command(in: "Hey Wren, remind me to call Sam tomorrow at 10 AM"), "remind me to call Sam tomorrow at 10 AM")
-        XCTAssertEqual(WakeWord.command(in: "hey ren remind me"), "remind me")
-        XCTAssertEqual(WakeWord.command(in: "okay Wren"), "")
-        XCTAssertEqual(WakeWord.command(in: "so anyway hey wren what's due"), "what's due")
-        XCTAssertNil(WakeWord.command(in: "I saw a wren in the garden"))
-        XCTAssertNil(WakeWord.command(in: "hey when is the meeting"))
-        XCTAssertNil(WakeWord.command(in: "hey wrench"))
-    }
-
     func testEndpointer() {
         var e = CommandEndpointer(start: Date(timeIntervalSince1970: 0))
         XCTAssertNil(e.check(Date(timeIntervalSince1970: 3)))
@@ -450,46 +439,52 @@ final class VoiceTests: XCTestCase {
         XCTAssertEqual(e.check(Date(timeIntervalSince1970: 3.7)), .pause)
         e.transcript("remind me to call", at: Date(timeIntervalSince1970: 3.5))
         XCTAssertNil(e.check(Date(timeIntervalSince1970: 4)), "still talking")
-        XCTAssertEqual(e.check(Date(timeIntervalSince1970: 21)), .timeLimit)
+        XCTAssertEqual(e.check(Date(timeIntervalSince1970: 31)), .timeLimit)
     }
 
-    func testHeyWrenCapturesOneCommandThenListensAgain() async {
+    func testShortcutCapturesOneCommandAndTheMicrophoneStaysOffAfterwards() async {
         let (v, s, c, _) = make()
         var commands: [(String, VoiceSession.Trigger)] = []
         v.onCommand = { commands.append(($0, $1)) }
-        let err = await v.setWakeWord(true)
-        XCTAssertNil(err); XCTAssertEqual(v.phase, .listening); XCTAssertEqual(s.starts, 1)
-        s.say("the weather is nice")
-        XCTAssertEqual(v.phase, .listening, "no wake phrase, nothing happens")
-        s.say("the weather is nice hey Wren remind me to call Sam")
-        XCTAssertEqual(v.phase, .capturing(.wakeWord))
-        s.say("the weather is nice hey Wren remind me to call Sam tomorrow at 10 AM")
+        XCTAssertEqual(v.phase, .off); XCTAssertEqual(s.starts, 0, "nothing opens the microphone until the user asks")
+        let err = await v.activate(.shortcut)
+        XCTAssertNil(err); XCTAssertEqual(v.phase, .capturing(.shortcut)); XCTAssertEqual(s.starts, 1)
+        s.say("remind me to call Sam")
+        s.say("remind me to call Sam tomorrow at 10 AM")
         XCTAssertEqual(v.liveCommand, "remind me to call Sam tomorrow at 10 AM")
-        c.t += 1; v.tick(); XCTAssertTrue(commands.isEmpty)
+        c.t += 1; v.tick(); XCTAssertTrue(commands.isEmpty, "still within the pause")
         c.t += 1; v.tick()
         XCTAssertEqual(commands.map(\.0), ["remind me to call Sam tomorrow at 10 AM"])
-        XCTAssertEqual(commands.first?.1, .wakeWord)
+        XCTAssertEqual(commands.first?.1, .shortcut)
         XCTAssertEqual(v.phase, .handling); XCTAssertFalse(s.isRunning, "recording stops when the command ends")
-        // More speech or ticks while handling can't produce a second command.
-        s.say("hey wren remind me again"); c.t += 5; v.tick()
+        // More transcripts or ticks while handling can't produce a second command or reopen the microphone.
+        s.say("remind me again"); c.t += 5; v.tick()
         XCTAssertEqual(commands.count, 1)
         v.finishedHandling()
-        XCTAssertEqual(v.phase, .listening); XCTAssertTrue(s.isRunning)
+        XCTAssertEqual(v.phase, .off); XCTAssertFalse(s.isRunning); XCTAssertEqual(s.starts, 1, "never restarts by itself")
     }
 
-    func testShortcutUsesTheSamePipelineAndCanStopEarly() async {
-        let (v, s, c, _) = make()
+    func testButtonUsesTheSamePipelineAndPressingAgainStops() async {
+        let (v, s, _, _) = make()
         var commands: [(String, VoiceSession.Trigger)] = []
         v.onCommand = { commands.append(($0, $1)) }
-        await v.shortcut()
-        XCTAssertEqual(v.phase, .capturing(.shortcut))
-        s.say("snooze the current reminder for 30 minutes")
-        await v.shortcut()   // pressed again: done
-        XCTAssertEqual(commands.map(\.0), ["snooze the current reminder for 30 minutes"])
-        XCTAssertEqual(commands.first?.1, .shortcut)
-        v.finishedHandling()
-        XCTAssertEqual(v.phase, .off, "Hey Wren is off: microphone off afterwards"); XCTAssertFalse(s.isRunning)
-        _ = c
+        await v.activate(.button)
+        XCTAssertEqual(v.phase, .capturing(.button))
+        s.say("ask GPT to research quantum physics")
+        await v.activate(.shortcut)   // pressed again (either way in): stop
+        XCTAssertEqual(commands.map(\.0), ["ask GPT to research quantum physics"])
+        XCTAssertEqual(commands.first?.1, .button)
+        XCTAssertFalse(s.isRunning)
+    }
+
+    func testRepeatedActivationWhileHandlingDoesNothing() async {
+        let (v, s, _, _) = make()
+        var commands = 0
+        v.onCommand = { _, _ in commands += 1 }
+        await v.activate(.shortcut); s.say("what's due today"); v.stopCapturing()
+        XCTAssertEqual(v.phase, .handling)
+        await v.activate(.shortcut); await v.activate(.button)
+        XCTAssertEqual(v.phase, .handling); XCTAssertEqual(s.starts, 1, "no second recording"); XCTAssertEqual(commands, 1)
     }
 
     func testNothingSaidAndCancel() async {
@@ -498,41 +493,57 @@ final class VoiceTests: XCTestCase {
         var commands = 0
         v.onEndedWithoutCommand = { ended.append($0) }
         v.onCommand = { _, _ in commands += 1 }
-        await v.shortcut()
+        await v.activate(.shortcut)
         c.t += 8; v.tick()
-        XCTAssertEqual(ended, [.nothingSaid]); XCTAssertEqual(v.phase, .off)
-        await v.shortcut(); s.say("remind me to")
+        XCTAssertEqual(ended, [.nothingSaid]); XCTAssertEqual(v.phase, .off); XCTAssertFalse(s.isRunning)
+        await v.activate(.shortcut); s.say("remind me to")
         v.cancel()
         XCTAssertEqual(v.phase, .off); XCTAssertEqual(commands, 0); XCTAssertFalse(s.isRunning)
     }
 
-    func testPermissionDenialsAndFailures() async {
+    func testPermissionDenialsAndFailuresLeaveTheMicrophoneOff() async {
         let p = Perms(); p.grantMic = false
         let (v, s, _, _) = make(perms: p)
-        let e = await v.setWakeWord(true)
-        XCTAssertEqual(e, .microphoneDenied); XCTAssertFalse(v.wakeWordEnabled); XCTAssertEqual(s.starts, 0)
+        let e = await v.activate(.shortcut)
+        XCTAssertEqual(e, .microphoneDenied); XCTAssertEqual(s.starts, 0)
         XCTAssertEqual(v.phase, .failed(.microphoneDenied))
         let p2 = Perms(); p2.grantSpeech = false
-        let (v2, _, _, _) = make(perms: p2)
-        let e2 = await v2.shortcut()
-        XCTAssertEqual(e2, .speechDenied)
-        // The recogniser reports an unavailable on-device model.
+        let (v2, s2, _, _) = make(perms: p2)
+        let e2 = await v2.activate(.button)
+        XCTAssertEqual(e2, .speechDenied); XCTAssertEqual(s2.starts, 0)
+        // The on-device model isn't installed: no recording, and no server fallback.
         let (v3, s3, _, _) = make()
         s3.failStart = .onDeviceUnavailable("en_US")
-        let e3 = await v3.setWakeWord(true)
-        XCTAssertEqual(e3, .onDeviceUnavailable("en_US"))
+        let e3 = await v3.activate(.shortcut)
+        XCTAssertEqual(e3, .onDeviceUnavailable("en_US")); XCTAssertFalse(s3.isRunning)
+        // Granting permission later doesn't start anything by itself.
+        p.grantMic = true; p.microphone = .granted
+        XCTAssertEqual(s.starts, 0)
     }
 
-    func testRecogniserLimitRestartsListeningAndQuitStopsEverything() async {
+    func testRecogniserEndingOrFailingNeverRestartsAndQuitStopsEverything() async {
         let (v, s, _, _) = make()
-        await v.setWakeWord(true)
-        s.isRunning = false; s.onEnded?(nil)
-        XCTAssertEqual(v.phase, .listening); XCTAssertEqual(s.starts, 2, "fresh recogniser after its time limit")
-        s.onEnded?(.recordingFailed("device gone"))
-        XCTAssertEqual(v.phase, .failed(.recordingFailed("device gone")))
-        await v.setWakeWord(true)
-        XCTAssertEqual(v.phase, .listening)
+        await v.activate(.shortcut)
+        s.isRunning = false; s.onEnded?(.recordingFailed("device gone"))
+        XCTAssertEqual(v.phase, .failed(.recordingFailed("device gone"))); XCTAssertEqual(s.starts, 1)
+        await v.activate(.shortcut)
+        XCTAssertEqual(v.phase, .capturing(.shortcut)); XCTAssertEqual(s.starts, 2, "only because the user pressed again")
         v.shutdown()
-        XCTAssertEqual(v.phase, .off); XCTAssertFalse(s.isRunning); XCTAssertFalse(v.wakeWordEnabled)
+        XCTAssertEqual(v.phase, .off); XCTAssertFalse(s.isRunning)
+    }
+
+    func testCancellingWhileMacOSAsksForPermissionDoesntOpenTheMicrophone() async {
+        final class SlowPerms: VoicePermissions {
+            var microphone: VoicePermission = .notDetermined
+            var speech: VoicePermission = .granted
+            var onAsk: (() -> Void)?
+            func requestMicrophone() async -> Bool { onAsk?(); microphone = .granted; return true }
+            func requestSpeech() async -> Bool { true }
+        }
+        let p = SlowPerms(), s = Stream()
+        let v = VoiceSession(stream: s, permissions: p)
+        p.onAsk = { v.cancel() }   // Escape pressed while the macOS prompt is up
+        let e = await v.activate(.shortcut)
+        XCTAssertNil(e); XCTAssertEqual(v.phase, .off); XCTAssertEqual(s.starts, 0)
     }
 }

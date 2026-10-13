@@ -43,6 +43,9 @@ final class AppModel {
     var reminderSync = ReconcileReport()
     /// After Wren asked "When should I remind you…?", the start of the request the answer completes.
     var reminderFollowUp: String?
+    /// What the last command did (operation, success, entity, error). Never holds the user's words.
+    var lastExecution: ExecutionResult?
+    @ObservationIgnored var submissions = SubmissionGuard()
     @ObservationIgnored let loginItems: LoginItemController
 
     let store: WrenStore?
@@ -93,8 +96,8 @@ final class AppModel {
     @ObservationIgnored var applyHotKey: () -> Void = {}
     @ObservationIgnored var openMainWindow: () -> Void = {}
     @ObservationIgnored var applyVoiceHotKey: () -> Void = {}
-    /// Turns "Hey Wren" on or off in the voice service (set by the app delegate).
-    @ObservationIgnored var setWakeWordInService: (Bool) async -> VoiceError? = { _ in nil }
+    /// Starts (or stops) one voice command, exactly like the voice shortcut (set by the app delegate).
+    @ObservationIgnored var startVoice: () -> Void = {}
     /// The voice service's phase, for Settings and the menu.
     var voicePhase: VoiceSession.Phase = .off
     var voiceHotKeyError: String?
@@ -190,6 +193,8 @@ final class AppModel {
     // MARK: Lifecycle
 
     func start() {
+        settings.removeRetiredPreferences()
+        notifications.soundsEnabled = { [weak self] in self?.settings.notificationSounds ?? true }
         notifications.activate()
         loginStatus = loginItems.reconcileOnLaunch(userWantsEnabled: settings.launchAtLogin)
         Task {
@@ -488,6 +493,21 @@ final class AppModel {
 
     private func handle(_ r: NotificationService.Response) {
         reload()
+        // A notification action delivered twice (a repeated click, or the same reminder shown twice)
+        // changes the item once.
+        let actionKey: String? = switch r {
+        case let .done(id): "done|\(id)"
+        case let .snoozeHour(id): "snooze|\(id)"
+        case let .tomorrow(id): "tomorrow|\(id)"
+        case let .later(id, t): "later|\(id)|\(t)"
+        case let .mail(.markRead(id)): "markRead|\(id)"
+        case let .mail(.snooze(id)): "mailSnooze|\(id)"
+        default: nil
+        }
+        if let actionKey {
+            guard submissions.begin(actionKey, now: clock.now) else { log.notice("duplicate notification action ignored"); return }
+            submissions.end(actionKey, now: clock.now)
+        }
         func pendingItem(_ id: UUID) -> Commitment? { item(id).flatMap { $0.status == .pending ? $0 : nil } }
         switch r {
         case let .done(id):
@@ -653,15 +673,5 @@ final class AppModel {
         if hotKeyEnabled, spec == settings.hotKey { voiceHotKeyError = "\(spec.display) is already Wren's capture shortcut. Choose another."; return }
         settings.voiceHotKey = spec; voiceHotKeyError = nil; applyVoiceHotKey(); connectorsChanged()
     }
-    func setWakeWord(_ on: Bool) {
-        settings.wakeWordEnabled = on
-        hub.voice.wakeWord = on
-        Task {
-            if let e = await setWakeWordInService(on) {
-                settings.wakeWordEnabled = false; hub.voice.wakeWord = false
-                banner = "“Hey Wren” is off: \(e.localizedDescription)"
-            }
-            connectorsChanged()
-        }
-    }
+
 }

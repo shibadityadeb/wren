@@ -52,6 +52,9 @@ public enum ChatGPTError: Error, Equatable, LocalizedError {
     case temporarilyUnavailable(String)
     case clientRejected
     case unsupportedRequest(String)
+    /// `subscription_sharing_unsupported_capability`: the plan route refused part of the request.
+    /// `param` names it when OpenAI says (e.g. `tools`, `reasoning.effort`).
+    case unsupportedCapability(param: String?)
     case incomplete(partial: String)
     case interrupted(partial: String)
     case invalidResponse(String)
@@ -70,6 +73,12 @@ public enum ChatGPTError: Error, Equatable, LocalizedError {
         case let .temporarilyUnavailable(s): s
         case .clientRejected: "ChatGPT no longer accepts this copy of Wren's registration. Reconnect to register again."
         case let .unsupportedRequest(s): s
+        case let .unsupportedCapability(param):
+            switch Self.capability(param) {
+            case "web search": "ChatGPT plan sharing didn't allow web search for this model or workspace, so nothing was researched online. You can run it again without web search."
+            case "reasoning effort": "ChatGPT plan sharing didn't accept the higher reasoning effort for this model. You can run it again with the model's standard setting."
+            default: "ChatGPT plan sharing doesn't support part of this request\(param.map { " (\($0))" } ?? ""). You can run it again with standard settings."
+            }
         case .incomplete: "ChatGPT stopped before finishing the answer. You can keep the partial text or try again."
         case .interrupted: "The connection ended before the answer was complete. You can keep the partial text or try again."
         case let .invalidResponse(s): "ChatGPT returned something unexpected (\(s)). Try again."
@@ -80,10 +89,26 @@ public enum ChatGPTError: Error, Equatable, LocalizedError {
     /// Maps an OpenAI error body and status to a plain-language error. Never includes request text.
     public static func from(status: Int?, body: Data?, duringRefresh: Bool = false) -> ChatGPTError {
         let code = errorCode(body)
-        return from(status: status, code: code, duringRefresh: duringRefresh)
+        let param = body.flatMap { try? JSONDecoder().decode(JSONValue.self, from: $0) }.flatMap(errorParam)
+        return from(status: status, code: code, duringRefresh: duringRefresh, param: param)
     }
 
-    public static func from(status: Int?, code: String?, duringRefresh: Bool = false) -> ChatGPTError {
+    /// Which feature an `error.param` refers to, in words.
+    public static func capability(_ param: String?) -> String? {
+        guard let p = param?.lowercased() else { return nil }
+        if p.contains("tool") || p.contains("web_search") { return "web search" }
+        if p.contains("reasoning") { return "reasoning effort" }
+        return nil
+    }
+
+    /// `error.param` (or `response.error.param`), when it's a short field path.
+    static func errorParam(_ v: JSONValue) -> String? {
+        let raw = v["error"]?["param"]?.string ?? v["param"]?.string ?? v["response"]?["error"]?["param"]?.string
+        guard let raw, raw.count <= 100, raw.range(of: "^[A-Za-z0-9_.\\[\\]-]+$", options: .regularExpression) != nil else { return nil }
+        return raw
+    }
+
+    public static func from(status: Int?, code: String?, duringRefresh: Bool = false, param: String? = nil) -> ChatGPTError {
         if let code {
             if duringRefresh, SIWC.reauthCodes.contains(code) {
                 return .reauthorizationRequired("Your ChatGPT connection can no longer be renewed. Reconnect to keep using your plan.")
@@ -99,7 +124,7 @@ public enum ChatGPTError: Error, Equatable, LocalizedError {
                 return .planNotAuthorized
             case "invalid_client", "subscription_sharing_v2_client_not_enabled": return .clientRejected
             case "access_denied": return .signInCancelled
-            case "subscription_sharing_unsupported_capability": return .unsupportedRequest("This request uses something ChatGPT plan sharing doesn't support.")
+            case "subscription_sharing_unsupported_capability": return .unsupportedCapability(param: param)
             case "subscription_sharing_route_not_supported": return .unsupportedRequest("ChatGPT plan sharing doesn't support this kind of request.")
             case "model_not_found": return .unsupportedRequest("That model isn't available for your ChatGPT connection. Choose another model.")
             default:
