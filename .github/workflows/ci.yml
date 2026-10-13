@@ -39,6 +39,15 @@ jobs:
           swift build -c release --product Wren
           .build/release/Wren --smoke-test | tee /dev/stderr | grep -q "arch=${{ matrix.arch }}"
 
+  website:
+    name: Website (build and link check)
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build static site and check links, anchors and assets
+        run: node website/build.mjs
+
   package:
     name: Universal DMG (unsigned preview)
     needs: test

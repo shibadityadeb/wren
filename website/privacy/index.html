@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy Policy — Wren</title>
+  <meta name="description" content="How the Wren website and the Wren macOS app handle your data: what stays on your Mac, what leaves it and when, and how to inspect or delete it.">
+  <meta name="theme-color" content="#f7f3ea">
+  <link rel="canonical" href="{{SITE_URL}}/privacy/">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Wren">
+  <meta property="og:title" content="Wren Privacy Policy">
+  <meta property="og:description" content="What stays on your Mac, what leaves it and when, and how to delete it.">
+  <meta property="og:url" content="{{SITE_URL}}/privacy/">
+  <meta property="og:image" content="{{SITE_URL}}/assets/og-image.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/brand/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/brand/favicon-16.png">
+  <link rel="apple-touch-icon" href="/assets/brand/apple-touch-icon.png">
+  <link rel="preload" href="/assets/fonts/fraunces-variable.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/assets/css/site.css">
+  <script>document.documentElement.classList.add("js");setTimeout(function(){if(!window.wrenReady)document.documentElement.classList.remove("js")},3000)</script>
+  <script src="/assets/js/site.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="header">
+  <div class="wrap header__bar">
+    <a class="brand" href="/" aria-label="Wren home"><img src="/assets/brand/wren-icon-128@2x.png" alt="" width="40" height="40"><span>Wren</span></a>
+    <button class="menu-btn" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="Open menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 8h16M4 16h16"/></svg>
+    </button>
+    <nav class="nav" id="site-nav" aria-label="Main">
+      <ul class="nav__links">
+        <li><a href="/#what-it-does">What it does</a></li>
+        <li><a href="/#connectors">Connectors</a></li>
+        <li><a href="/#why-wren">Why Wren</a></li>
+        <li><a href="/#privacy">Privacy</a></li>
+        <li><a href="/#about">About</a></li>
+        <li><a href="https://github.com/shibadityadeb/wren" rel="noopener" target="_blank">GitHub <span aria-hidden="true">↗</span><span class="sr-only">(opens in a new tab)</span></a></li>
+      </ul>
+      <a class="btn btn--dark" href="https://github.com/shibadityadeb/wren" rel="noopener" target="_blank">Follow the journey <span class="arrow arrow--out" aria-hidden="true">↗</span><span class="sr-only">(opens GitHub in a new tab)</span></a>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="doc">
+  <p class="eyebrow">Privacy Policy</p>
+  <h1>Your Mac. Your data. Your control.</h1>
+  <p class="meta">Last updated 13 October 2026 · Applies to this website and to the Wren macOS app as currently developed (version 0.9, a preview that isn't yet available for download).</p>
+
+  <p class="lede">Wren is built around a simple rule: your personal workspace lives on your Mac, and anything that leaves it does so because you asked, using a connection you chose. This policy explains exactly what that means today, including the limits.</p>
+
+  <nav class="toc" aria-label="Contents">
+    <ol>
+      <li><a href="#covers">What this policy covers</a></li>
+      <li><a href="#website">The Wren website</a></li>
+      <li><a href="#app">The Wren macOS app</a></li>
+      <li><a href="#local">Tasks, reminders, goals, history and preferences</a></li>
+      <li><a href="#voice">Voice and microphone</a></li>
+      <li><a href="#ai">AI providers and external processing</a></li>
+      <li><a href="#google">Google, Gmail and Calendar</a></li>
+      <li><a href="#notion-slack">Notion and Slack</a></li>
+      <li><a href="#credentials">Credentials, authorization and disconnection</a></li>
+      <li><a href="#notifications">Notifications and background operation</a></li>
+      <li><a href="#logging">Logging, diagnostics and analytics</a></li>
+      <li><a href="#retention">Backups, exports, retention and deletion</a></li>
+      <li><a href="#security">Security practices and limitations</a></li>
+      <li><a href="#third-party">Third-party provider policies</a></li>
+      <li><a href="#changes">Changes to this policy</a></li>
+      <li><a href="#contact">Contact</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="covers">1. What this policy covers</h2>
+  <p>This policy covers the Wren website and the Wren app for macOS. Wren is an independent project developed by Shibaditya Deb. It isn't a company, and there is no Wren server, account or cloud service: the app runs on your Mac and talks directly to the services you connect.</p>
+  <p>Wren is in development. Some features described here are built but not yet available in a released version, and some are still being completed; where that matters, this policy says so. If something here no longer matches the app, the app's source code is public on <a href="https://github.com/shibadityadeb/wren" rel="noopener">GitHub</a>, and this policy will be corrected.</p>
+
+  <h2 id="website">2. The Wren website</h2>
+  <ul>
+    <li>The website is a set of static pages. It has no accounts, forms, cookies, analytics, advertising or tracking scripts, and it doesn't store anything in your browser.</li>
+    <li>Fonts, images and scripts are served from the same site. It loads nothing from other companies' servers.</li>
+    <li>The site is hosted on <a href="https://vercel.com" rel="noopener">Vercel</a>. Like any web host, Vercel receives the standard information your browser sends with each request, such as your IP address, the page requested, the time, and your browser's user-agent, and may keep it in its logs to run and protect its service, as described in <a href="https://vercel.com/legal/privacy-notice" rel="noopener">Vercel's privacy notice</a>. Vercel's optional visitor analytics and performance tracking are not turned on for this site.</li>
+    <li>Links to GitHub take you to GitHub, which has its own privacy policy.</li>
+  </ul>
+  <p>The product illustrations on the website are mockups with fictional content. The website never connects to your calendar, email or AI accounts.</p>
+
+  <h2 id="app">3. The Wren macOS app</h2>
+  <p>Wren stores its data in your user Library on your Mac, in <code>~/Library/Application Support/Wren</code>, and its preferences in macOS's standard preferences for the app. Nothing is synced to iCloud or to any server of Wren's own, because there isn't one.</p>
+  <p>Wren connects to the internet only for things you set up or ask for:</p>
+  <ul>
+    <li><strong>ChatGPT</strong> (<code>auth.openai.com</code>, <code>api.openai.com</code>), when you connect your OpenAI account and send a request.</li>
+    <li><strong>Google</strong> (<code>accounts.google.com</code>, <code>oauth2.googleapis.com</code>, <code>gmail.googleapis.com</code>, <code>www.googleapis.com</code>), when you connect Gmail or Google Calendar.</li>
+    <li><strong>Notion</strong> (<code>mcp.notion.com</code>), when you connect Notion.</li>
+    <li><strong>Your own local AI</strong> (Ollama at <code>127.0.0.1</code>, on your Mac), if you set it up.</li>
+  </ul>
+  <p>Each connector only talks to its listed addresses; Wren refuses any other. Opening links (for example “Open in Gmail” or “Manage usage”) opens your browser.</p>
+
+  <h2 id="local">4. Tasks, reminders, goals, history and preferences</h2>
+  <p>Stored on your Mac, in Wren's database (<code>Wren.store</code>):</p>
+  <ul>
+    <li>Everything you capture, with your original wording, its interpreted title, dates, reminders, recurrence, status and history.</li>
+    <li>Goals, waiting items, follow-ups and the observations Wren showed you.</li>
+    <li>Records of GPT requests you sent: what you said, what was sent, the answer, the model names, times and status.</li>
+    <li>An activity log of actions taken and why they were allowed. It holds short labels rather than full content: for example an item's title, the first 80 characters of a GPT request, or “Email from” plus a sender's name.</li>
+    <li>The permissions and standing rules you set.</li>
+  </ul>
+  <p>Stored in the app's preferences: settings such as shortcuts, notification and digest times, quiet hours, important senders, an unsent capture draft, and each connector's status (the connected account's email or workspace name and the last error).</p>
+  <p>If the database can't be opened, Wren saves what you type to a plain text file (<code>emergency-captures.txt</code>) in the same folder so nothing is lost.</p>
+
+  <h2 id="voice">5. Voice and microphone</h2>
+  <ul>
+    <li>Voice is optional and off until you turn it on. macOS asks you for Microphone and Speech Recognition permission; you can withdraw either in System Settings › Privacy &amp; Security.</li>
+    <li>Wren uses Apple's speech recognition in on-device mode, and refuses to run if on-device recognition isn't available for your language. Apple's on-device recognition processes speech on your Mac. Wren doesn't record or store audio.</li>
+    <li>With the voice shortcut, the microphone is used from when you press it until you finish speaking.</li>
+    <li>With “Hey Wren” on, the microphone stays open while Wren is running so it can hear the phrase, and macOS shows its microphone indicator. Until someone speaks, Wren only measures loudness; speech recognition runs only while someone is talking. Listening pauses while your screen is locked or the display sleeps, and stops when you quit Wren.</li>
+    <li>The recognised text is shown to you and handled exactly like typed text. It's kept only if it becomes an item or request you run.</li>
+  </ul>
+  <p>The voice feature is still in development and hasn't yet been verified end to end with a real microphone.</p>
+
+  <h2 id="ai">6. AI providers and external processing</h2>
+  <h3>Local AI (optional)</h3>
+  <p>If you install Ollama and choose a model, Wren sends the text of your captures to it on your own Mac (<code>127.0.0.1</code>) to understand them better. Nothing goes to an outside service.</p>
+  <h3>ChatGPT (optional)</h3>
+  <ul>
+    <li>You connect by signing in on OpenAI's own page (“Sign in with ChatGPT”). Wren never sees your password.</li>
+    <li>When you ask Wren to send something to GPT, the text of that request is sent to OpenAI with your account's authorization and counted against your ChatGPT plan. Wren asks OpenAI not to store the request (<code>store: false</code>); OpenAI's handling of it is governed by OpenAI's terms and policies.</li>
+    <li>Only the request is sent. Wren doesn't attach your items, notes, email or anything else, unless you add specific context yourself in Delegate, which shows exactly what will be sent. Items you've marked private are left out unless you tick them for that request, and text that looks like a password, key or card number is removed unless you choose otherwise.</li>
+    <li>Wren's background tasks never use your ChatGPT account. Email is never sent to ChatGPT or any other AI service.</li>
+    <li>The answer is saved in Wren's database on your Mac, where you can open it later.</li>
+  </ul>
+
+  <h2 id="google">7. Google, Gmail and Calendar</h2>
+  <p><em>In development:</em> connecting Google isn't possible in current builds yet. This describes how it works once it is.</p>
+  <ul>
+    <li>You connect by signing in on Google's own page and choosing what to allow. Gmail uses read-only access (<code>gmail.readonly</code>); Calendar uses read-only access (<code>calendar.readonly</code>).</li>
+    <li>Mark as read is a separate, optional permission (<code>gmail.modify</code>) that you'd grant on purpose. Google's permission technically allows more changes than that, but Wren only implements marking a message as read, and only when you choose it for that message. Wren doesn't send, archive, delete or label email.</li>
+    <li>For your inbox, Wren reads the sender, recipients, subject, date, labels and Gmail's short preview of recent messages. It doesn't download full message bodies or attachments, and it never reads Spam or Trash.</li>
+    <li>Sorting mail into categories happens on your Mac, by rules. Instructions written inside an email are treated as text and can never make Wren do anything.</li>
+    <li>While Wren is running and you allow it, it checks your inbox every few minutes for new mail (only what changed since the last check), and it doesn't check when Wren isn't running.</li>
+    <li>Recent inbox details are kept in a private file (<code>Mail/mailbox.json</code>, readable only by your macOS user) so the inbox, digest and alerts work. Messages older than 30 days are removed from it. An optional 7-day cache of headers and previews is off unless you turn it on. Neither is part of Wren's database, exports or backups.</li>
+    <li>Calendar events are read when needed, from Google or from the calendars already on your Mac (with macOS's Calendars permission), and aren't stored by Wren.</li>
+  </ul>
+
+  <h2 id="notion-slack">8. Notion and Slack</h2>
+  <p><strong>Notion</strong> is not yet available. Early support exists in the code: you would sign in on Notion's own page, and Wren would read pages only when you search, open or include one, and create a page only after you confirm. Page content isn't stored, except as part of a GPT request you chose to send with it.</p>
+  <p><strong>Slack</strong> is planned. Nothing has been built, and Wren doesn't connect to Slack.</p>
+
+  <h2 id="credentials">9. Credentials, authorization and disconnection</h2>
+  <ul>
+    <li>Wren never asks for your passwords or for API keys. Sign-in happens on each provider's own page.</li>
+    <li>The tokens each provider issues, and the account email or name they report, are kept as private files in <code>~/Library/Application Support/Wren/Credentials</code>: the folder is readable only by your macOS user and each file only by you. They are not stored in the macOS Keychain. They're never put in Wren's database, exports, backups or logs, and never shown on screen.</li>
+    <li>Disconnecting a service asks the provider to revoke Wren's access, deletes the tokens from your Mac, and (for Google) deletes cached mail. If the provider doesn't confirm the revocation, Wren tells you and points to where you can remove it yourself.</li>
+    <li>You can also revoke Wren's access from your Google account, ChatGPT settings or Notion settings at any time.</li>
+  </ul>
+
+  <h2 id="notifications">10. Notifications and background operation</h2>
+  <ul>
+    <li>Reminders are scheduled with macOS's notification system, which can show them even if Wren has been quit. Their text (the reminder's title) appears in Notification Centre and, depending on your settings, on your lock screen.</li>
+    <li>Other notifications Wren may show: a GPT request finishing (with the start of your request), an email digest or urgent email alert (sender, subject and Wren's reason), and the morning briefing.</li>
+    <li>Wren only works in the background while it's running. When you quit it, it stops listening for “Hey Wren”, stops checking email and sends nothing. It can start at login only if you turn that on.</li>
+  </ul>
+
+  <h2 id="logging">11. Logging, diagnostics and analytics</h2>
+  <ul>
+    <li>The app has no analytics, telemetry, advertising or crash-reporting SDK, and sends no usage data to the developer.</li>
+    <li>Wren writes short technical messages to macOS's system log on your Mac (for example “reminder scheduling failed for 1 request”). These describe states and counts, not your content. Developer test builds log more detail; they aren't the builds offered to users.</li>
+    <li>The in-app activity log described in section 4 stays in Wren's database on your Mac.</li>
+  </ul>
+
+  <h2 id="retention">12. Backups, exports, retention and deletion</h2>
+  <ul>
+    <li><strong>Backups</strong> are copies of Wren's database in <code>Backups/</code> inside Wren's folder: automatic daily backups (the latest 7 are kept), manual backups (10), and a copy before each upgrade, restore or reset (5 of each). They include GPT requests and answers, but not credentials or cached mail. You can delete them in Settings or in Finder.</li>
+    <li><strong>Export</strong> creates a file you save: your items with their history, goals, observations, briefing records, permissions and the activity log. It doesn't include credentials, GPT requests, mail, local AI models or preferences.</li>
+    <li><strong>Deleting</strong> an item removes it. <strong>Remove all Wren data</strong> deletes every item, goal, history entry, GPT request and briefing record, resets permissions, revokes and deletes connected sign-ins, and deletes cached mail. Backups are kept unless you delete them.</li>
+    <li>Wren keeps your data until you delete it. To remove everything, quit Wren, delete the app, and delete <code>~/Library/Application Support/Wren</code>.</li>
+  </ul>
+
+  <h2 id="security">13. Security practices and limitations</h2>
+  <ul>
+    <li>Connections to providers use HTTPS and are limited to each provider's expected addresses. Sign-ins use the providers' recommended flows for apps (authorization code with PKCE and a check that the response belongs to the request).</li>
+    <li>Changes Wren makes go through a permission system: what Wren may do on its own, what needs your confirmation, and what content Wren read (like an email) can never trigger.</li>
+    <li><strong>Limitations:</strong> sign-in tokens are stored as files protected by your macOS user's file permissions, not in the Keychain, so other software running as your user could read them. Wren's database isn't separately encrypted; it relies on your Mac's security, including FileVault if you've turned it on. Wren is a preview from an independent developer and hasn't had an independent security audit.</li>
+  </ul>
+
+  <h2 id="third-party">14. Third-party provider policies</h2>
+  <p>When you connect a service, that provider handles the data you send it under its own terms and privacy policy:</p>
+  <ul>
+    <li>OpenAI: <a href="https://openai.com/policies/privacy-policy/" rel="noopener">openai.com/policies/privacy-policy</a></li>
+    <li>Google: <a href="https://policies.google.com/privacy" rel="noopener">policies.google.com/privacy</a></li>
+    <li>Notion: <a href="https://www.notion.so/notion/Privacy-Policy-3468d120cf614d4c9014c09f6adc9091" rel="noopener">Notion Privacy Policy</a></li>
+    <li>Apple (speech recognition, notifications, calendars): <a href="https://www.apple.com/legal/privacy/" rel="noopener">apple.com/legal/privacy</a></li>
+    <li>Vercel (hosts this website): <a href="https://vercel.com/legal/privacy-notice" rel="noopener">Vercel Privacy Notice</a></li>
+    <li>GitHub (where the project lives): <a href="https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement" rel="noopener">GitHub Privacy Statement</a></li>
+  </ul>
+
+  <h2 id="changes">15. Changes to this policy</h2>
+  <p>This policy will change as Wren does. The date at the top shows the latest version, and every change is visible in the project's history on GitHub. If a change affects what leaves your Mac, it will be called out in the app's release notes.</p>
+
+  <h2 id="contact">16. Contact</h2>
+  <p>Questions or concerns about privacy: open an issue at <a href="https://github.com/shibadityadeb/wren/issues" rel="noopener">github.com/shibadityadeb/wren/issues</a>, or email the developer at <a href="mailto:shibadityadeb.official@gmail.com">shibadityadeb.official@gmail.com</a>. Please don't post personal data in a public issue.</p>
+
+  <p style="margin-top:56px"><a class="link-arrow" href="/"><span aria-hidden="true">←</span> Back to Wren</a></p>
+</main>
+
+<footer class="footer">
+  <div class="wrap">
+    <div class="footer__bottom" style="margin-top:0;border-top:0;padding-top:0">
+      <a class="brand" href="/" aria-label="Wren home"><img src="/assets/brand/wren-icon-128@2x.png" alt="" width="32" height="32"><span>Wren</span></a>
+      <span><a href="/">Home</a> · <a href="/privacy/">Privacy Policy</a> · <a href="https://github.com/shibadityadeb/wren" rel="noopener" target="_blank">GitHub ↗</a></span>
+      <span>© 2026 Shibaditya Deb</span>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

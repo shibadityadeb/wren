@@ -1,0 +1,598 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Wren — A quiet companion for your Mac</title>
+  <meta name="description" content="Wren is a local-first personal execution companion for macOS. Capture what matters, remember what needs doing, and let important things stop slipping through the cracks. In development, free during the preview.">
+  <meta name="theme-color" content="#f7f3ea">
+  <!-- Absolute URLs below are filled in by build.mjs (on Vercel: the project's production address) -->
+  <link rel="canonical" href="{{SITE_URL}}/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Wren">
+  <meta property="og:title" content="Wren — A little less to remember. A little more room to think.">
+  <meta property="og:description" content="A local-first personal execution companion for macOS. In development, free during the preview.">
+  <meta property="og:url" content="{{SITE_URL}}/">
+  <meta property="og:image" content="{{SITE_URL}}/assets/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="The Wren bird icon on a warm cream background with the words: A little less to remember.">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/brand/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/brand/favicon-16.png">
+  <link rel="apple-touch-icon" href="/assets/brand/apple-touch-icon.png">
+  <link rel="preload" href="/assets/fonts/fraunces-variable.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/assets/fonts/figtree-variable.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/assets/css/site.css">
+  <script>document.documentElement.classList.add("js");setTimeout(function(){if(!window.wrenReady)document.documentElement.classList.remove("js")},3000)</script>
+  <script src="/assets/js/site.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="header" id="top">
+  <div class="wrap header__bar">
+    <a class="brand" href="/" aria-label="Wren home">
+      <img src="/assets/brand/wren-icon-128@2x.png" alt="" width="40" height="40">
+      <span>Wren</span>
+    </a>
+    <button class="menu-btn" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="Open menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 8h16M4 16h16"/></svg>
+    </button>
+    <nav class="nav" id="site-nav" aria-label="Main">
+      <ul class="nav__links">
+        <li><a href="#what-it-does">What it does</a></li>
+        <li><a href="#connectors">Connectors</a></li>
+        <li><a href="#why-wren">Why Wren</a></li>
+        <li><a href="#privacy">Privacy</a></li>
+        <li><a href="#about">About</a></li>
+        <li><a href="https://github.com/shibadityadeb/wren" rel="noopener" target="_blank">GitHub <span aria-hidden="true">↗</span><span class="sr-only">(opens in a new tab)</span></a></li>
+      </ul>
+      <a class="btn btn--dark" href="https://github.com/shibadityadeb/wren" rel="noopener" target="_blank">Follow the journey <span class="arrow arrow--out" aria-hidden="true">↗</span><span class="sr-only">(opens GitHub in a new tab)</span></a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+
+<!-- Hero -->
+<section class="hero" aria-labelledby="hero-title">
+  <div class="wrap">
+    <p class="eyebrow hero-in"><img src="/assets/brand/wren-mark.svg" alt="" width="18" height="15">A quiet companion for your Mac</p>
+    <h1 id="hero-title" class="h-display hero-in" data-delay="1">
+      <span class="line">A little less to remember.</span>
+      <span class="line blue">A little more room to think.</span>
+    </h1>
+    <p class="lede hero-in" data-delay="2">Wren is your personal execution companion for macOS. Capture what matters. Remember what needs doing. Let the important things stop slipping through the cracks.</p>
+    <div class="hero__ctas hero-in" data-delay="3">
+      <a class="btn btn--dark" href="#what-it-does">Explore Wren <span class="arrow arrow--down" aria-hidden="true">↓</span></a>
+      <a class="btn btn--ghost" href="https://github.com/shibadityadeb/wren" rel="noopener" target="_blank">Follow the journey <span class="arrow arrow--out" aria-hidden="true">↗</span><span class="sr-only">(opens GitHub in a new tab)</span></a>
+    </div>
+    <p class="status-line hero-in" data-delay="4"><span class="dot dot--pulse" aria-hidden="true"></span>Currently in development · Free during the preview</p>
+
+    <div class="hero__stage hero-in" data-delay="4" data-demo="capture">
+      <div class="window" role="img" aria-label="Illustration of Wren's capture window: the sentence “Remind me to call Sam tomorrow at 10” becomes a reminder card for Call Sam, tomorrow at 10:00 AM.">
+        <div class="window__bar" aria-hidden="true">
+          <div class="window__lights"><i></i><i></i><i></i></div>
+          <div class="window__title"><img src="/assets/brand/wren-icon-128@2x.png" alt="" width="18" height="18">Wren</div>
+          <div></div>
+        </div>
+        <div class="window__body" aria-hidden="true">
+          <div class="capture-prompt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M6 6l2 2M16 16l2 2M6 18l2-2M16 8l2-2"/></svg>What do you need to do?</div>
+          <div class="capture-input">
+            <span class="typed"><span data-typed>Remind me to call Sam tomorrow at 10.</span><span class="caret"></span></span>
+            <svg class="send is-ready" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </div>
+        </div>
+        <div class="window__foot" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+          Saved on your Mac first. A little thought, a clear next step.
+        </div>
+      </div>
+      <div class="result-card is-in" aria-hidden="true">
+        <div class="result-card__status"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>Reminder set</div>
+        <div class="result-card__title">Call Sam</div>
+        <div class="result-card__meta"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Tomorrow, 10:00 AM</div>
+      </div>
+      <p class="illustrative">Illustration of the app. This website doesn't connect to your calendar, inbox or accounts.</p>
+    </div>
+  </div>
+</section>
+
+<!-- What Wren does -->
+<section class="section section--paper" id="what-it-does" aria-labelledby="wid-title">
+  <div class="wrap">
+    <div class="intro">
+      <div class="reveal">
+        <p class="eyebrow">A little more room to think</p>
+        <h2 id="wid-title" class="h-section">Less remembering.<br>More doing.</h2>
+      </div>
+      <p class="lede reveal" data-delay="1">Wren helps turn the things you mean to do into things you can actually follow through on. Capture a thought, keep track of a commitment, ask a connected tool to do a piece of work, and return when it is finished.</p>
+    </div>
+    <ol class="flow reveal" data-delay="2" aria-label="How Wren fits together">
+      <li><b>Capture</b><span>Type or say it in ordinary words.</span></li>
+      <li><b>Remember</b><span>Dates become deadlines and reminders.</span></li>
+      <li><b>Delegate</b><span>Send a piece of work to a tool you connected.</span></li>
+      <li><b>Return</b><span>Come back to the result when it's ready.</span></li>
+    </ol>
+  </div>
+</section>
+
+<!-- 01 Capture -->
+<section class="section" aria-labelledby="capture-title">
+  <div class="wrap feature">
+    <div class="reveal">
+      <p class="eyebrow">01 / Capture, naturally</p>
+      <h2 id="capture-title" class="h-feature">One place to capture what matters.</h2>
+      <p class="lede">Start with a sentence, not a form. Give Wren a task, a commitment, a deadline or a reminder in ordinary language, then review what needs doing.</p>
+      <p>A global shortcut opens a small capture panel over whatever you're doing. Wren saves your exact words first, reads any date in them, and turns “I need to finish this report by Friday” into a task called <em>Finish this report</em>, due Friday. Moving, snoozing and completing work the same way: “move the research task to Sunday”, with a preview you confirm.</p>
+      <p class="small"><span class="chip chip--available">Available in the development build</span>&nbsp; Works without any account, and without AI. An optional local model on your Mac can improve how sentences are read.</p>
+    </div>
+    <div class="reveal" data-delay="1">
+      <div class="sentence" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 12h14M13 6l6 6-6 6"/></svg>“Follow up on the proposal on Friday at 2.”</div>
+      <div class="window window--cream" role="img" aria-label="Illustrative task list: Call Sam, tomorrow at 10:00 AM, with a reminder; Follow up on the proposal, Friday at 2:00 PM; Send the project notes, completed.">
+        <div class="window__bar" aria-hidden="true">
+          <div class="window__lights"><i></i><i></i><i></i></div>
+          <div class="window__title"><img src="/assets/brand/wren-icon-128@2x.png" alt="" width="18" height="18">Your day</div>
+          <div></div>
+        </div>
+        <div class="window__body" aria-hidden="true">
+          <div class="tasks__head"><strong>A little clarity.</strong><span>Today</span></div>
+          <div class="task"><span class="ring"></span><div><div class="task__title">Call Sam</div><div class="task__meta">Tomorrow · 10:00 AM</div></div><span class="tag">Reminder</span></div>
+          <div class="task"><span class="ring"></span><div><div class="task__title">Follow up on the proposal</div><div class="task__meta">Friday · 2:00 PM</div></div><span class="tag">Reminder</span></div>
+          <div class="task task--done"><span class="ring ring--done"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m6 12 4 4 8-9"/></svg></span><div><div class="task__title">Send the project notes</div><div class="task__meta">Completed · one less thing on your mind</div></div><span></span></div>
+        </div>
+      </div>
+      <p class="caption">Illustrative task view</p>
+    </div>
+  </div>
+</section>
+
+<!-- 02 Voice -->
+<section class="section section--dark" aria-labelledby="voice-title">
+  <div class="wrap voice-grid">
+    <div class="reveal">
+      <p class="eyebrow">02 / Speak, naturally</p>
+      <h2 id="voice-title" class="h-feature">Just say what needs doing.</h2>
+      <p class="lede">Wren is being built around a simple idea: your personal assistant should fit into the way you already work. A quick voice command or keyboard shortcut should be enough to capture a thought, create a reminder or start a supported action.</p>
+      <ol class="steps" data-steps>
+        <li>Say “Hey Wren”, or press the voice shortcut <span class="keys"><kbd>⌥</kbd><kbd>⇧</kbd><kbd>Space</kbd></span></li>
+        <li>Wren shows that it's listening while you speak</li>
+        <li>Your words appear as they're recognised</li>
+        <li>When you pause, you can check and edit them</li>
+        <li>Return runs it, through the same path as typing</li>
+      </ol>
+      <div class="voice-note">
+        <p style="margin:0 0 8px"><span class="chip chip--dev">In development</span></p>
+        The voice pipeline is built: Wren uses Apple's on-device speech recognition and refuses to run if on-device recognition isn't available, and no audio is stored. It hasn't yet been verified end to end with a real microphone. “Hey Wren” works only while Wren is running, voice is turned on, and you've allowed Microphone and Speech Recognition. While it's on, macOS shows its microphone indicator. When you quit Wren, it stops listening.
+      </div>
+    </div>
+    <div class="reveal" data-delay="1" data-demo="voice">
+      <div class="panel-dark is-listening" role="img" aria-label="Illustration: Wren's panel listening after “Hey Wren”, showing the words “remind me to finish the report by Friday”, then a task, Finish the report, due Friday.">
+        <div class="panel-dark__top" aria-hidden="true"><span><img src="/assets/brand/wren-mark-on-charcoal.svg" alt="" width="16" height="13">Wren</span><span>esc&nbsp; Cancel</span></div>
+        <div class="panel-dark__text" aria-hidden="true" data-voice-text>remind me to finish the report by Friday</div>
+        <div class="listening" aria-hidden="true">
+          <span class="rec"></span>
+          <div class="wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <div><div class="listening__label" data-voice-label>Listening…</div><div class="listening__sub" data-voice-sub>Heard “Hey Wren”. Say what you need, then pause.</div></div>
+        </div>
+        <div class="panel-dark__result is-in" aria-hidden="true" data-voice-result>
+          <div class="result-card__status"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" width="18" height="18"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>Task saved</div>
+          <p>Finish the report</p>
+          <small>Due Friday · reminder Friday, 10:00 AM</small>
+        </div>
+      </div>
+      <p class="caption">Illustrative voice interaction</p>
+    </div>
+  </div>
+</section>
+
+<!-- 03 GPT -->
+<section class="section" aria-labelledby="gpt-title">
+  <div class="wrap feature feature--flip">
+    <div class="reveal">
+      <p class="eyebrow">03 / Give the work a place to go</p>
+      <h2 id="gpt-title" class="h-feature">Ask GPT. Get on with your day.</h2>
+      <p class="lede">Sometimes you do not need another assistant explaining everything to you. You need a tool to do a piece of work, finish it, and let you know when it is ready.</p>
+      <p>Say “Hey Wren, ask GPT to research the fundamentals of quantum physics.” Wren sends just that request with your own ChatGPT account, keeps a record of it while it runs, and tells you once when it's done. The saved request and its answer stay in Wren for you to open later.</p>
+      <ul class="facts">
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m6 12 4 4 8-9"/></svg><span>Uses your ChatGPT sign-in and plan. No API key to paste, and no switch to separate API billing.</span></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m6 12 4 4 8-9"/></svg><span>Only your request is sent. Nothing else from Wren is attached unless you add it yourself.</span></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m6 12 4 4 8-9"/></svg><span>A failed request says why and can be retried. Wren doesn't remote-control the ChatGPT website, and there's no ChatGPT conversation link: your result lives in Wren.</span></li>
+      </ul>
+      <p class="small" style="margin-top:24px"><span class="chip chip--auth">Requires account authorization</span>&nbsp; A real request on a ChatGPT plan has been run through this pipeline in the development build. It needs a ChatGPT plan that allows app sign-in.</p>
+    </div>
+    <div class="reveal" data-delay="1" data-demo="gpt">
+      <div class="window" role="img" aria-label="Illustration of Wren's request list: a GPT research request moves from prepared to running to completed, with a View result link and a notification saying GPT finished.">
+        <div class="window__bar" aria-hidden="true">
+          <div class="window__lights"><i></i><i></i><i></i></div>
+          <div class="window__title"><img src="/assets/brand/wren-icon-128@2x.png" alt="" width="18" height="18">GPT requests</div>
+          <div></div>
+        </div>
+        <div class="window__body requests" aria-hidden="true">
+          <div class="request">
+            <div>
+              <div class="request__q">Research the fundamentals of quantum physics.</div>
+              <div class="request__src">From voice · ChatGPT (your plan)</div>
+              <a class="view-result is-in" data-gpt-view tabindex="-1">View result →</a>
+            </div>
+            <span class="state state--done" data-gpt-state>Completed</span>
+          </div>
+          <div class="request">
+            <div><div class="request__q">Brainstorm names for my project.</div><div class="request__src">From the capture panel</div></div>
+            <span class="state state--done">Completed</span>
+          </div>
+          <div class="request">
+            <div><div class="request__q">Compare these two approaches.</div><div class="request__src">Couldn't reach ChatGPT · retry available</div></div>
+            <span class="state state--failed">Failed</span>
+          </div>
+        </div>
+      </div>
+      <div class="toast is-in" data-gpt-toast aria-hidden="true">
+        <img src="/assets/brand/wren-icon-128@2x.png" alt="" width="34" height="34">
+        <div><b>GPT finished: Research the fundamentals of quantum physics.</b><span>View result.</span></div>
+      </div>
+      <p class="caption">Illustrative request history</p>
+    </div>
+  </div>
+</section>
+
+<!-- 04 Email -->
+<section class="section section--paper" aria-labelledby="mail-title">
+  <div class="wrap feature">
+    <div class="reveal">
+      <p class="eyebrow">04 / Attention, not alerts</p>
+      <h2 id="mail-title" class="h-feature">Your inbox, without the noise.</h2>
+      <p class="lede">Your inbox holds more than messages. It holds decisions, opportunities, deadlines and things worth remembering. Wren is being built to help you notice what deserves attention and leave the rest alone.</p>
+      <p>The design: a short morning email digest, a quiet alert only when something genuinely urgent arrives, and a reason next to everything Wren highlights, which you can correct. Spam and Trash are never looked at, and email is sorted on your Mac by rules, never sent to an AI service.</p>
+      <ol class="ladder" aria-label="What Gmail access does and doesn't allow">
+        <li><div><b>Reading messages</b><span>Headers, labels and Gmail's short preview. Read-only permission.</span></div><span class="chip chip--dev">In development</span></li>
+        <li><div><b>Assessing priority</b><span>Wren's own reading, on your Mac. It changes nothing in Gmail.</span></div><span class="chip chip--dev">In development</span></li>
+        <li><div><b>Marking a message as read</b><span>A separate permission you'd grant on purpose, for one action on one message.</span></div><span class="chip chip--dev">In development</span></li>
+        <li><div><b>Sending, archiving, deleting</b><span>Not something Wren does.</span></div><span class="chip chip--soon">Not planned now</span></li>
+      </ol>
+      <p class="small" style="margin-top:20px">Built and tested with simulated mail. Connecting a real Gmail account is waiting on Google sign-in setup for the app.</p>
+    </div>
+    <div class="reveal" data-delay="1">
+      <div class="window window--cream" role="img" aria-label="Illustrative morning email digest with fictional examples: a decision that needs you, a new opportunity, something before tomorrow's meeting, and a few updates that can wait.">
+        <div class="window__bar" aria-hidden="true">
+          <div class="window__lights"><i></i><i></i><i></i></div>
+          <div class="window__title"><img src="/assets/brand/wren-icon-128@2x.png" alt="" width="18" height="18">Email digest</div>
+          <div></div>
+        </div>
+        <div class="window__body" aria-hidden="true">
+          <div class="briefing__date">Tuesday morning</div>
+          <div class="briefing__title">Three things worth your attention.</div>
+          <div class="mail"><div><div class="mail__cat">A decision that needs you</div><div class="mail__line">Sam · Can we confirm the proposal today?</div><div class="mail__why">Why: asks you something · due today</div></div><div class="mail__actions"><span class="mini">Open</span><span class="mini mini--muted">Mark as read</span></div></div>
+          <div class="mail"><div><div class="mail__cat">A new opportunity</div><div class="mail__line">Recruiting team · A conversation worth having.</div><div class="mail__why">Why: work or recruiting</div></div><div class="mail__actions"><span class="mini">Open</span></div></div>
+          <div class="mail"><div><div class="mail__cat">Before tomorrow's meeting</div><div class="mail__line">Project team · The agenda is ready to review.</div><div class="mail__why">Why: a meeting is coming up</div></div><div class="mail__actions"><span class="mini">Open</span></div></div>
+          <div class="mail"><div><div class="mail__cat mail__cat--quiet">The rest can wait</div><div class="mail__line">A few non-urgent updates.</div></div><div></div></div>
+        </div>
+      </div>
+      <p class="caption">Fictional, illustrative messages. Not a connected inbox.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 05 Reminders -->
+<section class="section" aria-labelledby="rem-title">
+  <div class="wrap">
+    <div class="intro reveal">
+      <div>
+        <p class="eyebrow">05 / A thought becomes a next step</p>
+        <h2 id="rem-title" class="h-feature">Remember it now.<br>Let Wren remind you later.</h2>
+      </div>
+      <div>
+        <p class="lede">Reminders are handed to macOS's own notification system when you set them, so a reminder that was scheduled successfully can still arrive after you've quit Wren, as long as notifications are allowed and macOS delivers them. Completing, snoozing or moving it updates what's scheduled, without duplicates.</p>
+        <p class="small"><span class="chip chip--dev">In development</span>&nbsp; Scheduling is built and tested. A final live check of delivery after quitting is still to be done. A quit Wren doesn't listen for “Hey Wren” or check email.</p>
+      </div>
+    </div>
+    <ol class="lifecycle reveal" data-delay="1" data-demo="lifecycle" aria-label="The life of a reminder">
+      <li class="is-done"><span class="node" aria-hidden="true"></span><div><b>Set</b><span>“Remind me to call Sam tomorrow at 10.”</span></div></li>
+      <li class="is-done"><span class="node" aria-hidden="true"></span><div><b>Saved</b><span>In Wren, with its time and status.</span></div></li>
+      <li class="is-done"><span class="node" aria-hidden="true"></span><div><b>Scheduled</b><span>Handed to macOS notifications.</span></div></li>
+      <li class="is-done"><span class="node" aria-hidden="true"></span><div><b>Delivered</b><span>macOS shows it at the time.</span></div></li>
+      <li class="is-done"><span class="node" aria-hidden="true"></span><div><b>Done or snoozed</b><span>Right from the notification.</span></div></li>
+    </ol>
+    <div class="reminder-stage">
+      <div class="notif reveal" data-delay="2" role="img" aria-label="Illustration of a macOS notification from Wren: Call Sam, with Done and Remind me in 1 hour buttons.">
+        <img src="/assets/brand/wren-icon-128@2x.png" alt="" width="38" height="38" aria-hidden="true">
+        <div aria-hidden="true"><div class="notif__app"><span>WREN</span><span>now</span></div><div class="notif__title">Call Sam</div><div class="notif__body">Reminder · Tomorrow, 10:00 AM</div></div>
+        <div class="notif__actions" aria-hidden="true"><span data-done>Done</span><span>Remind me in 1 hour</span></div>
+      </div>
+      <p class="caption reveal" data-delay="3" style="text-align:left;margin:0">Illustrative notification. Delivery depends on your notification settings and macOS, including Focus.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 06 Mac companion -->
+<section class="section section--paper" aria-labelledby="mac-title">
+  <div class="wrap">
+    <div class="intro reveal">
+      <div>
+        <p class="eyebrow">06 / One quiet companion</p>
+        <h2 id="mac-title" class="h-feature">At home on your Mac.</h2>
+      </div>
+      <p class="lede">Wren is designed to feel at home on your Mac: nearby when you need it, out of the way when you do not. One app, one bird in the menu bar, a main window when you want to look around, and a small panel when you just want to get something down. Closing the window keeps Wren nearby; quitting it means it has stopped.</p>
+    </div>
+    <div class="desk reveal" data-delay="1" role="img" aria-label="Illustration of Wren on a Mac desktop: one Wren bird in the menu bar, the main window showing today's items, the capture panel, a reminder notification, the connectors settings, and the Wren icon in the Dock.">
+      <div class="menubar" aria-hidden="true">
+        <div class="menubar__left"><span>Wren</span><span>File</span><span>Edit</span><span>Window</span></div>
+        <div class="menubar__right"><span class="menubar__bird"><img src="/assets/brand/wren-mark.svg" alt="" width="18" height="15"></span><span>Tue 9:41</span></div>
+      </div>
+      <div class="window desk__window" aria-hidden="true">
+        <div class="window__bar"><div class="window__lights"><i></i><i></i><i></i></div><div class="window__title">Wren</div><div></div></div>
+        <div class="desk__side">
+          <div class="desk__nav"><span class="on">Overview</span><span>Items</span><span>Inbox</span><span>Goals</span><span>Delegate</span><span>Connectors</span><span>Settings</span></div>
+          <div class="desk__main"><b>Today</b>
+            <div class="desk__row"><span>Call Sam</span><em>10:00 AM</em></div>
+            <div class="desk__row"><span>Follow up on the proposal</span><em>Fri 2:00 PM</em></div>
+            <div class="desk__row"><span>Finish the report</span><em>Friday</em></div>
+          </div>
+        </div>
+      </div>
+      <div class="desk__capture" aria-hidden="true"><small>⌥ Space · Capture</small>Book the dentist for next week</div>
+      <div class="notif desk__notif" aria-hidden="true">
+        <img src="/assets/brand/wren-icon-128@2x.png" alt="" width="30" height="30">
+        <div><div class="notif__app"><span>WREN</span><span>now</span></div><div class="notif__title">Call Sam</div><div class="notif__body">Reminder · 10:00 AM</div></div>
+      </div>
+      <div class="window desk__settings" aria-hidden="true">
+        <div class="window__bar"><div class="window__lights"><i></i><i></i><i></i></div><div class="window__title">Connectors</div><div></div></div>
+        <div class="window__body">
+          <div class="conn-row"><span>ChatGPT</span><span class="chip chip--auth">Sign-in</span></div>
+          <div class="conn-row"><span>Gmail</span><span class="chip chip--dev">In development</span></div>
+          <div class="conn-row"><span>Slack</span><span class="chip chip--soon">Coming soon</span></div>
+        </div>
+      </div>
+      <div class="dock" aria-hidden="true"><i></i><i></i><span class="running"><img src="/assets/brand/wren-icon-128@2x.png" alt="" width="34" height="34"></span><i></i><i></i></div>
+    </div>
+    <p class="caption">Illustration, not a screenshot of a released build.</p>
+  </div>
+</section>
+
+<!-- Connectors -->
+<section class="section" id="connectors" aria-labelledby="conn-title">
+  <div class="wrap">
+    <div class="connectors-head">
+      <div class="reveal">
+        <p class="eyebrow">Connected, by choice</p>
+        <h2 id="conn-title" class="h-section">Your tools. Your permission. One quieter workflow.</h2>
+      </div>
+      <div class="reveal" data-delay="1">
+        <p class="lede">Wren is being designed to work with the tools you already use. Connections are explicit, permissions matter, and an integration should be honest about what it can actually do.</p>
+        <div class="legend" aria-label="Status legend">
+          <span class="chip chip--available">Available</span>
+          <span class="chip chip--auth">Requires account authorization</span>
+          <span class="chip chip--dev">In development</span>
+          <span class="chip chip--soon">Coming soon</span>
+        </div>
+        <p class="small" style="margin-top:14px">Statuses describe Wren's current development build. Wren itself isn't available to download yet, and this site never asks for access to your accounts.</p>
+      </div>
+    </div>
+    <div class="directory reveal" data-delay="1" role="list">
+      <div class="conn" role="listitem">
+        <span class="conn__icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 6h16v10H8l-4 4z"/></svg></span>
+        <div class="conn__name">ChatGPT<span class="conn__kind">Your OpenAI account</span></div>
+        <p class="conn__desc">Delegate questions and research, then return to the saved request and its result.<small>Sign in on OpenAI's own page. Uses your ChatGPT plan, not an API key.</small></p>
+        <span class="chip chip--auth">Requires account authorization</span>
+      </div>
+      <div class="conn" role="listitem">
+        <span class="conn__icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg></span>
+        <div class="conn__name">Gmail<span class="conn__kind">Your Google account</span></div>
+        <p class="conn__desc">Find what deserves attention, a daily digest, quiet alerts for urgent mail, and Mark as read when you allow it.<small>Read-only by default. Waiting on Google sign-in setup for the app.</small></p>
+        <span class="chip chip--dev">In development</span>
+      </div>
+      <div class="conn" role="listitem">
+        <span class="conn__icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg></span>
+        <div class="conn__name">Calendar<span class="conn__kind">On your Mac, or Google Calendar</span></div>
+        <p class="conn__desc">Understand what's coming up: “what meetings do I have tomorrow?”, today's events in your briefing, and a reminder from any event.<small>Read-only. The calendars already on your Mac need one macOS permission; Google Calendar directly needs the Google sign-in.</small></p>
+        <span class="chip chip--dev">In development</span>
+      </div>
+      <div class="conn" role="listitem">
+        <span class="conn__icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></span>
+        <div class="conn__name">Voice<span class="conn__kind">A capability on your Mac</span></div>
+        <p class="conn__desc">“Hey Wren” and a voice shortcut, through the same path as typing, with a chance to edit what you said.<small>Apple's on-device speech recognition. Needs Microphone and Speech Recognition permission.</small></p>
+        <span class="chip chip--dev">In development</span>
+      </div>
+      <div class="conn" role="listitem">
+        <span class="conn__icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></span>
+        <div class="conn__name">Notion<span class="conn__kind">Your workspace</span></div>
+        <p class="conn__desc">Search and read pages you've given Wren access to, include one in a request, and create a page after you confirm.<small>Early work exists; it isn't verified with a real workspace yet.</small></p>
+        <span class="chip chip--soon">Coming soon</span>
+      </div>
+      <div class="conn" role="listitem">
+        <span class="conn__icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 4v16M15 4v16M4 9h16M4 15h16"/></svg></span>
+        <div class="conn__name">Slack<span class="conn__kind">Your workspace</span></div>
+        <p class="conn__desc">Find and summarise the work conversations and mentions that need you.<small>Planned. Nothing has been built yet.</small></p>
+        <span class="chip chip--soon">Coming soon</span>
+      </div>
+      <div class="conn" role="listitem">
+        <span class="conn__icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/></svg></span>
+        <div class="conn__name">Local files<span class="conn__kind">On your Mac</span></div>
+        <p class="conn__desc">Work with documents you choose, with explicit permission for each.<small>Planned.</small></p>
+        <span class="chip chip--soon">Coming soon</span>
+      </div>
+      <div class="conn" role="listitem">
+        <span class="conn__icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M7 4h7l6 6v7a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3z"/><path d="M9 13l2 2 4-4"/></svg></span>
+        <div class="conn__name">Apple Shortcuts<span class="conn__kind">macOS automation</span></div>
+        <p class="conn__desc">Connect Wren to the automations you already use on your Mac.<small>Planned.</small></p>
+        <span class="chip chip--soon">Coming soon</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Why Wren principles -->
+<section class="section section--paper" id="why-wren" aria-labelledby="why-title">
+  <div class="wrap principles-grid">
+    <div class="reveal">
+      <p class="eyebrow">A different kind of assistant</p>
+      <h2 id="why-title" class="h-section">Useful technology should feel like less technology.</h2>
+    </div>
+    <ol class="principles">
+      <li class="reveal"><span class="num">i.</span><div><h3>Capture without friction</h3><p>Express what needs doing in ordinary language. Wren saves your words first, and nothing you type is lost because something else failed.</p></div></li>
+      <li class="reveal"><span class="num">ii.</span><div><h3>Local-first foundations</h3><p>Your items, reminders, goals and history live on your Mac. The core of Wren works without an account or an internet connection.</p></div></li>
+      <li class="reveal"><span class="num">iii.</span><div><h3>Connections by choice</h3><p>External accounts are connected deliberately, and what Wren can do with each one depends on the permissions you grant. Disconnecting is one click.</p></div></li>
+      <li class="reveal"><span class="num">iv.</span><div><h3>Actions, not just answers</h3><p>Wren is built to help you follow through: set the reminder, hand off the piece of work, and bring you back to the result.</p></div></li>
+      <li class="reveal"><span class="num">v.</span><div><h3>Quiet by design</h3><p>Fewer interruptions, with the important commitments still in view. An alert should earn its place.</p></div></li>
+    </ol>
+  </div>
+</section>
+
+<!-- Why the name -->
+<section class="section section--dark" aria-labelledby="name-title">
+  <div class="wrap name">
+    <div class="name__art reveal" aria-hidden="true">
+      <svg class="flight" viewBox="0 0 400 400"><path d="M20 330 C 90 300, 120 210, 190 200 S 300 150, 380 60"/></svg>
+      <img class="name__mark" src="/assets/brand/wren-mark-on-charcoal.svg" alt="" width="200" height="166">
+    </div>
+    <div class="reveal" data-delay="1">
+      <p class="eyebrow">Why Wren?</p>
+      <h2 id="name-title" class="h-feature">Small bird. Quiet presence. Thoughtful purpose.</h2>
+      <blockquote style="margin-top:30px">A wren is a small bird. The name felt right for a companion that should be useful without becoming the centre of attention: alert to what matters, close at hand when needed, and otherwise happy to let you get on with your day.</blockquote>
+      <p style="margin-top:24px">Wren is not meant to take over your work or your decisions. It is meant to help you keep hold of what matters, make room for the next step, and return your attention to the things you care about.</p>
+    </div>
+  </div>
+</section>
+
+<!-- About -->
+<section class="section" id="about" aria-labelledby="about-title">
+  <div class="wrap about">
+    <img class="about__icon reveal" src="/assets/brand/wren-icon-512.png" alt="The Wren app icon: a black bird in flight on a cream rounded square" width="380" height="380" loading="lazy">
+    <div class="reveal" data-delay="1">
+      <p class="eyebrow">Independently built</p>
+      <h2 class="h-section" id="about-title">A personal project.<br><span class="blue">A thoughtful purpose.</span></h2>
+      <p class="lede" style="margin-top:28px">Wren is an independent project, designed and built by Shibaditya Deb.</p>
+      <p>Wren is being built around a simple ambition: create a useful everyday Mac companion that can help people capture commitments, delegate work and keep important things from being forgotten, without demanding constant attention in return.</p>
+      <p>The project is evolving in the open. Its design, implementation and roadmap continue to grow as the product becomes more useful.</p>
+      <div class="about__links">
+        <a class="link-arrow" href="https://github.com/shibadityadeb" rel="noopener" target="_blank">Meet the developer <span aria-hidden="true">↗</span><span class="sr-only">(GitHub profile, opens in a new tab)</span></a>
+        <a class="link-arrow" href="https://github.com/shibadityadeb/wren" rel="noopener" target="_blank">Explore the source <span aria-hidden="true">↗</span><span class="sr-only">(opens in a new tab)</span></a>
+        <a class="link-arrow" href="https://www.linkedin.com/in/shibadityadeb/" rel="noopener" target="_blank">Connect on LinkedIn <span aria-hidden="true">↗</span><span class="sr-only">(opens in a new tab)</span></a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Free during the preview -->
+<section class="section section--paper" id="pricing" aria-labelledby="price-title">
+  <div class="wrap price">
+    <div class="reveal">
+      <p class="eyebrow">Free during the preview</p>
+      <h2 class="h-section" id="price-title">Good things take a little care.<br><span class="blue">Wren costs nothing for now.</span></h2>
+      <p class="price__big" style="margin-top:44px" aria-hidden="true">Free<small>During the preview</small></p>
+    </div>
+    <div class="reveal" data-delay="1">
+      <p class="lede">Wren is currently free to use during its preview. There is no Wren subscription, no in-app purchase, and no charge from Wren for the features available in the current preview.</p>
+      <p>Connected providers have their own permissions, eligibility requirements, quotas and terms. Wren's ChatGPT connection uses your own ChatGPT account and plan rather than an API key you'd pay for separately; requests count toward your plan's usage, and the plan must allow apps to use it.</p>
+      <ul class="checks">
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 12 4 4 8-9"/></svg>No Wren subscription during the current preview.</li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 12 4 4 8-9"/></svg>No Wren in-app purchase.</li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 12 4 4 8-9"/></svg>No paid feature tiers or checkout flow.</li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 12 4 4 8-9"/></svg>Third-party accounts and services remain subject to their own requirements.</li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 12 4 4 8-9"/></svg>Future pricing, if any, will be communicated transparently.</li>
+      </ul>
+      <a class="btn btn--ghost" href="https://github.com/shibadityadeb/wren" rel="noopener" target="_blank">Follow the journey <span class="arrow arrow--out" aria-hidden="true">↗</span><span class="sr-only">(opens GitHub in a new tab)</span></a>
+    </div>
+  </div>
+</section>
+
+<!-- Privacy narrative -->
+<section class="section" id="privacy" aria-labelledby="privacy-title">
+  <div class="wrap">
+    <div class="intro">
+      <div class="reveal">
+        <p class="eyebrow">Privacy</p>
+        <h2 class="h-section" id="privacy-title">Your Mac. Your data. Your control.</h2>
+      </div>
+      <div class="reveal" data-delay="1">
+        <p class="lede">Privacy is a product decision, not a line in the footer. Wren is designed around local-first foundations and explicit connections to external services. You should understand what stays on your Mac, what leaves it, and why.</p>
+        <a class="link-arrow" href="/privacy/">Read the Privacy Policy <span aria-hidden="true">→</span></a>
+      </div>
+    </div>
+    <div class="privacy-cols">
+      <div class="reveal">
+        <h3>Stays on your Mac</h3>
+        <ul>
+          <li>Your items, reminders, goals, history and settings, in Wren's folder in your user Library.</li>
+          <li>Voice: Wren uses Apple's on-device recognition and doesn't store audio.</li>
+          <li>Email triage runs on your Mac, by rules.</li>
+          <li>The optional local AI model runs on your Mac through Ollama.</li>
+        </ul>
+      </div>
+      <div class="reveal" data-delay="1">
+        <h3>Leaves only when you ask</h3>
+        <ul>
+          <li>A request you send to GPT goes to OpenAI with your account, with only the text you chose.</li>
+          <li>Connected accounts are read with the permissions you granted, when a feature needs them.</li>
+          <li>Email content is never sent to an AI service.</li>
+          <li>No analytics or tracking in the app or on this website.</li>
+        </ul>
+      </div>
+      <div class="reveal" data-delay="2">
+        <h3>Yours to inspect and remove</h3>
+        <ul>
+          <li>Export your items and history, and make or restore backups.</li>
+          <li>Disconnecting an account revokes Wren's access and deletes its sign-in and cached mail.</li>
+          <li>“Remove all Wren data” deletes everything and signs out of connected accounts.</li>
+          <li>Sign-in tokens are private files in Wren's folder, readable only by your macOS user, not the Keychain.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Closing -->
+<section class="closing section--paper" aria-labelledby="closing-title">
+  <div class="wrap reveal">
+    <img class="closing__bird" src="/assets/brand/wren-mark.svg" alt="" width="64" height="53">
+    <h2 class="h-display" id="closing-title" style="font-size:clamp(44px,6.4vw,92px)">Good things take a little care.</h2>
+    <p class="lede">Wren is still finding its wings. Follow along as it grows into the companion it was meant to be.</p>
+    <a class="btn btn--dark" href="https://github.com/shibadityadeb/wren" rel="noopener" target="_blank">Follow the journey <span class="arrow arrow--out" aria-hidden="true">↗</span><span class="sr-only">(opens GitHub in a new tab)</span></a>
+  </div>
+</section>
+
+</main>
+
+<footer class="footer">
+  <div class="wrap">
+    <div class="footer__grid">
+      <div>
+        <a class="brand" href="/" aria-label="Wren home"><img src="/assets/brand/wren-icon-128@2x.png" alt="" width="40" height="40"><span>Wren</span></a>
+        <p class="footer__about">A local-first personal execution companion for macOS. Currently in development · Free during the preview.</p>
+      </div>
+      <div>
+        <h4>Wren</h4>
+        <ul>
+          <li><a href="/#what-it-does">What it does</a></li>
+          <li><a href="/#connectors">Connectors</a></li>
+          <li><a href="/#why-wren">Why Wren</a></li>
+          <li><a href="/#about">About</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Trust</h4>
+        <ul>
+          <li><a href="/privacy/">Privacy Policy</a></li>
+          <li><a href="/#privacy">How privacy works</a></li>
+          <li><a href="/#pricing">Free during the preview</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Elsewhere</h4>
+        <ul>
+          <li><a href="https://github.com/shibadityadeb/wren" rel="noopener" target="_blank">GitHub ↗</a></li>
+          <li><a href="https://github.com/shibadityadeb" rel="noopener" target="_blank">Shibaditya Deb on GitHub ↗</a></li>
+          <li><a href="https://www.linkedin.com/in/shibadityadeb/" rel="noopener" target="_blank">LinkedIn ↗</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="footer__word" aria-hidden="true">Wren<img src="/assets/brand/wren-mark-on-charcoal.svg" alt="" width="120" height="100"></p>
+    <div class="footer__bottom">
+      <span>© 2026 Shibaditya Deb</span>
+      <span>Made independently, with care, for the Mac.</span>
+    </div>
+  </div>
+</footer>
+</body>
+</html>
