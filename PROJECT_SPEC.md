@@ -3,7 +3,7 @@
 > **As built (0.9.0, 2026-10-11): where this spec and the code differ, the code and ARCHITECTURE §35–§44 win.**
 > - Credentials are private files in Wren's data folder (0700/0600), not the Keychain (§128, §199).
 > - There is no OpenAI API-key path (§176). ChatGPT is used through Sign in with ChatGPT and the user's plan, only for requests the user addresses to GPT; results are tracked jobs with completion notifications (ARCHITECTURE §39).
-> - Voice has the push-to-talk shortcut **and** an opt-in "Hey Wren" wake phrase with continuous on-device recognition while Wren runs (§81, §245). No audio is stored.
+> - Voice is explicitly activated only: the voice shortcut or a Voice button records one command, transcribed on-device. The 0.9 "Hey Wren" wake phrase and its background listening were removed in 0.10 (§81, §245 are superseded). No audio is stored.
 > - Gmail: inbox triage, digest, alerts and optional Mark as read (`gmail.modify`) are built; email bodies aren't fetched, and email is never sent to an AI service (ARCHITECTURE §37).
 > - Notion uses Notion MCP, not an integration token.
 > - There is no `~/Library/Logs/Wren/` file log; Wren logs to the unified log (`subsystem com.shibadityadeb.wren`), never with content.

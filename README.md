@@ -54,7 +54,7 @@ The script compiles the Swift package, regenerates the icon from `assets/logo.pn
 
 **Wren is a normal Mac app.** It has a Dock icon, a Wren menu (About Wren, Settings…, Hide Wren, Quit Wren), and exactly one bird in the menu bar. All of them are the same running Wren. Opening Wren from the Dock, Applications, Spotlight or Finder shows its window: what Wren does, your open commitments, goals and waiting items, today's overdue and due items, upcoming reminders, and **New reminder** and **New capture** buttons.
 
-- **Closing the window** keeps Wren running in the menu bar, so "Hey Wren", the shortcuts, the briefing and the check-in keep working. Click the Dock icon or the bird to get it back.
+- **Closing the window** keeps Wren running in the menu bar, so the shortcuts, email checks, the briefing and the check-in keep working. Click the Dock icon or the bird to get it back.
 - **Quitting** (⌘Q, Wren › Quit Wren, or right-click the bird › Quit Wren) stops everything, including the microphone, and removes the bird. Reminders are scheduled with macOS, so they still arrive after you quit. Open Wren from the Dock or Applications to start it again.
 - **Only one Wren runs at a time.** Opening it again brings the running one forward, and Wren locks its data folder so two copies can never change your data at once.
 - **Open at login** is in Settings › Startup (off until you turn it on). Started at login, Wren stays in the menu bar without opening its window.
@@ -84,7 +84,7 @@ The script compiles the Swift package, regenerates the icon from `assets/logo.pn
 | Set a reminder | Type or say "remind me to call Sam tomorrow at 10 AM", "remind me to submit the report Friday evening" or "remind me to take a break every weekday at 3 PM". Or use **New reminder** in the window. |
 | Change or snooze a reminder | "Move my API reminder to Sunday at noon" or "snooze the current reminder for 30 minutes". Wren shows the change; Return confirms. |
 | Ask ChatGPT | Type "ask ChatGPT to explain quantum physics" or "can you check on GPT what is quantum physics". The panel shows the question and the real answer from your ChatGPT plan, or Connect ChatGPT if you aren't signed in. A question that names no assistant lets you choose local AI, ChatGPT or saving it. Start with "Note:" to just save text. |
-| Talk to Wren | Say "Hey Wren" (turn it on in Connectors › Voice) or press **⌥⇧ Space**, then say what you need. |
+| Talk to Wren | Press **⌥⇧ Space** or click **Voice**, then say what you need. Wren never listens in the background. |
 | Quit | ⌘Q, Wren › Quit Wren, right-click the bird › Quit Wren, or **Quit** at the bottom of the menu. |
 
 ### Reminders
@@ -148,7 +148,7 @@ Each connector shows its real state (Available to connect, Connecting, Connected
 | Connector | What you do | What it can do |
 |---|---|---|
 | ChatGPT | **Continue with ChatGPT**, sign in, approve Wren | Send requests you confirm and get the answer back, using your ChatGPT plan |
-| Voice | Turn it on; allow Microphone and Speech Recognition when macOS asks | The voice shortcut and optional "Hey Wren", transcribed on your Mac |
+| Voice | Click Voice or turn on the shortcut; allow Microphone and Speech Recognition when macOS asks | One spoken command at a time, transcribed on your Mac |
 | Gmail | **Connect Google** (one sign-in for both) | Inbox triage with reasons, daily email digest, urgent-mail alerts while Wren runs; optional Mark as read |
 | Google Calendar | **Connect Google** (same sign-in) | Read-only: schedule questions, briefing, reminders from events |
 | Calendar | **Use this Mac's calendars** (macOS asks once) | Read-only: every calendar already on this Mac, including Google, iCloud and Outlook accounts |
@@ -170,12 +170,14 @@ If a connector says **Maintainer setup required**, the copy of Wren you have was
 | Usage limit reached | Your plan's allowance for apps is used up for now. **Manage usage** opens ChatGPT's usage page |
 | Temporarily unavailable | ChatGPT or your connection had a problem; nothing was removed |
 
-Say or type "Hey Wren, search in GPT: explain quantum physics and give me a few beginner resources", "ask GPT to brainstorm names for my project", or use **Delegate**. Wren treats it as a delegation, not a task or a note:
+Say or type "search in GPT: explain quantum physics and give me a few beginner resources", "ask GPT to brainstorm names for my project", or use **Delegate**. Wren treats it as a delegation, not a task or a note:
 
 1. It sends exactly your request (without "ask GPT" and "let me know when it's done") using your ChatGPT plan, once. A repeated Return or voice event doesn't send it twice.
 2. The request is saved as **Running** first, so it keeps going if you close the panel and stays in your history after a restart.
-3. When ChatGPT finishes, Wren tells you once: "GPT finished: … View result." Clicking it (or the entry in Overview › GPT requests or Delegate) opens the saved result: your words, what was sent, the model requested and reported, the times, and the answer exactly as returned.
+3. When ChatGPT finishes, Wren tells you once: "GPT has finished · Research: quantum physics", with **View result**. Clicking it (or the entry in Overview › GPT requests or Delegate) opens the saved result: your words, what was sent, the model requested and reported, the times, and the answer exactly as returned.
 4. Failures say why (not connected, permission, usage limit, network, Wren closed mid-request). **Retry** reruns the same entry; a completed request is never re-sent.
+
+**Thinking and research.** "Ask GPT to think deeply about …", "… use high reasoning effort" or "investigate this carefully" asks the model for **high reasoning effort** (or the strongest level the model's list allows). "Ask GPT to research …", "find sources for …" or "the latest …" also offers ChatGPT's **web search** tool, which plan sharing allows subject to your model and account or workspace policy. The result page shows what was asked for and what ChatGPT reports actually ran: the reasoning effort, how many web searches it made and the sources it cited. If it didn't search, the page says so; Wren never claims research that didn't happen. If your plan refuses web search or the reasoning setting, the request fails with that reason and **Run with standard settings** reruns it without them, only if you choose. This is the Responses API on your plan, not the ChatGPT website's Thinking or Deep Research modes, and Wren doesn't claim it is.
 
 The plan API is called with storage off, so the request doesn't appear in your ChatGPT history and there's no link to a ChatGPT conversation; Wren doesn't invent one. **Open ChatGPT** just opens ChatGPT. Nothing from Wren (items, notes, email) is attached unless you add it yourself in Delegate, which shows exactly what will leave your Mac; private items need ticking and detected secrets are replaced with "[removed]". Wren never switches to paid API billing.
 
@@ -183,20 +185,21 @@ Wren uses your plan only for requests you start and confirm; background tasks ne
 
 **Fallback: copy and open.** Under Connectors › ChatGPT you can also allow copying a prompt and opening ChatGPT in your browser or the ChatGPT app. You paste and send it yourself, then paste the answer back into Delegate. This works without signing in.
 
-### Voice: "Hey Wren" and the voice shortcut
+### Voice: the voice shortcut and the Voice button
 
-Turn these on in Connectors › Voice. Both run the same voice command:
+Voice is a tool you pick up. Wren never listens in the background and has no setting to make it do so.
 
-- **"Hey Wren"** (off until you turn it on). Say "Hey Wren, search in GPT: explain transformers". The capture panel opens with a Siri-style animated orb and **Listening…**, your words appear as you speak, and recording stops when you pause. The panel then shows **Transcribed** with the text editable: fix anything, then press **Return** to run it, or **Esc** to cancel. (Settings › Connectors › Voice can switch to running straight away.) Typing while Wren listens stops listening and keeps the text.
-- **The voice shortcut** (default **⌥⇧ Space**, changeable; Wren tells you if it clashes with another shortcut). Press it, speak, and pause, or press it again when you're done.
+- **The voice shortcut** (default **⌥⇧ Space**, changeable in Connectors › Voice; Wren tells you if it clashes with another shortcut). Press it, speak, and pause, or press it again when you're done.
+- **The Voice button** in the capture panel, the menu-bar popover (microphone icon) and the menu-bar item's right-click menu does the same, even with the shortcut turned off.
 
-Wren shows what it heard and what it did, for example "Reminder set: Call Sam, tomorrow at 10:00 AM, scheduled with macOS". A clear request such as setting a reminder runs straight away. Changing an existing item shows a preview to confirm. Anything unclear gets a short question. **Esc** or **Cancel** stops listening without doing anything.
+The panel shows a red **Recording…** indicator while the microphone is open, and your words appear as you speak. Recording stops when you pause, press **Stop**, or after 30 seconds. The panel then shows the words **transcribed on this Mac**, editable: fix anything and press **Return** to run it, choose **Record again** if it misheard, or press **Esc** to cancel. (Connectors › Voice can switch to running straight away.) Typing while Wren records stops recording and keeps the text.
+
+What you said goes through exactly the same steps as typing: "remind me to call Sam tomorrow at 10 AM" sets a reminder, "ask GPT to research the fundamentals of quantum physics" sends a GPT request, "do I have an important email from the recruiter?" checks Gmail. Wren shows what it did. Changing an existing item shows a preview to confirm, and anything unclear gets a short question.
 
 **Privacy:**
-- Speech is recognised on this Mac with Apple's on-device recognition. Wren refuses server recognition, and no audio is stored or sent anywhere.
-- To hear the phrase at all, the microphone has to stay open while "Hey Wren" is on and Wren is running, so macOS shows its orange microphone indicator (no app other than Siri can avoid that). Until someone speaks, Wren only measures loudness; speech recognition runs on this Mac only while someone is talking, and silence and background noise are never transcribed. Listening pauses while the screen is locked or the display sleeps.
-- Recording stops as soon as a command ends.
-- Quitting Wren turns the microphone off.
+- The microphone opens only after you press the shortcut or a Voice button, and closes when that one command ends. It never restarts by itself: not after a command, an error, a relaunch, unlocking the screen or a permission change. Locking the screen or sleeping cancels a recording. Pressing the shortcut again while Wren is working on a command does nothing.
+- Speech is recognised with Apple's on-device speech model. macOS installs and updates it (System Settings › Keyboard › Dictation); Connectors › Voice shows whether it's installed for your language. Wren refuses server recognition, needs no account, and no audio is stored or sent anywhere.
+- Quitting Wren stops any recording.
 
 If on-device recognition isn't installed for your language, turn on Dictation once in System Settings › Keyboard.
 
@@ -219,7 +222,7 @@ Afterwards Wren shows the Google account, which permissions Google actually gran
 
 **Inbox.** While Wren runs (and "Check for new mail while Wren runs" is on), it checks the inbox every 5 minutes by default, reading only what changed since the last check. It never looks at Spam or Trash. Unread mail is ranked into Urgent, Time-sensitive, Needs a reply, Professional (work, recruiting), Financial, and Informational, each with the reason (for example "deadline within a day; asks you something"). Promotions and newsletters are low priority, not "spam", and an unfamiliar sender isn't treated as suspicious. **Correct** changes a message's category or always/never treats a sender as important.
 
-**Alerts.** Mail at or above your threshold (default: urgent and time-sensitive) gets one notification with the sender, subject and reason. Each message alerts once; another message in the same conversation doesn't alert again unless it's more urgent; several at once become one summary; quiet hours (default 22:00–07:00) hold alerts until they end. Clicking an alert opens the message in Wren, with **Open in Gmail**, **Mark as read** (when allowed), **Add task…**, **Dismiss** and **Snooze**. Dismiss and Snooze change Wren's alert only, never Gmail.
+**Alerts.** Mail at or above your threshold (default: urgent and time-sensitive) gets one notification, such as "Important email from Sam", with the subject and Wren's reason (never the message body). The notification offers **Open email** and **Snooze alert for 1 hour** (the alert comes back once if the message is still unread), plus **Mark as read** when allowed. Each message alerts once; another message in the same conversation doesn't alert again unless it's more urgent; several at once become one summary; quiet hours (default 22:00–07:00) hold alerts until they end. Clicking an alert opens the message in Wren, with **Open in Gmail**, **Mark as read** (when allowed), **Add task…**, **Dismiss** and **Snooze**. Dismiss and Snooze change Wren's alert only, never Gmail. Opening an alert never marks the message read. Settings › Voice, GPT and Gmail has the check interval, alert threshold, quiet hours, digest time and **Play notification sounds**. Checking happens only while Wren is running; after you quit, nothing checks Gmail.
 
 **Email digest.** Once a day at the time and time zone you choose (default 08:00, this Mac's zone), Wren sums up unread inbox mail since the last digest plus older important unread mail (up to 14 days), one entry per conversation: sender, subject, Gmail's own preview (factual), Wren's inferred category and reason, and a suggested next step. If the Mac was asleep or Wren wasn't running, the digest comes once when Wren next runs, marked late. With the digest on, the morning briefing leaves email out so you're not told twice.
 
@@ -278,7 +281,7 @@ Details: ARCHITECTURE.md §18.
 | Notifications | Reminders, briefing, check-in, with actions | The first time a capture gets a reminder, or via **Allow…** in the menu |
 | Login item | Open Wren at login | Only when you turn it on in Settings › Startup; macOS shows it in System Settings › General › Login Items |
 
-The global shortcut needs no Accessibility or Input Monitoring permission. Wren registers exactly one key combination through the standard macOS hotkey API and never sees any other keystroke. The microphone is used only for the voice shortcut and, if you turn it on, "Hey Wren" (see Voice). Wren needs no file access.
+The global shortcut needs no Accessibility or Input Monitoring permission. Wren registers exactly one key combination through the standard macOS hotkey API and never sees any other keystroke. The microphone is used only while you record a voice command (see Voice). Wren needs no file access.
 
 If notifications are off, due items appear under **Due now** in the menu. Wren does not mark them as sent.
 

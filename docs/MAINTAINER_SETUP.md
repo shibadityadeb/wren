@@ -187,8 +187,11 @@ installed copy.
 `/connectors` logs every connector's state, `/chatgpt-connect` starts Sign in with ChatGPT (you still
 sign in in the browser), `/chatgpt-status` logs the account state and listed models, and
 `/chatgpt-ask?task=…` runs one confirmed request, `/reminders` reconciles and lists the reminder
-requests pending in macOS, `/voice-command?text=…` runs text through the voice command step, `/voice`
-presses the voice shortcut, and `/wake?on=1` turns "Hey Wren" on. Read the results with
+requests pending in macOS, `/voice-command?text=…` runs text through the voice command step, and `/voice`
+presses the voice shortcut (the microphone really starts). `/command?text=…` logs `execute <Operation>`
+for the routed operation. `wren-tools live-check chatgpt "<request>"` and the read-only
+`wren-tools live-check gmail` (needs `WREN_GOOGLE_CLIENT_ID`/`_SECRET` in the environment) exercise the
+real providers with the signed-in accounts in Wren's data folder and print counts only. Read the results with
 `/usr/bin/log show --last 5m --predicate 'subsystem == "com.shibadityadeb.wren"'`. Logs never contain
 tokens or request text.
 

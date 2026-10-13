@@ -47,7 +47,7 @@
 <main id="main" class="doc">
   <p class="eyebrow">Privacy Policy</p>
   <h1>Your Mac. Your data. Your control.</h1>
-  <p class="meta">Last updated 13 October 2026 · Applies to this website and to the Wren macOS app as currently developed (version 0.9, a preview that isn't yet available for download).</p>
+  <p class="meta">Last updated 13 October 2026 · Applies to this website and to the Wren macOS app as currently developed (version 0.10, a preview that isn't yet available for download).</p>
 
   <p class="lede">Wren is built around a simple rule: your personal workspace lives on your Mac, and anything that leaves it does so because you asked, using a connection you chose. This policy explains exactly what that means today, including the limits.</p>
 
@@ -110,10 +110,9 @@
 
   <h2 id="voice">5. Voice and microphone</h2>
   <ul>
-    <li>Voice is optional and off until you turn it on. macOS asks you for Microphone and Speech Recognition permission; you can withdraw either in System Settings › Privacy &amp; Security.</li>
+    <li>Voice is optional and starts only when you press the voice shortcut or click a Voice button. Wren never listens in the background and has no setting to do so. macOS asks you for Microphone and Speech Recognition permission; you can withdraw either in System Settings › Privacy &amp; Security.</li>
     <li>Wren uses Apple's speech recognition in on-device mode, and refuses to run if on-device recognition isn't available for your language. Apple's on-device recognition processes speech on your Mac. Wren doesn't record or store audio.</li>
-    <li>With the voice shortcut, the microphone is used from when you press it until you finish speaking.</li>
-    <li>With “Hey Wren” on, the microphone stays open while Wren is running so it can hear the phrase, and macOS shows its microphone indicator. Until someone speaks, Wren only measures loudness; speech recognition runs only while someone is talking. Listening pauses while your screen is locked or the display sleeps, and stops when you quit Wren.</li>
+    <li>The microphone is used from when you press the shortcut or click Voice until your command ends (you pause, press Stop or cancel, or after 30 seconds). It doesn't restart by itself. Locking your screen or quitting Wren stops a recording.</li>
     <li>The recognised text is shown to you and handled exactly like typed text. It's kept only if it becomes an item or request you run.</li>
   </ul>
   <p>The voice feature is still in development and hasn't yet been verified end to end with a real microphone.</p>
@@ -158,7 +157,7 @@
   <ul>
     <li>Reminders are scheduled with macOS's notification system, which can show them even if Wren has been quit. Their text (the reminder's title) appears in Notification Centre and, depending on your settings, on your lock screen.</li>
     <li>Other notifications Wren may show: a GPT request finishing (with the start of your request), an email digest or urgent email alert (sender, subject and Wren's reason), and the morning briefing.</li>
-    <li>Wren only works in the background while it's running. When you quit it, it stops listening for “Hey Wren”, stops checking email and sends nothing. It can start at login only if you turn that on.</li>
+    <li>Wren only works in the background while it's running. When you quit it, it stops any recording, stops checking email and sends nothing. It can start at login only if you turn that on.</li>
   </ul>
 
   <h2 id="logging">11. Logging, diagnostics and analytics</h2>

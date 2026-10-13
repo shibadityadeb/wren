@@ -69,7 +69,7 @@
       const words = final.split(" ");
       const mark = (n) => steps.forEach((li, i) => li.classList.toggle("is-active", i <= n));
       result.classList.remove("is-in"); text.textContent = ""; panel.classList.add("is-listening");
-      label.textContent = "Listening…"; sub.textContent = "Heard “Hey Wren”. Say what you need, then pause.";
+      label.textContent = "Recording…"; sub.textContent = "Say what you need, then pause.";
       mark(0); await wait(900); mark(1);
       for (let i = 1; i <= words.length; i++) { text.textContent = words.slice(0, i).join(" "); await wait(230); }
       mark(2); await wait(1200);
