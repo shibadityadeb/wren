@@ -90,7 +90,7 @@ public struct ActionDescriptor: Sendable {
 /// Where a Wren input surface the user operates directly.
 public enum UserChannel: String, Codable, Sendable {
     case hotkey, popover, notificationAction, settings, checkIn, briefing
-    /// A spoken command ("Hey Wren" or the voice shortcut), transcribed on this Mac.
+    /// A spoken command (voice shortcut or Voice button), transcribed on this Mac.
     case voice
 }
 

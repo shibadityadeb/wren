@@ -11,6 +11,8 @@ public enum AskOutcome: Equatable, Sendable {
     case needsPermission(String)
     case usageLimit(String)
     case needsReview(String)
+    /// ChatGPT refused web search or the reasoning setting; the user may run it with standard settings.
+    case unsupported(String)
     case failed(String, retryable: Bool)
 }
 
@@ -29,6 +31,7 @@ public struct AskCard: Equatable, Sendable {
         case needsPermission(String)
         case usageLimit(String)
         case needsReview(String)
+        case unsupported(String)
         case failed(String, retryable: Bool)
         public var isSending: Bool { if case .sending = self { true } else { false } }
     }
@@ -60,6 +63,7 @@ public struct AskCard: Equatable, Sendable {
         case .needsPermission: return .allowPlan
         case .usageLimit: return .run(.chatgpt)
         case .needsReview: return .openDelegate
+        case .unsupported: return .runStandard
         case let .failed(_, retryable): return retryable ? .run(destination == .choose ? .chatgpt : destination) : nil
         }
     }
@@ -67,6 +71,8 @@ public struct AskCard: Equatable, Sendable {
 
 public enum AskAction: Equatable, Sendable {
     case run(AskCard.Destination), connect, allowPlan, manageUsage, openDelegate, openAnswer, copyAnswer, saveAsNote
+    /// Run again without web search or the reasoning setting ChatGPT refused.
+    case runStandard
     public func title(_ card: AskCard) -> String {
         switch self {
         case .run(.chatgpt): if case .ready = card.phase { return "Ask ChatGPT" } else { return "Try again" }
@@ -79,6 +85,7 @@ public enum AskAction: Equatable, Sendable {
         case .openAnswer: return "Open result"
         case .copyAnswer: return "Copy answer"
         case .saveAsNote: return "Save as a note instead"
+        case .runStandard: return "Run with standard settings"
         }
     }
 }
@@ -180,6 +187,8 @@ public final class AskService {
         case .planEnabled, .usageLimitReached, .temporarilyUnavailable: break
         }
         let rec = DelegationRecord(task: r.prompt, destination: .chatgptPlan, depth: r.depth, now: clock.now)
+        rec.kind = r.kind
+        rec.webSearchRequested = r.wantsWebSearch
         rec.prompt = draft.prompt
         rec.original = r.original
         rec.channelRaw = channel.rawValue
@@ -187,16 +196,25 @@ public final class AskService {
         rec.status = .running
         store.context.insert(rec)
         try? store.context.save()
-        launch(rec, draft: draft, target: target, channel: channel, perRequest: perRequest)
+        let options = ResponseOptions(reasoningEffort: r.wantsHighEffort || draft.depth == .deep ? "high" : nil, webSearch: r.wantsWebSearch)
+        launch(rec, draft: draft, options: options, target: target, channel: channel, perRequest: perRequest)
         return .started(rec.id)
     }
 
     /// Runs a retryable failure again on the same record (no second record, never after success).
     @discardableResult
-    public func retry(_ id: UUID) -> AskStart {
+    public func retry(_ id: UUID) -> AskStart { rerun(id, standardSettings: false) }
+
+    /// After ChatGPT refused web search or the reasoning setting: runs the same text again without
+    /// them, on the same record. Only when the user chooses it; the record then says what ran.
+    @discardableResult
+    public func retryWithStandardSettings(_ id: UUID) -> AskStart { rerun(id, standardSettings: true) }
+
+    func rerun(_ id: UUID, standardSettings: Bool) -> AskStart {
         guard let rec = record(id), let prompt = rec.prompt else { return .notRun(.failed("No such request.", retryable: false)) }
         guard tasks[id] == nil else { return .duplicate(id) }
-        guard rec.canRetry else { return .notRun(.failed("This request can't be retried.", retryable: false)) }
+        let allowed = standardSettings ? (rec.status == .failed && rec.failure == .unsupportedCapability) : rec.canRetry
+        guard allowed else { return .notRun(.failed("This request can't be retried.", retryable: false)) }
         switch chatgpt.account {
         case .notConnected, .connecting: return .notRun(.notConnected)
         case let .reauthorizationRequired(m): return .notRun(.reconnect(m))
@@ -204,12 +222,20 @@ public final class AskService {
         default: break
         }
         let channel = rec.channel ?? .popover
+        let options: ResponseOptions
+        if standardSettings {
+            options = .standard
+            rec.webSearchRequested = false; rec.requestedEffort = nil
+        } else {
+            options = ResponseOptions(reasoningEffort: rec.requestedEffort ?? (rec.depth == .deep ? "high" : nil), webSearch: rec.webSearchRequested)
+        }
         rec.status = .running; rec.error = nil; rec.failure = nil; rec.response = nil; rec.notifiedAt = nil; rec.completedAt = nil
+        rec.reportedEffort = nil; rec.webSearchCalls = 0; rec.sources = []; rec.startedAt = nil
         rec.updatedAt = clock.now
         try? store.context.save()
         let target = TargetRef(kind: "prompt", id: UUID().uuidString, label: String(rec.task.prefix(80)))
         // The exact text that was sent before (and reviewed then) is sent again, nothing added.
-        launch(rec, draft: .exact(prompt, depth: rec.depth, containsPrivate: rec.includesPrivate), target: target, channel: channel, perRequest: { _ in })
+        launch(rec, draft: .exact(prompt, depth: rec.depth, containsPrivate: rec.includesPrivate), options: options, target: target, channel: channel, perRequest: { _ in })
         return .started(id)
     }
 
@@ -244,21 +270,22 @@ public final class AskService {
         return stuck.count
     }
 
-    static func request(_ draft: HandoffDraft, model: String?, target: TargetRef, channel: UserChannel, at: Date) -> ActionRequest {
+    static func request(_ draft: HandoffDraft, model: String?, options: ResponseOptions = .standard, target: TargetRef, channel: UserChannel, at: Date) -> ActionRequest {
         var p: [String: JSONValue] = ["prompt": .string(draft.prompt), "allowance": .string("ChatGPT plan")]
         if let model { p["model"] = .string(model) }
+        if let e = options.reasoningEffort { p["reasoningEffort"] = .string(e) }
+        if options.webSearch { p["webSearch"] = .bool(true) }
         return ActionRequest(action: BuiltInAction.delegateToExternalAI, target: target, parameters: p, origin: .user(channel), createdAt: at,
                              containsPrivateContent: draft.containsPrivate)
     }
 
-    private func launch(_ rec: DelegationRecord, draft: HandoffDraft, target: TargetRef, channel: UserChannel, perRequest: @escaping @MainActor (String) -> Void) {
+    private func launch(_ rec: DelegationRecord, draft: HandoffDraft, options: ResponseOptions, target: TargetRef, channel: UserChannel, perRequest: @escaping @MainActor (String) -> Void) {
         let id = rec.id, k = Self.key(draft.prompt)
         inFlight[k] = id
         rec.attempts += 1
-        rec.startedAt = clock.now
         tasks[id] = Task { [weak self] in
             guard let self else { return .failed("Cancelled.", retryable: true) }
-            let o = await self.run(rec, draft: draft, target: target, channel: channel, perRequest: perRequest)
+            let o = await self.run(rec, draft: draft, options: options, target: target, channel: channel, perRequest: perRequest)
             self.inFlight[k] = nil
             self.tasks[id] = nil
             if rec.status.isFinal { self.onFinished(rec) }
@@ -266,7 +293,7 @@ public final class AskService {
         }
     }
 
-    private func run(_ rec: DelegationRecord, draft: HandoffDraft, target: TargetRef, channel: UserChannel,
+    private func run(_ rec: DelegationRecord, draft: HandoffDraft, options wanted: ResponseOptions, target: TargetRef, channel: UserChannel,
                      perRequest: @escaping @MainActor (String) -> Void) async -> AskOutcome {
         let c = chatgpt
         func save() { rec.updatedAt = clock.now; try? store.context.save() }
@@ -281,9 +308,16 @@ public final class AskService {
             let m = "ChatGPT didn't list any models for your account. Try again, or check Connectors › ChatGPT."
             return fail(.unavailable, m, .failed(m, retryable: true))
         }
+        // A model that lists its reasoning levels gets the strongest it allows; one that lists none
+        // takes no reasoning setting. When the list says nothing, the response reports what ran.
+        var options = wanted
+        if wanted.reasoningEffort != nil { options.reasoningEffort = c.models.first { $0.slug == model }?.effort(forDeepThinking: wanted.reasoningEffort!) ?? wanted.reasoningEffort }
         rec.requestedModel = model
+        rec.requestedEffort = options.reasoningEffort
+        rec.webSearchRequested = options.webSearch
+        rec.startedAt = clock.now
         save()
-        let request = Self.request(draft, model: model, target: target, channel: channel, at: clock.now)
+        let request = Self.request(draft, model: model, options: options, target: target, channel: channel, at: clock.now)
         let id = rec.id
         let delta: @Sendable (String) -> Void = { [weak self] d in
             Task { @MainActor in perRequest(d); self?.onDelta(id, d) }
@@ -291,11 +325,12 @@ public final class AskService {
         do {
             let reply = try await broker.performExternal(request, confirmation: broker.confirm(request, includingPrivate: draft.containsPrivate),
                                                          detail: { "ChatGPT plan · requested \($0.requestedModel) · reported \($0.reportedModel ?? "not reported")" }) {
-                try await c.respond(model: model, input: draft.prompt, origin: .user(channel), onDelta: delta)
+                try await c.respond(model: model, input: draft.prompt, options: options, origin: .user(channel), onDelta: delta)
             }
             try Task.checkCancellation()
             let source = "ChatGPT plan\(c.email.map { " (\($0))" } ?? "") · \(reply.reportedModel ?? model)"
             rec.response = reply.text; rec.responseSource = source; rec.reportedModel = reply.reportedModel
+            rec.reportedEffort = reply.reportedEffort; rec.webSearchCalls = reply.webSearchCalls; rec.sources = reply.sources
             rec.status = .completed; rec.completedAt = clock.now; rec.failure = nil; rec.error = nil
             save()
             return .answered(text: reply.text, source: source, recordID: rec.id)
@@ -314,6 +349,7 @@ public final class AskService {
                 rec.error = m; rec.failure = .unavailable; rec.completedAt = clock.now; save()
                 return .partial(text: partial, source: "ChatGPT plan · \(model)", recordID: rec.id, message: m)
             case .usageLimitReached: return fail(.usageLimit, m, .usageLimit(m))
+            case .unsupportedCapability: return fail(.unsupportedCapability, m, .unsupported(m))
             case .planNotAuthorized, .notEligible: return fail(.planNotAuthorized, m, .needsPermission(m))
             case .reauthorizationRequired, .identityNotVerified, .accountMismatch, .clientRejected: return fail(.reauthorizationRequired, m, .reconnect(m))
             case .temporarilyUnavailable, .incomplete, .interrupted: return fail(.unavailable, m, .failed(m, retryable: true))
@@ -334,11 +370,28 @@ public final class AskService {
         case .failed, .cancelled:
             switch r.failure {
             case .usageLimit?: return .usageLimit(r.error ?? "")
+            case .unsupportedCapability?: return .unsupported(r.error ?? "")
             case .planNotAuthorized?: return .needsPermission(r.error ?? "")
             case .reauthorizationRequired?: return .reconnect(r.error ?? "")
             default: return .failed(r.error ?? "Failed.", retryable: r.canRetry)
             }
         default: return nil
         }
+    }
+}
+
+/// Words for a finished delegation's notification: the kind and the user's own request, shortened.
+public enum DelegationText {
+    public static func notificationLine(_ r: DelegationRecord) -> String {
+        "\(r.kind.label): \(topic(r.task))"
+    }
+
+    /// "Research the fundamentals of quantum physics." → "the fundamentals of quantum physics".
+    public static func topic(_ task: String) -> String {
+        var t = task.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ".!")))
+        t = t.replacingOccurrences(of: #"^(?:please\s+)?(?:research|investigate|look into|think (?:deeply|carefully|hard) about|explain|summari[sz]e|analy[sz]e)\s+(?:about\s+)?"#,
+                                   with: "", options: [.regularExpression, .caseInsensitive])
+        if t.count > 90 { t = String(t.prefix(89)) + "…" }
+        return t.isEmpty ? task : t
     }
 }

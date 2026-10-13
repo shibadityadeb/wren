@@ -21,6 +21,12 @@ if args.count >= 3 && args[1] == "live-check" && args[2] == "chatgpt" {
     Task { @MainActor in exit(await LiveCheck.chatgpt(prompt: prompt, dataFolder: folder)) }
     dispatchMain()
 }
+if args.count >= 3 && args[1] == "live-check" && args[2] == "gmail" {
+    let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent(ProcessInfo.processInfo.environment["WREN_DATA_FOLDER_NAME"] ?? "Wren", isDirectory: true)
+    Task { @MainActor in exit(await LiveCheck.gmail(dataFolder: folder)) }
+    dispatchMain()
+}
 guard args.count >= 4 else { usage() }
 let logoURL = URL(fileURLWithPath: args[2])
 let out = URL(fileURLWithPath: args[3])

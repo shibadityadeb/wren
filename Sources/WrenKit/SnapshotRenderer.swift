@@ -111,10 +111,12 @@ public enum SnapshotRenderer {
         }
         // GPT delegations and the inbox (sample data only).
         let gptDone = DelegationRecord(task: "Explain quantum physics and give me a few useful beginner resources.", destination: .chatgptPlan, depth: .normal, now: now.addingTimeInterval(-300))
-        gptDone.original = "Hey Wren, search in GPT: explain quantum physics and give me a few useful beginner resources."
+        gptDone.original = "Ask GPT to research quantum physics and give me a few useful beginner resources."
         gptDone.prompt = gptDone.task; gptDone.status = .completed; gptDone.requestedModel = "gpt-6-luna"; gptDone.reportedModel = "gpt-6-luna"
         gptDone.response = "Quantum physics describes how matter and energy behave at very small scales, where particles act like waves and outcomes are probabilistic.\n\nBeginner resources:\n1. \"Quantum Physics for Babies\" (yes, really) for intuition\n2. MIT OpenCourseWare 8.04, lectures 1–3\n3. 3Blue1Brown's videos on wave functions"
         gptDone.completedAt = now.addingTimeInterval(-280); gptDone.notifiedAt = gptDone.completedAt; gptDone.attempts = 1; gptDone.channelRaw = UserChannel.voice.rawValue
+        gptDone.kind = .research; gptDone.webSearchRequested = true; gptDone.webSearchCalls = 2; gptDone.reportedEffort = "medium"; gptDone.startedAt = gptDone.createdAt
+        gptDone.sources = [CitedSource(title: "MIT OpenCourseWare 8.04 Quantum Physics I", url: "https://ocw.mit.edu/courses/8-04-quantum-physics-i-spring-2016/")]
         let running = DelegationRecord(task: "Compare these two approaches.", destination: .chatgptPlan, depth: .normal, now: now.addingTimeInterval(-20))
         running.prompt = running.task; running.status = .running; running.requestedModel = "gpt-6-luna"; running.attempts = 1
         let failed = DelegationRecord(task: "Research rust async runtimes.", destination: .chatgptPlan, depth: .normal, now: now.addingTimeInterval(-900))
@@ -157,7 +159,7 @@ public enum SnapshotRenderer {
         listening.voiceEnabled = true; listening.recording = true; listening.voiceLevel = 0.55
         listening.text = "search in GPT explain quantum physics and give me"
         listening.lastVoiceText = listening.text
-        listening.voiceStatus = "Heard “Hey Wren”. Say what you need, then pause."
+        listening.voiceStatus = "Say what you need, then pause, or press the shortcut again to stop."
         try render(CaptureView(state: listening, submit: { _ in }, cancel: {}).padding(20).background(Color(white: 0.85)),
                    size: CGSize(width: 600, height: 200), appearance: .aqua, to: dir.appendingPathComponent("capture-voice-listening-light.png"))
         try render(CaptureView(state: listening, submit: { _ in }, cancel: {}).padding(20).background(Color(white: 0.15)),

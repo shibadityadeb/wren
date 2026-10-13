@@ -2,6 +2,20 @@
 
 Versions follow [semantic versioning](https://semver.org). The `VERSION` file is the source of truth; release tags are `v<VERSION>` (stable) or `v<VERSION>-preview.N` (prerelease).
 
+## [0.10.0] (unreleased)
+
+Wren as a personal executor: explicitly started voice, honest GPT thinking and research, useful email alerts, and one router for every command.
+
+- **Voice is a tool you pick up, never a background listener.** The "Hey Wren" wake phrase and its always-open microphone are removed (the old preference is deleted at launch). Press the voice shortcut (⌥⇧ Space by default) or click **Voice** in the capture panel, the menu-bar popover or the menu-bar item's menu. Wren records one command, stops when you pause (or press Stop, or after 30 s), shows the words transcribed on this Mac to fix or **Record again**, then runs them. The microphone never restarts on its own: not after a command, an error, a relaunch, a screen unlock or a permission change. Locking the screen or sleeping cancels a recording. Pressing the shortcut while a command is being handled does nothing. Connectors › Voice shows the local transcription model's status (Apple's on-device model, managed by macOS) with a link to Dictation settings.
+- **One execution router.** Typed text, the capture panel and voice transcripts all go through `ExecutionRouter`, which names one operation (CreateTask, CreateReminder, QueryStoredItems, ChangeItem, DelegateToChatGPT, SearchGmail, OpenEmail, MarkEmailRead, QueryCalendar, OpenDelegationResult, ClarifyIntent…) before anything runs. Each run records a structured result. "Ask GPT." with nothing to ask now asks what to send instead of saving a note. "Open the latest email from Sam" and "show the GPT result" work. The same words submitted twice in a row (a repeated Return or voice event) and a notification action delivered twice run once.
+- **GPT thinking and research.** "Think deeply/carefully", "use high reasoning effort" and "investigate … carefully" ask for high reasoning effort (only where the model's list allows it); "research …", "find sources" and "latest …" offer ChatGPT's web search tool. The result page shows what was asked for and what ChatGPT reports actually ran (reasoning effort, number of web searches, cited sources), never assumes. If the plan refuses web search or the reasoning setting, the request fails with that reason; **Run with standard settings** reruns it only when you choose. New Queued, Needs reconnection and Usage limit labels; search within a result.
+- **Notifications.** "GPT has finished · Research: quantum physics", opening the exact result. Email alerts read "Important email from Sam" with the subject and Wren's reason, and offer **Open email**, **Snooze alert for 1 hour** (it really comes back once if still unread) and, when allowed, Mark as read. New **Play notification sounds** setting.
+- Fixed: while the Mac was locked, Wren's mailbox file couldn't be saved (it used complete file protection), so alert bookkeeping was lost and a restart could alert again. It now uses protection until first login.
+- Fixed: "Move that reminder to Sunday" right after setting a reminder said no reminder had gone off yet; "that/this reminder" now means the one you were just talking about.
+- Settings › **Voice, GPT and Gmail** shows each tool's real state in one place (voice model and permissions, ChatGPT account, Google scopes) with email alert frequency, quiet hours and the morning email digest.
+- `wren-tools live-check chatgpt` reports effort and web-search evidence; new read-only `wren-tools live-check gmail`.
+- Data version 7 (new GPT request fields; a backup is made before the upgrade). Wren 0.9 won't open 0.10 data.
+
 ## [0.9.0] (unreleased)
 
 Real integrations, tracked GPT requests, Gmail inbox intelligence, and an audit (docs/AUDIT_REPORT.md).

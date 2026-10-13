@@ -3,8 +3,32 @@ import Foundation
 public struct ChatGPTModel: Codable, Equatable, Sendable, Identifiable, Hashable {
     public var slug: String
     public var displayName: String
+    /// Reasoning efforts the model list says this model accepts, when it says (`supported_reasoning_levels`).
+    /// nil: the list didn't say, so Wren can't know before asking.
+    public var reasoningEfforts: [String]?
     public var id: String { slug }
-    public init(slug: String, displayName: String) { self.slug = slug; self.displayName = displayName }
+    public init(slug: String, displayName: String, reasoningEfforts: [String]? = nil) {
+        self.slug = slug; self.displayName = displayName; self.reasoningEfforts = reasoningEfforts
+    }
+
+    /// The effort to request for "think deeply": "high" when allowed, otherwise the strongest the
+    /// model lists. nil when the model lists none (it doesn't take a reasoning setting).
+    public func effort(forDeepThinking wanted: String = "high") -> String? {
+        guard let levels = reasoningEfforts else { return wanted }
+        if levels.contains(wanted) { return wanted }
+        let order = ["minimal", "low", "medium", "high"]
+        return levels.filter { order.contains($0) }.max { order.firstIndex(of: $0)! < order.firstIndex(of: $1)! }
+    }
+}
+
+/// What Wren asks of the model beyond the text. Each is sent only when the user's words call for it.
+public struct ResponseOptions: Equatable, Sendable {
+    /// `reasoning.effort`, e.g. "high". nil: the model's default.
+    public var reasoningEffort: String?
+    /// Offer the hosted `web_search` tool (subject to model and account/workspace policy).
+    public var webSearch: Bool
+    public init(reasoningEffort: String? = nil, webSearch: Bool = false) { self.reasoningEffort = reasoningEffort; self.webSearch = webSearch }
+    public static let standard = ResponseOptions()
 }
 
 public struct ChatGPTReply: Equatable, Sendable {
@@ -13,6 +37,12 @@ public struct ChatGPTReply: Equatable, Sendable {
     public var requestedModel: String
     /// The model the completed response reports, when it does.
     public var reportedModel: String?
+    /// The reasoning effort the completed response reports, when it does.
+    public var reportedEffort: String? = nil
+    /// Web searches the response actually performed.
+    public var webSearchCalls: Int = 0
+    /// Sources cited in the answer.
+    public var sources: [CitedSource] = []
 }
 
 /// Server-sent events: collects `data:` lines into one payload per event (blank line ends an event).
@@ -44,8 +74,27 @@ public struct ResponseStreamState: Sendable {
     public private(set) var text = ""
     public private(set) var completed = false
     public private(set) var reportedModel: String?
+    public private(set) var reportedEffort: String?
+    /// Web searches seen as finished output items (and, at completion, in the final output).
+    public private(set) var webSearchCalls = 0
+    public private(set) var sources: [CitedSource] = []
 
     public init() {}
+
+    mutating func collectCitations(in item: JSONValue) {
+        guard case let .array(content)? = item["content"] else { return }
+        for part in content {
+            guard case let .array(annotations)? = part["annotations"] else { continue }
+            annotations.forEach { cite($0) }
+        }
+    }
+
+    /// One `url_citation`, kept once, web links only.
+    mutating func cite(_ a: JSONValue) {
+        guard a["type"]?.string == "url_citation", let url = a["url"]?.string, url.hasPrefix("https://") || url.hasPrefix("http://"),
+              url.count <= 2048, !sources.contains(where: { $0.url == url }), sources.count < 50 else { return }
+        sources.append(CitedSource(title: String((a["title"]?.string ?? url).prefix(300)), url: url))
+    }
 
     /// Returns the new text delta, if any. Throws on failure events.
     public mutating func apply(_ payload: String) throws -> String? {
@@ -58,12 +107,31 @@ public struct ResponseStreamState: Sendable {
             guard let delta = e["delta"]?.string else { return nil }
             text += delta
             return delta
+        case "response.output_text.annotation.added":
+            if let a = e["annotation"] { cite(a) }
+            return nil
+        case "response.output_item.done":
+            // Seen live on the plan route: the completed event's `output` is empty, so web searches
+            // and citations are counted from the items as they finish.
+            switch e["item"]?["type"]?.string {
+            case "web_search_call": webSearchCalls += 1
+            case "message"?: if let item = e["item"] { collectCitations(in: item) }
+            default: break
+            }
+            return nil
         case "response.completed":
             completed = true
-            reportedModel = e["response"]?["model"]?.string
+            let r = e["response"]
+            reportedModel = r?["model"]?.string
+            reportedEffort = r?["reasoning"]?["effort"]?.string
+            if case let .array(output)? = r?["output"] {
+                // When the final output is present it's authoritative for what ran.
+                webSearchCalls = max(webSearchCalls, output.filter { $0["type"]?.string == "web_search_call" }.count)
+                for item in output { collectCitations(in: item) }
+            }
             return nil
         case "response.failed", "error":
-            throw ChatGPTError.from(status: nil, code: ChatGPTError.errorCode(e))
+            throw ChatGPTError.from(status: nil, code: ChatGPTError.errorCode(e), param: ChatGPTError.errorParam(e))
         case "response.incomplete":
             throw ChatGPTError.incomplete(partial: text)
         default:
@@ -106,11 +174,18 @@ public struct ChatGPTPlanClient: Sendable {
                   let name = m["display_name"]?.string?.trimmingCharacters(in: .whitespaces), !name.isEmpty, name.count <= 200 else {
                 throw ChatGPTError.invalidResponse("model list")
             }
-            return ChatGPTModel(slug: slug, displayName: name)
+            // Optional: `supported_reasoning_levels: [{"effort": "high", …}]` or `["low", "high"]`.
+            var efforts: [String]?
+            if case let .array(levels)? = m["supported_reasoning_levels"] {
+                efforts = levels.compactMap { $0["effort"]?.string ?? $0.string }.filter { $0.count <= 20 }
+            }
+            return ChatGPTModel(slug: slug, displayName: name, reasoningEfforts: efforts)
         }
     }
 
-    public static func requestBody(model: String, input: String, instructions: String?) throws -> Data {
+    /// The plan route requires `store: false` and `stream: true`; it rejects sampling and background
+    /// fields, so none are sent. `reasoning` and the `web_search` tool are added only when asked for.
+    public static func requestBody(model: String, input: String, instructions: String?, options: ResponseOptions = .standard) throws -> Data {
         var body: [String: JSONValue] = [
             "model": .string(model),
             "input": .array([.object(["role": .string("user"), "content": .string(input)])]),
@@ -118,13 +193,15 @@ public struct ChatGPTPlanClient: Sendable {
             "stream": .bool(true),
         ]
         if let instructions { body["instructions"] = .string(instructions) }
+        if let effort = options.reasoningEffort { body["reasoning"] = .object(["effort": .string(effort)]) }
+        if options.webSearch { body["tools"] = .array([.object(["type": .string("web_search")])]) }
         return try JSONEncoder().encode(JSONValue.object(body))
     }
 
     /// Streams one answer. `onDelta` receives text as it arrives.
-    public func respond(model: String, input: String, instructions: String? = nil,
+    public func respond(model: String, input: String, instructions: String? = nil, options: ResponseOptions = .standard,
                         onDelta: @escaping @Sendable (String) -> Void = { _ in }) async throws -> ChatGPTReply {
-        let body = try Self.requestBody(model: model, input: input, instructions: instructions)
+        let body = try Self.requestBody(model: model, input: input, instructions: instructions, options: options)
         let (bytes, resp) = try await withRetryOn401 { t in
             try await http.stream(URL(string: Self.base + "/responses")!,
                                   headers: ["Authorization": "Bearer \(t)", "Content-Type": "application/json", "Accept": "text/event-stream"],
@@ -157,7 +234,8 @@ public struct ChatGPTPlanClient: Sendable {
             throw ChatGPTError.interrupted(partial: state.text)
         }
         guard state.completed else { throw ChatGPTError.interrupted(partial: state.text) }
-        return ChatGPTReply(text: state.text, requestedModel: model, reportedModel: state.reportedModel)
+        return ChatGPTReply(text: state.text, requestedModel: model, reportedModel: state.reportedModel, reportedEffort: state.reportedEffort,
+                            webSearchCalls: state.webSearchCalls, sources: state.sources)
     }
 
     func withRetryOn401(_ op: (String) async throws -> (Data, HTTPURLResponse)) async throws -> (Data, HTTPURLResponse) {

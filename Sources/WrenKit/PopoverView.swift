@@ -167,6 +167,10 @@ struct ListPane: View {
                 .buttonStyle(.borderless).help("Evening check-in")
             Button { model.openCapturePanel() } label: { Image(systemName: "square.and.pencil") }
                 .buttonStyle(.borderless).help("Capture (\(model.hotKeyDisplay))")
+            Button { model.startVoice() } label: { Image(systemName: model.voicePhase.isCapturingPhase ? "mic.fill" : "mic") }
+                .buttonStyle(.borderless).foregroundStyle(model.voicePhase.isCapturingPhase ? .red : .primary)
+                .help(model.settings.voiceEnabled ? "Voice command (\(model.settings.voiceHotKey.display)). The microphone turns off when you stop speaking." : "Voice command. The microphone turns off when you stop speaking.")
+                .accessibilityLabel("Start a voice command")
             Button { model.route = .settings } label: { Image(systemName: "gearshape") }
                 .buttonStyle(.borderless).help("Settings")
         }

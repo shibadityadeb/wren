@@ -34,58 +34,128 @@ extension AppModel {
 
     // MARK: Capture panel entry point
 
-    /// Every input is classified first (explicit save, reminder, ask an assistant, change an item,
-    /// question about stored items, general question, or something to remember), and only the
-    /// matching action or card follows. Cards never come from an unrelated guess.
+    /// Every input is routed once, by `ExecutionRouter`, to one operation (create a task or reminder,
+    /// ask ChatGPT, search Gmail, change an item…), and only that operation's subsystem runs it. Typed
+    /// text and voice transcripts take exactly this path. Each run records a structured result.
     func submitFromCapture(_ text: String, channel: UserChannel = .hotkey) async -> CaptureReply {
         // A spoken command may still start with "Hey Wren,"; it isn't part of the request.
         let spoken = channel == .voice ? ReminderCommand.stripAddress(text) : text
         let trimmed = spoken.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return .failed("Nothing to save.") }
+        // The same words from the same place twice in a row (a repeated Return or voice event) run once.
+        let key = SubmissionGuard.key(trimmed, channel: channel.rawValue)
+        guard submissions.begin(key, now: clock.now) else {
+            log.notice("duplicate submission ignored (\(channel.rawValue, privacy: .public))")
+            return .failed("That was just submitted, so Wren didn't do it twice.")
+        }
+        defer { submissions.end(key, now: clock.now) }
+        let (operation, reply) = await execute(trimmed, original: text, channel: channel)
+        let result = Self.result(of: reply, operation: operation, at: clock.now)
+        lastExecution = result
+        log.notice("execute \(result.operation, privacy: .public) succeeded=\(result.succeeded, privacy: .public) needsUser=\(result.needsUser, privacy: .public) via \(channel.rawValue, privacy: .public)")
+        return reply
+    }
+
+    private func execute(_ trimmed: String, original text: String, channel: UserChannel) async -> (String, CaptureReply) {
         reload()
         let source: CaptureSource = channel == .voice ? .voice : .hotkey
+        func save(_ body: String) -> CaptureReply { capture(body, source: source) ? .saved : .failed("Couldn't save. Your text is still here.") }
         if let body = IntentRouter.explicitCapture(trimmed) {
             reminderFollowUp = nil
-            return capture(body, source: source) ? .saved : .failed("Couldn't save. Your text is still here.")
+            return ("SaveNote", save(body))
         }
-        if let r = await reminderRequest(trimmed, channel: channel) { return r }
+        // Reminders first: this also completes an answer to "When should I remind you…?".
+        if let r = await reminderRequest(trimmed, channel: channel) { return ("CreateReminder", r) }
         let all = (try? store?.all()) ?? []
-        switch IntentRouter.route(trimmed, now: clock.now, calendar: clock.calendar, resolver: resolver) {
-        case .explicitCapture(let body):
-            return capture(body, source: source) ? .saved : .failed("Couldn't save. Your text is still here.")
-        case .askAI(let request):
-            return .ask(request)
-        case .reminder:
+        let operation = ExecutionRouter.operation(for: trimmed, now: clock.now, calendar: clock.calendar, resolver: resolver)
+        switch operation {
+        case let .saveNote(body):
+            return (operation.name, save(body))
+        case let .delegateToChatGPT(request):
+            return (operation.name, .ask(request))
+        case .createReminder:
             // reminderRequest handles every reminder; reaching here means it couldn't, so keep the words.
-            return capture(trimmed, source: source) ? .saved : .failed("Couldn't save. Your text is still here.")
-        case .itemCommand, .storedQuery:
-            if let r = await connectorAnswer(trimmed) { return .resolution(r) }
+            return (operation.name, save(trimmed))
+        case let .clarifyIntent(question):
+            return (operation.name, .resolution(.needsDate(question)))
+        case .openDelegationResult:
+            guard let r = recentDelegations.first(where: { $0.status.isFinal }) ?? recentDelegations.first else {
+                return (operation.name, .resolution(.notFound("There are no GPT requests yet.")))
+            }
+            openDelegation(r.id)
+            return (operation.name, .resolution(.answer(Answer(title: "Opened the GPT result", lines: [AnswerLine(r.task, recordID: nil)], basis: "\(r.displayStatus) · \(r.createdAt.formatted(date: .abbreviated, time: .shortened))"))))
+        case let .openEmail(sender):
+            return (operation.name, openEmail(from: sender))
+        case let .markEmailRead(sender):
+            // Never marks anything read from words alone: it opens the message, where Mark as read
+            // asks for its own confirmation and needs Gmail's separate permission.
+            let r = openEmail(from: sender)
+            if case .resolution(.answer) = r {
+                return (operation.name, .resolution(.notFound(canMarkRead ? "Opened the email. Choose Mark as read there to change it in Gmail." : "Opened the email. Mark as read needs Gmail's separate permission; allow it from the message.")))
+            }
+            return (operation.name, r)
+        case .changeItem, .queryStoredItems:
+            if let r = await connectorAnswer(trimmed) { return (operation.name, .resolution(r)) }
             let result = resolver.resolve(trimmed, items: all, goals: goals, context: conversation, now: clock.now)
             if case let .notFound(msg) = result {
                 // The model may only help if it found something real; an empty answer would hide the reason.
                 if case let .resolved(r)? = await modelInterpretation(trimmed, all: all) {
-                    if case let .answer(a) = r, a.lines.isEmpty {} else { return .resolution(r) }
+                    if case let .answer(a) = r, a.lines.isEmpty {} else { return (operation.name, .resolution(r)) }
                 }
-                return .resolution(.notFound(msg))
+                return (operation.name, .resolution(.notFound(msg)))
             }
-            if case .notACommand = result { return capture(trimmed, source: source) ? .saved : .failed("Couldn't save. Your text is still here.") }
-            return .resolution(result)
-        case .generalQuestion(let request):
-            // Questions Wren can answer from connected Gmail or Calendar go there first.
-            if let r = await connectorAnswer(trimmed) { return .resolution(r) }
-            return .ask(request)
-        case .capture:
-            if let r = await connectorAnswer(trimmed) { return .resolution(r) }
+            if case .notACommand = result { return ("Capture", save(trimmed)) }
+            return (operation.name, .resolution(result))
+        case .searchGmail, .queryCalendar:
+            if let r = await connectorAnswer(trimmed) { return (operation.name, .resolution(r)) }
+            return (operation.name, .resolution(.notFound(operation == .searchGmail ? "Gmail isn't connected. Open Connectors › Gmail to set it up." : "No calendar is connected. Open Connectors › Calendar.")))
+        case let .generalQuestion(request):
+            return (operation.name, .ask(request))
+        case .createTask, .capture:
+            if let r = await connectorAnswer(trimmed) { return ("SearchGmail", .resolution(r)) }
             // Ask the local model only when the text looks like a command or question.
             if ContextResolver.mightBeCommandOrQuestion(trimmed) {
                 switch await modelInterpretation(trimmed, all: all) {
-                case let .resolved(r)?: return .resolution(r)
-                case .generalQuestion?: return .ask(AIRequest(prompt: IntentRouter.questionPromptPublic(trimmed), original: text, target: nil))
+                case let .resolved(r)?: return ("ChangeItem", .resolution(r))
+                case .generalQuestion?: return ("GeneralQuestion", .ask(AIRequest(prompt: IntentRouter.questionPromptPublic(trimmed), original: text, target: nil)))
                 case nil: break
                 }
             }
-            return capture(trimmed, source: source) ? .saved : .failed("Couldn't save. Your text is still here.")
+            return (operation.name, save(trimmed))
         }
+    }
+
+    /// The structured result of one executed command (no user text).
+    static func result(of reply: CaptureReply, operation: String, at: Date) -> ExecutionResult {
+        switch reply {
+        case .saved: return ExecutionResult(operation: operation, succeeded: true, at: at)
+        case let .failed(m): return ExecutionResult(operation: operation, succeeded: false, error: m, at: at)
+        case .ask: return ExecutionResult(operation: operation, succeeded: true, needsUser: false, at: at)
+        case let .resolution(r):
+            switch r {
+            case let .answer(a): return ExecutionResult(operation: operation, succeeded: true, entityID: a.lines.compactMap(\.recordID).first?.uuidString, at: at)
+            case .proposal, .clarify, .needsDate: return ExecutionResult(operation: operation, succeeded: false, needsUser: true, at: at)
+            case let .notFound(m): return ExecutionResult(operation: operation, succeeded: false, error: m, at: at)
+            case .notACommand: return ExecutionResult(operation: operation, succeeded: false, error: "Not a command.", at: at)
+            }
+        }
+    }
+
+    /// Opens the newest matching message from Wren's inbox (synced from Gmail), in Wren.
+    func openEmail(from sender: String?) -> CaptureReply {
+        guard gmailUsable else { return .resolution(.notFound("Gmail isn't connected. Open Connectors › Gmail to set it up.")) }
+        let items = mailbox.items.values.sorted { $0.message.date > $1.message.date }
+        let match = items.first { item in
+            guard let s = sender, !s.isEmpty else { return true }
+            let from = (item.message.senderName + " " + item.message.from).lowercased()
+            return s.split(separator: " ").allSatisfy { from.contains($0) }
+        }
+        guard let m = match else {
+            return .resolution(.notFound(sender.map { "No email from “\($0)” in Wren's inbox yet. Wren checks Gmail every \(mailPrefs.pollingMinutes) minutes; try Check now in Inbox." } ?? "Wren's inbox is empty."))
+        }
+        openMail(m.id)
+        return .resolution(.answer(Answer(title: "Opened the email from \(m.message.senderName)", lines: [AnswerLine(m.message.subject, recordID: nil)],
+                                          basis: "From Wren's synced inbox. Open in Gmail is on the message.")))
     }
 
     // MARK: Asking ChatGPT from the panel

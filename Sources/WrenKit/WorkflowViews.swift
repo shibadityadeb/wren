@@ -12,6 +12,7 @@ struct DelegationDetailView: View {
     let id: UUID
     @State private var live = ""
     @State private var note: String?
+    @State private var find = ""
 
     var body: some View {
         let _ = model.delegationVersion
@@ -25,7 +26,7 @@ struct DelegationDetailView: View {
                     HStack(alignment: .firstTextBaseline) {
                         Text(r.task).font(.title3.weight(.semibold)).textSelection(.enabled)
                         Spacer()
-                        StatusBadge(status: r.status)
+                        StatusBadge(status: r.status, label: r.displayStatus)
                     }
                     facts(r)
                     if r.status == .running {
@@ -37,8 +38,19 @@ struct DelegationDetailView: View {
                         Label(e, systemImage: "exclamationmark.triangle").font(.callout).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
                     }
                     if let resp = r.response, r.status != .running {
-                        Text(r.status == .partial ? "Partial answer, as returned" : "Answer, as returned").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                        answer(resp)
+                        HStack {
+                            Text(r.status == .partial ? "Partial answer, as returned" : "Answer, as returned").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                            Spacer()
+                            TextField("Find in answer", text: $find).textFieldStyle(.roundedBorder).frame(maxWidth: 200).controlSize(.small)
+                            if !find.isEmpty { Text(Self.matchCount(find, in: resp)).font(.caption).foregroundStyle(.secondary) }
+                        }
+                        answer(resp, highlight: find)
+                        if !r.sources.isEmpty {
+                            Text("Sources ChatGPT cited").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                            ForEach(r.sources, id: \.url) { src in
+                                if let u = URL(string: src.url) { Link(src.title, destination: u).font(.callout).help(src.url) }
+                            }
+                        }
                     }
                     actions(r)
                     if let note { Text(note).font(.caption).foregroundStyle(.secondary) }
@@ -62,6 +74,11 @@ struct DelegationDetailView: View {
             if let o = r.original, o != r.task { row("You said", o) }
             row("Sent", r.prompt ?? r.task)
             row("Provider", r.destination.label)
+            if r.destination == .chatgptPlan {
+                row("Kind", r.kind.label)
+                row("Reasoning", Self.effortText(r))
+                if r.webSearchRequested || r.webSearchCalls > 0 { row("Web search", Self.searchText(r)) }
+            }
             if let m = r.requestedModel { row("Model", m + (r.reportedModel.map { $0 == m ? "" : " (response reports \($0))" } ?? " (not reported)")) }
             row("Created", r.createdAt.formatted(date: .abbreviated, time: .shortened))
             if let c = r.completedAt { row(r.status == .completed ? "Completed" : "Ended", c.formatted(date: .abbreviated, time: .shortened)) }
@@ -78,8 +95,40 @@ struct DelegationDetailView: View {
         }
     }
 
-    func answer(_ t: String) -> some View {
-        ScrollView { Text(t).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
+    /// Requested versus reported, never assumed.
+    static func effortText(_ r: DelegationRecord) -> String {
+        switch (r.requestedEffort, r.reportedEffort) {
+        case (nil, nil): return "Model default"
+        case let (nil, rep?): return "Model default (response reports \(rep))"
+        case let (req?, nil): return r.status == .completed ? "Asked for \(req); the response didn't report its effort" : "Asked for \(req)"
+        case let (req?, rep?): return req == rep ? "\(rep) (asked for and reported)" : "Asked for \(req); response reports \(rep)"
+        }
+    }
+
+    static func searchText(_ r: DelegationRecord) -> String {
+        if r.webSearchCalls > 0 { return "Used: \(r.webSearchCalls) search\(r.webSearchCalls == 1 ? "" : "es") reported by ChatGPT" }
+        switch r.status {
+        case .completed, .partial: return "Offered, but ChatGPT didn't search the web for this answer"
+        case .running: return "Offered (if your account allows it)"
+        default: return r.failure == .unsupportedCapability ? "Not available for this model or workspace" : "Offered; not run"
+        }
+    }
+
+    static func matchCount(_ q: String, in t: String) -> String {
+        let n = t.lowercased().components(separatedBy: q.lowercased()).count - 1
+        return n == 1 ? "1 match" : "\(n) matches"
+    }
+
+    func answer(_ t: String, highlight: String = "") -> some View {
+        var a = AttributedString(t)
+        if highlight.count >= 2 {
+            var search = a.startIndex
+            while let r = a[search...].range(of: highlight, options: .caseInsensitive) {
+                a[r].backgroundColor = .yellow.opacity(0.45)
+                search = r.upperBound
+            }
+        }
+        return ScrollView { Text(a).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
             .frame(minHeight: 80, maxHeight: 360)
             .padding(10).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
     }
@@ -98,6 +147,14 @@ struct DelegationDetailView: View {
                 Button("Reconnect ChatGPT") { model.connectChatGPT(reconsent: r.failure == .planNotAuthorized) }
             }
             if r.failure == .usageLimit { Link("Manage usage", destination: SIWC.manageUsageURL) }
+            if r.status == .failed, r.failure == .unsupportedCapability {
+                Button("Run with standard settings") {
+                    switch model.retryDelegation(r.id, standardSettings: true) {
+                    case .started, .duplicate: note = "Running again without web search or a reasoning override."; live = ""
+                    case let .notRun(o): note = DelegateView.describe(o)
+                    }
+                }.buttonStyle(.borderedProminent).tint(WrenTheme.accent)
+            }
             if let resp = r.response {
                 Button("Copy answer") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(resp, forType: .string); note = "Copied." }
             }
@@ -112,8 +169,10 @@ struct DelegationDetailView: View {
 
 struct StatusBadge: View {
     let status: DelegationStatus
+    /// A more specific label (Queued, Needs reconnection) when the record has one.
+    var label: String? = nil
     var body: some View {
-        let (text, color): (String, Color) = switch status {
+        let (base, color): (String, Color) = switch status {
         case .running: ("Running", .blue)
         case .completed: ("Completed", WrenTheme.accent)
         case .partial: ("Incomplete", .orange)
@@ -123,6 +182,7 @@ struct StatusBadge: View {
         case .responseImported: ("Answer pasted", WrenTheme.accent)
         case .prepared: ("Not sent", .secondary)
         }
+        let text = label.map { $0.count <= 22 ? $0 : base } ?? base
         Text(text).font(.caption.weight(.semibold)).padding(.horizontal, 7).padding(.vertical, 2)
             .background(color.opacity(0.15), in: Capsule()).foregroundStyle(color)
     }

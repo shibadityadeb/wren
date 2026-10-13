@@ -15,7 +15,7 @@ Done:
 - **Duplicate birds.** The cause was two processes: the installed copy plus a development build. A debug-only exception had let the development build skip the single-instance check. That exception is removed, the data folder is now locked, and development builds can use a separate "Wren Dev" identity.
 - **Mac app basics.** Dock app, app menu, one status item, and a clean quit.
 - **Reminders.** Scheduled with macOS and reconciled, with recurrence and the commands.
-- **Voice.** One service handles both "Hey Wren" and the shortcut, using on-device speech.
+- **Voice.** One service handles the voice shortcut and the Voice buttons, using on-device speech. Explicit activation only since 0.10; no wake word.
 - **Connectors.** Truthful states, and Google with no client secret.
 
 What was run live and what still needs a person, an account or the maintainers' registrations is in docs/MANUAL_TESTS.md. In short:

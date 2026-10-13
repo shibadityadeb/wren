@@ -315,7 +315,7 @@ public struct EmailCache: Sendable {
             .filter { now.timeIntervalSince($0.date) < Double(days) * 86400 }
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         let e = JSONEncoder(); e.dateEncodingStrategy = .iso8601
-        try e.encode(Array(keep)).write(to: url, options: [.atomic, .completeFileProtection])
+        try e.encode(Array(keep)).write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
     public func load() -> [EmailMessage] {
         let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601

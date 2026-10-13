@@ -68,7 +68,7 @@ public enum WrenMark {
     }
 
     /// Menu-bar template image. Template images are tinted by macOS for light, dark and highlighted states.
-    /// `listening`: a small dot marks that Wren is listening for "Hey Wren" (or capturing).
+    /// `listening`: a small dot marks that Wren is recording a voice command.
     public static func menuBarImage(pointSize: CGFloat = 18, listening: Bool = false) -> NSImage {
         let img = NSImage(size: NSSize(width: pointSize, height: pointSize), flipped: true) { rect in
             guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
@@ -81,7 +81,7 @@ public enum WrenMark {
             return true
         }
         img.isTemplate = true
-        img.accessibilityDescription = listening ? "Wren, listening for Hey Wren" : "Wren"
+        img.accessibilityDescription = listening ? "Wren, recording a voice command" : "Wren"
         return img
     }
 }

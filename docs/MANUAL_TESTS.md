@@ -15,7 +15,33 @@ touched. Debug URLs exist only in debug builds. Read results with:
 /usr/bin/log stream --style compact --predicate 'subsystem == "com.shibadityadeb.wren" AND processImagePath CONTAINS "Wren Dev.app"'
 ```
 
-## Last pass: 2026-10-11, branch `feat/audit-real-integrations` (0.9.0, schema 6), macOS 26, Apple Silicon
+## Last pass: 2026-10-13, branch `feat/personal-executor` (0.10.0, schema 7), macOS 26.1, Apple Silicon
+
+Automated: `swift test` (mocks, see above). Live items below used the maintainer's own signed-in
+accounts through `wren-tools live-check` (same AskService/broker/connectors as the app, throwaway
+in-memory database) and a **Wren Dev** build driven by debug URLs. Nothing was sent from or changed in
+the installed Wren or its data.
+
+| ID | Area | Test | Status |
+|---|---|---|---|
+| E-GPT-1 | GPT | "Ask GPT to think deeply about this …" on the real ChatGPT plan: routed as DelegateToChatGPT (thinking), persisted as running first, duplicate deduplicated, `reasoning.effort: high` sent, completed with `response.completed`, response reports effort `high`, announced once, audit `succeeded` | **Passed live** (5.9 s, gpt-6-luna) |
+| E-GPT-2 | GPT | "Ask GPT to research the latest stable Swift language release and cite your sources …": `web_search` tool offered and accepted; the record shows 1 web search and 1 cited source taken from the stream, effort left at the model default (response reports `medium`) | **Passed live** (7.6 s). First run found 0 sources: live stream inspection showed the completed event's `output` is empty on this route, so citations are now read from `response.output_text.annotation.added` and finished message items (fixed, re-run passed) |
+| E-GPT-3 | GPT | The model list exposes `supported_reasoning_levels` per model (used to pick the effort) | **Passed live** (3 models, each listing low…max) |
+| E-GPT-4 | GPT | Plan refuses web search or reasoning (`subscription_sharing_unsupported_capability`) | **Mock only** (`testUnsupportedWebSearchFails…`); the live account accepted both, so the refusal couldn't be produced live |
+| E-GPT-5 | GPT | "GPT has finished · Research: …" notification opens the exact result | **Blocked**: notifications are denied for Wren Dev on this Mac (needs a person in System Settings › Notifications › Wren Dev) and Wren Dev isn't signed in to ChatGPT. Covered by mocks and the result-page snapshot |
+| E-GMAIL-1 | Gmail | Read-only `live-check gmail` with the real Google sign-in: token refresh, full sync, Spam/Trash excluded, then an incremental (history) sync, triage into categories, alert policy dry run (nothing delivered) | **Passed live** (150 inbox messages, 0 Spam/Trash, incremental sync reported 0 new, a repeated alert check would alert 0 times) |
+| E-GMAIL-2 | Gmail | Mark as read changes the real Gmail state | **Not run**: this account granted read-only access (`gmail.modify` not granted); Wren correctly reports Mark as read unavailable |
+| E-GMAIL-3 | Gmail | "Important email from …" alert with Open email / Snooze alert in Notification Center | **Blocked**: notifications denied for Wren Dev, and Wren Dev has its own data folder without the Google sign-in. Snooze re-alert covered by `testSnoozedAlertComesBackOnce…` |
+| E-ROUTE-1 | Router | In the running Wren Dev app (`/debug/command`): "Remind me to call Sam tomorrow at 10 AM." → CreateReminder (set); "Move that reminder to Sunday." → ChangeItem (preview "Move “Call Sam” to Sunday"); "I need to finish the report by Friday." → CreateTask; "Remind me every weekday at 3 PM." → asks "What should I remind you about?"; "Check whether I have an important email from the recruiter." → SearchGmail (Wren Dev not connected: says so); "Ask GPT." → ClarifyIntent; "Show the GPT result" → OpenDelegationResult; "What am I waiting for?" → QueryStoredItems | **Passed live** in Wren Dev |
+| E-ROUTE-2 | Router | The same reminder submitted twice at once creates one reminder | **Passed live** in Wren Dev (`duplicate submission ignored`, one `execute CreateReminder`) |
+| E-VOICE-1 | Voice | After launch nothing touches the microphone: voice phase `off`, Microphone and Speech Recognition still `notDetermined` (macOS never asked) | **Passed live** in Wren Dev |
+| E-VOICE-2 | Voice | A transcript ("Hey Wren, ask GPT to research quantum physics and think carefully …") through the post-transcription step waits for review and then takes the typed path | **Passed live** in Wren Dev (`voice command awaiting review`) |
+| E-VOICE-3 | Voice | Real microphone: shortcut and Voice button start one recording, the red indicator shows, pause/Stop ends it, the macOS microphone indicator goes off afterwards, Record again, Esc, screen lock cancels | **Not run**: needs a person to speak and to allow Microphone and Speech Recognition |
+| E-REM-1 | Reminders | Delivery at the time while Wren is quit; Complete/Snooze from the notification | **Blocked**: notifications denied for Wren Dev (as in 0.9). Scheduling, reconcile-without-duplicates, recurrence, DST, snooze/move/complete/delete: mock-tested (`ReminderSchedulerTests`, `ExecutorJourneyTests`) |
+| E-LIFE-1 | Lifecycle | Quit Wren Dev (Apple Event): process ends, status item removed, shortcuts released, data unlocked | **Passed live** |
+| E-DATA-1 | Upgrade | Wren Dev's existing schema-6 data opens under schema 7 | **Passed live** (opened, commands ran on existing data) |
+
+## Previous pass: 2026-10-11, branch `feat/audit-real-integrations` (0.9.0, schema 6), macOS 26, Apple Silicon
 
 | ID | Area | Test | Status |
 |---|---|---|---|
@@ -35,7 +61,7 @@ touched. Debug URLs exist only in debug builds. Read results with:
 | M-LIFE-3 | Lifecycle | One bird in the menu bar, ⌘Q from the keyboard, Dock click reopens the window | **Not run** by hand (needs someone at the screen) |
 | M-DATA-1 | Upgrade | A copy of the real 0.8.0 store (schema 5) opens under schema 6 with every item, delegation and audit record intact | **Passed live** (`items=8 delegations=1 audit=22` before and after; `WREN_MIGRATION_COPY` test) |
 | M-DATA-2 | Upgrade | Wren Dev's existing data opens after the upgrade | **Passed live** |
-| M-VOICE-1 | Voice | Real microphone, "Hey Wren", the voice shortcut, the listening orb, gated idle listening, pause on screen lock | **Not run**: needs a person to speak and to allow Microphone and Speech Recognition |
+| M-VOICE-1 | Voice | Real microphone, "Hey Wren" (removed in 0.10), the voice shortcut, the listening orb, gated idle listening, pause on screen lock | **Not run**: needs a person to speak and to allow Microphone and Speech Recognition |
 | M-VOICE-2 | Voice | A spoken command waits for review (editable, runs on Return) instead of acting | **Passed live** in Wren Dev (`voice command awaiting review`; no item created) |
 | M-NOTION-1 | Notion | Full sign-in and search | **Not run**: needs a Notion account at the screen (registration and consent page were reached live in an earlier pass) |
 | M-CAL-1 | Calendar (this Mac) | Reading events through macOS | **Not run**: needs a person to allow Calendars access |
@@ -55,21 +81,24 @@ Expected: `persisted as: running`, `second identical submit while running: dedup
 `record: status=completed … providerURL=none announced=1`, `audit: succeeded`.
 
 In the app (Wren Dev, after Connectors › ChatGPT › Continue with ChatGPT and allowing plan usage):
-1. ⌥ Space, type `Hey Wren, search in GPT: explain quantum physics and give me a few useful beginner resources.`, Return.
+1. ⌥ Space, type `search in GPT: explain quantum physics and give me a few useful beginner resources.`, Return.
    Expected: the card says "Ask ChatGPT · Request: Explain quantum physics and give me a few useful beginner resources." and "Sent to ChatGPT. You can close this; Wren will tell you when it's finished." No "You're not waiting on anything", no new item.
 2. Press Return again and Esc. Expected: no second request (Delegate history shows one entry).
-3. When it finishes: a notification "GPT finished: Explain quantum physics… · View result." Click it.
+3. When it finishes: a notification "GPT has finished · Request: quantum physics and give me a few useful beginner resources" with View result. Click it.
    Expected: the main window opens on the result: what you said, what was sent, model, created/completed times, the answer as returned, Copy answer, Open ChatGPT. No "Open conversation" link (the plan API returns none).
 4. Overview › GPT requests lists it as Completed. Quit and reopen Wren: still there.
 5. Turn Wi-Fi off, ask `ask GPT to brainstorm names for my project`. Expected: Failed, retryable; Retry with Wi-Fi on completes the same entry (Attempts 2).
 6. Ask something and quit Wren while it runs; reopen. Expected: the entry says Wren was closed before ChatGPT finished, with Retry.
-7. Voice: say "Hey Wren, ask GPT what quantum physics is." Expected: same as 1–3.
+7. Voice: press ⌥⇧ Space and say "ask GPT what quantum physics is." Expected: same as 1–3.
+8. Thinking: `ask GPT to think deeply about whether I should learn Rust or Go first`. Expected: the card says "Asks for high reasoning effort"; the result page shows Kind Deep thinking and Reasoning "high (asked for and reported)" (or what the response actually reported).
+9. Research: `ask GPT to research the fundamentals of quantum physics and cite sources`. Expected: the card mentions web search; the notification reads "GPT has finished · Research: the fundamentals of quantum physics …"; the result shows "Web search: Used: N searches" and a "Sources ChatGPT cited" list, or "Offered, but ChatGPT didn't search the web" when it didn't. Find in answer highlights matches.
+10. If your workspace disallows web search: the request fails saying so, and **Run with standard settings** reruns it on the same entry without web search.
 
 ### M-GMAIL: inbox intelligence (needs the maintainer's Google setup, then a listed test account)
 1. Connectors › Gmail › Connect Google, approve Gmail read. Expected: Gmail Connected; Inbox shows your account and "checked …".
 2. Inbox: only unread inbox mail appears; nothing from Spam or Trash; each entry says "Why: …"; promotions sit under "Informational".
 3. Correct › "Never important from …": that sender's mail moves to Informational and stays there after Check now.
-4. Send yourself `Urgent: please sign by today`. Within the polling interval (default 5 min) a notification "Urgent: <you>" appears once. Check now again: no second alert. Reply in the same thread with the same urgency: no new alert.
+4. Send yourself `Urgent: please sign by today`. Within the polling interval (default 5 min) a notification "Important email from <you>" with the subject and "Why: …" appears once, with **Open email** and **Snooze alert for 1 hour**. Choose Snooze: it disappears and comes back once about an hour later if still unread (not if you read it meanwhile). Click the alert itself: Wren opens that exact message, and it stays unread in Gmail. Check now again: no second alert. Reply in the same thread with the same urgency: no new alert.
 5. Set quiet hours to include now; send another urgent mail: no alert; end quiet hours: one alert.
 6. Mail settings › digest time 2 minutes ahead. Expected: one "Email digest" notification; the Inbox shows the digest with Summary (Gmail's text), Inferred reason and Suggested action, and Open email. Quit and relaunch: no second digest for that slot.
 7. Sleep the Mac across the digest time; wake. Expected: one digest marked "(late)".
@@ -93,16 +122,17 @@ Debug: `open "wren-dev://debug/reminders"` logs `debug pending <id> next=<date>`
 1. Quit any other Wren. Open Wren Dev: one Dock icon, one bird, the window opens.
 2. Close the window: the bird stays; click the Dock icon: the window returns.
 3. Open the app again from Finder: still one process and one bird.
-4. ⌘Q: the bird and Dock icon go; the microphone indicator (if "Hey Wren" was on) goes off. Wren no longer checks mail or listens; already-scheduled reminders still arrive from macOS.
+4. ⌘Q while recording a voice command: the bird and Dock icon go and the macOS microphone indicator goes off. Wren no longer checks mail or records; already-scheduled reminders still arrive from macOS.
 
 ### M-VOICE (needs Microphone and Speech Recognition allowed)
-1. Connectors › Voice › "Listen for “Hey Wren”".
-2. Say "Hey Wren, remind me to call Sam tomorrow at 10 AM". Expected: the panel opens with the animated orb and "Listening…", the words appear as you speak; after you pause it shows "Transcribed" with the text editable. Change "10" to "11" and press Return: "Reminder set: Call Sam, tomorrow at 11:00 AM".
-2a. Lock the screen (⌃⌘Q) with "Hey Wren" on: the orange microphone indicator goes off; unlock: it comes back.
-2b. Sit in silence for a minute with "Hey Wren" on: Activity Monitor shows Wren near-idle (no continuous recognition).
-3. Say "Hey Wren, search in GPT: explain transformers": a GPT delegation as in M-GPT.
-4. Say "Hey Wren, what am I waiting on?": an answer from Wren's own items, nothing sent anywhere.
-5. Start speaking and press Esc: nothing happens; recording stops.
+1. Launch Wren and wait a minute without using voice. Expected: no orange microphone indicator, ever. Connectors › Voice says "Microphone off" and shows the local model as installed (or links to Dictation settings).
+2. Press ⌥⇧ Space (turn the shortcut on in Connectors › Voice first) and say "remind me to call Sam tomorrow at 10 AM". Expected: the panel shows a red **Recording…** indicator and the orange macOS microphone dot; the words appear as you speak; after you pause the dot goes off and the panel shows "Transcribed on this Mac" with the text editable. Change "10" to "11" and press Return: "Reminder set: Call Sam, tomorrow at 11:00 AM".
+3. Click **Voice** in the capture panel (or the microphone in the menu-bar popover, or the bird's right-click menu › Voice Command), say "ask GPT to research the fundamentals of quantum physics", press **Stop**. Expected: a GPT delegation as in M-GPT 9.
+4. Say something, then choose **Record again**: the old text is discarded and a new recording starts. Press Esc while recording: nothing happens and the microphone dot goes off.
+5. Press the shortcut twice quickly while a command is being handled: no second recording.
+6. Start a recording and lock the screen (⌃⌘Q): the recording is cancelled; unlocking doesn't start anything.
+7. Say "what am I waiting on?": an answer from Wren's own items, nothing sent anywhere.
+8. Activity Monitor › Wren with voice idle: no audio activity; after ⌘Q during a recording, the microphone dot goes off.
 
 ### M-NOTION, M-CAL
 As before: Connectors › Notion › Connect Notion (search, read, create after confirming, disconnect);

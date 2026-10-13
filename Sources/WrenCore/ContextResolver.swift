@@ -276,8 +276,14 @@ public struct ContextResolver: Sendable {
         // "the current reminder", "this reminder": the reminder you most recently got.
         if ref.firstMatch(of: /^(?:the |this |that |my |the last |the latest )?(?:current )?reminder$/) != nil {
             let notified = candidates.filter { $0.lastReminderAt != nil }.sorted { $0.lastReminderAt! > $1.lastReminderAt! }
-            if let sel = context.selected, let c = notified.first(where: { $0.id == sel }) { return .unique(c, note: nil) }
+            let hasReminder: (Commitment) -> Bool = { $0.nextReminderAt != nil || $0.lastReminderAt != nil || $0.recurrence != nil }
+            if let sel = context.selected, let c = candidates.first(where: { $0.id == sel && hasReminder($0) }) { return .unique(c, note: nil) }
+            // "that/this reminder" points at what was just talked about (e.g. the reminder just set);
+            // "the current reminder" at the one that most recently went off.
+            let recent = context.recent.lazy.compactMap { id in candidates.first { $0.id == id && hasReminder($0) } }.first
+            if ref.hasPrefix("that ") || ref.hasPrefix("this "), let c = recent { return .unique(c, note: nil) }
             if let c = notified.first { return .unique(c, note: nil) }
+            if let c = recent { return .unique(c, note: nil) }
             return .none("No reminder has gone off yet, so there's no current one.")
         }
         let tokens = Self.tokens(ref)

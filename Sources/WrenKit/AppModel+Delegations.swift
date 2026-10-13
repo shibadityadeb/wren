@@ -22,9 +22,9 @@ extension AppModel {
         return s
     }
 
-    func retryDelegation(_ id: UUID) -> AskStart {
+    func retryDelegation(_ id: UUID, standardSettings: Bool = false) -> AskStart {
         guard let asks else { return .notRun(.failed("Wren's database isn't available.", retryable: false)) }
-        let s = asks.retry(id)
+        let s = standardSettings ? asks.retryWithStandardSettings(id) : asks.retry(id)
         delegationVersion += 1
         return s
     }

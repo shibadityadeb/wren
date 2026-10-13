@@ -340,15 +340,19 @@ struct ConnectorDetailView: View {
     }
 
     @ViewBuilder func voiceSetup(_ state: ConnectorState) -> some View {
+        let speech = LocalSpeechModel.status()
         VStack(alignment: .leading, spacing: 10) {
-            Toggle("Listen for “Hey Wren”", isOn: Binding(get: { model.settings.wakeWordEnabled }, set: { model.setWakeWord($0) }))
-            Text("To hear “Hey Wren”, the microphone stays on while this is on and Wren is running, so macOS shows its orange microphone dot. Wren only measures loudness until someone speaks, recognises speech on this Mac only while someone is talking, never stores audio, and stops listening while your screen is locked or asleep. Quitting Wren turns it off.")
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Toggle("Let me check and edit what I said before Wren acts", isOn: Binding(get: { model.settings.voiceReviewFirst }, set: { model.settings.voiceReviewFirst = $0; model.connectorsChanged() }))
-            Text("On: after you pause, the words appear in the panel; press Return to run them. Off: Wren acts as soon as you stop speaking.")
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Text("Off by default. While on, Wren keeps the microphone open in the background and listens only for “Hey Wren”, on this Mac. macOS shows the orange microphone indicator, and Wren's menu-bar bird gets a dot. After it hears “Hey Wren”, Wren captures your request until you pause, then stops recording.")
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text("Voice starts only when you ask: press the voice shortcut or click a Voice button. Wren records one command, turns the microphone off when you stop speaking, and never listens in the background.")
+                .font(.callout).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Button { model.startVoice() } label: { Label(model.voicePhase.isCapturingPhase ? "Stop recording" : "Start a voice command", systemImage: "mic.fill") }
+                    .buttonStyle(.borderedProminent).tint(WrenTheme.accent)
+                HStack(spacing: 6) {
+                    Circle().fill(voiceDotColor).frame(width: 8, height: 8)
+                    Text(voiceStatusText).font(.caption)
+                }
+            }
+            Divider()
             Toggle("Voice shortcut", isOn: Binding(get: { model.settings.voiceEnabled }, set: { model.setVoiceEnabled($0) }))
             HStack {
                 Text(recordingVoiceKey ? "Press the new shortcut…" : model.settings.voiceHotKey.display)
@@ -359,13 +363,21 @@ struct ConnectorDetailView: View {
                 Button("Reset") { model.setVoiceHotKey(.optionShiftSpace) }.disabled(!model.settings.voiceEnabled)
             }
             if let e = model.voiceHotKeyError { Text(e).font(.caption).foregroundStyle(.orange) }
-            Text("Press the shortcut, speak, and pause; or press it again to finish. It runs the same voice command as “Hey Wren”. Escape cancels.")
+            Text("Press the shortcut, speak, and pause; or press it again to stop. Escape cancels. Pressing it while a command is being handled does nothing, so one press never records twice. The Voice button in the capture panel, the menu-bar popover and the menu-bar item's menu works even with the shortcut off.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 6) {
-                Circle().fill(voiceDotColor).frame(width: 8, height: 8)
-                Text(voiceStatusText).font(.caption)
+            Toggle("Let me check and edit what I said before Wren acts", isOn: Binding(get: { model.settings.voiceReviewFirst }, set: { model.settings.voiceReviewFirst = $0; model.connectorsChanged() }))
+            Text("On: after you pause, the words appear in the panel; fix them or choose Record again, then press Return. Off: Wren acts as soon as you stop speaking.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Divider()
+            Text("Local transcription model").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            HStack {
+                Image(systemName: speech.isReady ? "checkmark.circle.fill" : "exclamationmark.triangle.fill").foregroundStyle(speech.isReady ? WrenTheme.accent : .orange)
+                Text(speech.label).font(.callout)
+                Spacer()
+                Button("Check again") { model.connectorsChanged() }.controlSize(.small)
+                if !speech.isReady { Button("Dictation Settings…") { NSWorkspace.shared.open(LocalSpeechModel.dictationSettingsURL) }.controlSize(.small) }
             }
-            Text("Everything is processed on this Mac with Apple's on-device speech recognition. Wren refuses server recognition and never sends audio anywhere. What you said is shown before and after Wren acts on it.")
+            Text("Wren uses Apple's on-device speech model. macOS downloads, updates and removes it (System Settings › Keyboard › Dictation, choose the language); Wren adds no model of its own, needs no account, and refuses server recognition. Audio goes straight to the on-device recogniser and is never saved or sent anywhere.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
                 Text("Microphone: \(model.hub.voicePermissions.microphone.rawValue)").font(.caption)
@@ -379,7 +391,6 @@ struct ConnectorDetailView: View {
 
     var voiceDotColor: Color {
         switch model.voicePhase {
-        case .listening: WrenTheme.accent
         case .capturing: .red
         case .failed: .orange
         default: .secondary
@@ -388,10 +399,9 @@ struct ConnectorDetailView: View {
 
     var voiceStatusText: String {
         switch model.voicePhase {
-        case .off: model.settings.wakeWordEnabled ? "Starting…" : "Not listening"
-        case .listening: "Listening for “Hey Wren”"
-        case .capturing: "Capturing a command"
-        case .handling: "Working on your command"
+        case .off: "Microphone off"
+        case .capturing: "Recording a command"
+        case .handling: "Working on your command (microphone off)"
         case let .failed(e): e.localizedDescription
         }
     }

@@ -354,6 +354,26 @@ public enum DelegationDestination: String, Codable, Sendable, CaseIterable {
     public var leavesMac: Bool { self == .chatgptPlan || self == .chatgptHandoff || self == .openaiAPI }
 }
 
+/// What kind of work was delegated, decided from the user's own words.
+public enum DelegationKind: String, Codable, Sendable {
+    /// An ordinary request or question.
+    case question
+    /// "Think deeply / carefully", "use high reasoning effort": higher reasoning effort, no web.
+    case thinking
+    /// "Research …", "find sources", "latest news": web search when the account allows it.
+    case research
+    public var label: String {
+        switch self { case .question: "Request"; case .thinking: "Deep thinking"; case .research: "Research" }
+    }
+}
+
+/// A source the provider cited (a `url_citation` annotation), exactly as returned.
+public struct CitedSource: Codable, Equatable, Sendable, Hashable {
+    public var title: String
+    public var url: String
+    public init(title: String, url: String) { self.title = title; self.url = url }
+}
+
 public enum DelegationStatus: String, Codable, Sendable {
     /// Prompt prepared and shown; nothing has left the Mac.
     case prepared
@@ -387,6 +407,9 @@ public enum DelegationStatus: String, Codable, Sendable {
 /// Why a delegation didn't complete, so the UI can offer the right recovery.
 public enum DelegationFailure: String, Codable, Sendable {
     case notConnected, reauthorizationRequired, planNotAuthorized, usageLimit, unavailable, rejected, interrupted, needsReview, other
+    /// ChatGPT plan sharing refused something in the request (web search or a reasoning setting for
+    /// this model or workspace). The same request isn't retried; the user may choose standard settings.
+    case unsupportedCapability
     public var retryable: Bool {
         switch self {
         case .usageLimit, .unavailable, .interrupted: true
@@ -433,6 +456,20 @@ public final class DelegationRecord {
     public var providerURL: String?
     /// The user explicitly included private content in this prompt (needed again to retry it).
     public var includesPrivate: Bool = false
+    // Schema v7: what was asked of ChatGPT and what it reports having done. Optional/defaulted so
+    // v6 records load unchanged.
+    /// "question", "thinking" or "research" (see `DelegationKind`).
+    var kindRaw: String?
+    /// The reasoning effort Wren asked for ("high"), nil when it left the model's default.
+    public var requestedEffort: String?
+    /// The reasoning effort the completed response reports. nil: not reported.
+    public var reportedEffort: String?
+    /// Wren offered ChatGPT's web search tool for this request.
+    public var webSearchRequested: Bool = false
+    /// Web searches the response actually contains (`web_search_call` items). 0 with a request: none ran.
+    public var webSearchCalls: Int = 0
+    /// Cited sources from the response, as JSON `[{"title":…,"url":…}]`.
+    var sourcesJSON: String?
 
     public init(task: String, destination: DelegationDestination, depth: HandoffDepth, now: Date) {
         id = UUID(); createdAt = now; updatedAt = now; self.task = task
@@ -449,6 +486,23 @@ public final class DelegationRecord {
         set { failureRaw = newValue?.rawValue }
     }
     public var channel: UserChannel? { channelRaw.flatMap(UserChannel.init(rawValue:)) }
+    public var kind: DelegationKind {
+        get { kindRaw.flatMap(DelegationKind.init(rawValue:)) ?? (depth == .deep ? .thinking : .question) }
+        set { kindRaw = newValue.rawValue }
+    }
+    public var sources: [CitedSource] {
+        get { sourcesJSON.flatMap { $0.data(using: .utf8) }.flatMap { try? JSONDecoder().decode([CitedSource].self, from: $0) } ?? [] }
+        set { sourcesJSON = newValue.isEmpty ? nil : (try? JSONEncoder().encode(newValue)).flatMap { String(data: $0, encoding: .utf8) } }
+    }
+    /// The state shown to the user, including Queued and Needs reconnection.
+    public var displayStatus: String {
+        switch status {
+        case .running where startedAt == nil: return "Queued"
+        case .failed where failure == .reauthorizationRequired || failure == .notConnected: return "Needs reconnection"
+        case .failed where failure == .usageLimit: return "Usage limit reached"
+        default: return status.label
+        }
+    }
     /// Retry is offered only for a failure that may succeed later; a completed request never re-runs.
     public var canRetry: Bool {
         switch status {

@@ -9,7 +9,7 @@ public struct HotKeySpec: Codable, Equatable {
     public var display: String
 
     public static let optionSpace = HotKeySpec(keyCode: UInt32(kVK_Space), carbonModifiers: UInt32(optionKey), display: "⌥ Space")
-    /// Default push-to-talk: hold ⌥⇧Space.
+    /// Default voice shortcut: press ⌥⇧Space to start one command, press again to stop.
     public static let optionShiftSpace = HotKeySpec(keyCode: UInt32(kVK_Space), carbonModifiers: UInt32(optionKey | shiftKey), display: "⌥⇧ Space")
 }
 
@@ -70,10 +70,14 @@ final class WrenSettings {
         get { d.bool(forKey: "macCalendarEnabled") }
         set { d.set(newValue, forKey: "macCalendarEnabled") }
     }
-    /// Listen for "Hey Wren" in the background (opt-in, off by default).
-    var wakeWordEnabled: Bool {
-        get { d.bool(forKey: "wakeWordEnabled") }
-        set { d.set(newValue, forKey: "wakeWordEnabled") }
+    /// Before 0.10 Wren could listen for "Hey Wren" in the background. That listener was removed:
+    /// voice now starts only from the shortcut or a Voice button. The old preference is deleted so
+    /// nothing can turn continuous listening back on.
+    func removeRetiredPreferences() { d.removeObject(forKey: "wakeWordEnabled") }
+    /// Play a sound with Wren's notifications (reminders, GPT results, email alerts, digests).
+    var notificationSounds: Bool {
+        get { d.object(forKey: "notificationSounds") as? Bool ?? true }
+        set { d.set(newValue, forKey: "notificationSounds") }
     }
     var voiceHotKey: HotKeySpec {
         get { (d.data(forKey: "voiceHotKey")).flatMap { try? JSONDecoder().decode(HotKeySpec.self, from: $0) } ?? .optionShiftSpace }
@@ -114,7 +118,7 @@ final class WrenSettings {
     /// Every preference key Wren writes. "Reset preferences" removes exactly these.
     static let allKeys = ["hotKeyEnabled", "hotKey", "ollamaModel", "useModel", "dateOnlyReminderHour", "captureDraft",
                           "dailySettings", "launchAtLogin", "insightSettings", "notificationPause", "lastAutomaticBackup",
-                          "voiceEnabled", "voiceHotKey", "wakeWordEnabled", "macCalendarEnabled", "chatgptEnabled", "chatgptDestination", "chatgptModel", "openaiModel", "gmailCacheEnabled", "importantSenders", "mailPreferences", "voiceReviewFirst"]
+                          "voiceEnabled", "voiceHotKey", "wakeWordEnabled", "macCalendarEnabled", "chatgptEnabled", "chatgptDestination", "chatgptModel", "openaiModel", "gmailCacheEnabled", "importantSenders", "mailPreferences", "voiceReviewFirst", "notificationSounds"]
 
     func resetAll() { Self.allKeys.forEach(d.removeObject(forKey:)) }
 

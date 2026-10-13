@@ -106,7 +106,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSUIElement</key><false/>
   <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
   <key>NSHumanReadableCopyright</key><string>Local-first personal assistant. Data stays on this Mac.</string>
-  <key>NSMicrophoneUsageDescription</key><string>Wren listens when you press the voice shortcut and, if you turn on “Hey Wren”, in the background for the wake phrase while Wren is running. Speech is transcribed on this Mac; audio is never stored or sent anywhere.</string>
+  <key>NSMicrophoneUsageDescription</key><string>Wren records only after you press the voice shortcut or click Voice, and stops when your command ends. It never listens in the background. Speech is transcribed on this Mac; audio is never stored or sent anywhere.</string>
 ${PROVIDER_PLIST}  <key>NSCalendarsFullAccessUsageDescription</key><string>Wren reads your calendars (read-only) to answer questions like “what meetings do I have tomorrow?” and to add events to your briefing. Nothing leaves this Mac.</string>
   <key>NSCalendarsUsageDescription</key><string>Wren reads your calendars (read-only) to answer questions about your schedule. Nothing leaves this Mac.</string>
   <key>NSSpeechRecognitionUsageDescription</key><string>Wren uses on-device speech recognition to turn your voice capture into text. Audio never leaves this Mac.</string>

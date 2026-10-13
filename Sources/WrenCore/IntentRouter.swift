@@ -6,13 +6,45 @@ public struct AIRequest: Equatable, Sendable {
     public var prompt: String
     /// Exactly what the user typed or said.
     public var original: String
+    /// `.deep`: the user asked for careful thinking, so Wren asks for a higher reasoning effort.
     public var depth: HandoffDepth
+    /// Question, deep thinking, or research (which may use web search when the account allows it).
+    public var kind: DelegationKind
     /// Who the user addressed. nil: a general question with no assistant named.
     public var target: Target?
     public enum Target: String, Equatable, Sendable { case chatgpt }
 
-    public init(prompt: String, original: String, depth: HandoffDepth = .normal, target: Target?) {
+    public init(prompt: String, original: String, depth: HandoffDepth = .normal, kind: DelegationKind? = nil, target: Target?) {
         self.prompt = prompt; self.original = original; self.depth = depth; self.target = target
+        self.kind = kind ?? (depth == .deep ? .thinking : .question)
+    }
+
+    /// What to ask of the model: higher reasoning effort only when asked for, web search only for research.
+    public var wantsHighEffort: Bool { depth == .deep }
+    public var wantsWebSearch: Bool { kind == .research }
+}
+
+/// Reads, from the user's own words, whether a delegated request asks for deeper thinking or for
+/// research that needs outside sources. Nothing is inferred from the topic.
+public enum DelegationIntent {
+    /// "think deeply/carefully", "high reasoning effort", "in depth", "investigate … carefully".
+    public static func wantsDeepThinking(_ text: String) -> Bool {
+        text.lowercased().firstMatch(of: /\b(think(?:ing)? (?:deeply|hard|harder|carefully|it through)|deep(?:ly)? think\w*|deeper|in[ -]depth|deep analysis|thorough(?:ly)?|carefully|high(?:er)? reasoning(?: effort)?|reason (?:carefully|deeply)|maximum reasoning|investigate)\b/) != nil
+    }
+
+    /// "research …", "find sources", "with citations", "latest/current news", "search the web".
+    public static func wantsResearch(_ text: String) -> Bool {
+        text.lowercased().firstMatch(of: /\b(research(?:ing)?|find (?:me )?(?:sources|references|citations)|with (?:sources|citations|references)|cite (?:sources|your sources)|(?:latest|current|recent|today'?s) (?:news|developments|updates|research|papers|prices?)|search (?:the )?(?:web|internet|online)|look (?:it )?up online|browse the web|web search)\b/) != nil
+    }
+
+    public static func kind(_ text: String) -> DelegationKind {
+        wantsResearch(text) ? .research : (wantsDeepThinking(text) ? .thinking : .question)
+    }
+
+    /// Phrases addressed to Wren about how to run the request, not part of the request itself.
+    static func stripRunInstructions(_ s: String) -> String {
+        s.replacingOccurrences(of: #"[\s,;.]*(?:and\s+)?(?:please\s+)?(?:use|with|at|using)\s+(?:a\s+)?(?:high|higher|maximum|max|deep)\s+(?:reasoning|thinking)(?:\s+effort)?(?:\s+mode)?[\s.!]*$"#,
+                             with: "", options: [.regularExpression, .caseInsensitive])
     }
 }
 
@@ -80,8 +112,13 @@ public enum IntentRouter {
     /// Finds a request addressed to ChatGPT/GPT, in many phrasings, and extracts what to send.
     /// "email the GPT team" doesn't count: the assistant has to be asked, checked with, used, etc.
     public static func aiRequest(_ text: String) -> AIRequest? {
-        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        var t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let a = assistant
+        // "Research this topic using GPT: X" → "ask GPT to research X".
+        if let m = t.firstMatch(of: try! Regex("^" + polite + #"(research|investigate|look into|analy[sz]e|explain|summari[sz]e|think (?:deeply |carefully |hard )?about)\s+(?:this|that|the following)?\s*(?:topic|question|idea|subject)?\s*(?:using|with|on|via|in|through)\s+(?:the\s+|my\s+)?"# + a + #"\s*[:,\-–]\s*(.+)$"#).ignoresCase()),
+           let verb = m.output[1].substring, let rest = m.output[2].substring {
+            t = "ask GPT to \(verb) \(rest)"
+        }
         // Ordered from the most specific. Group 1 is always the request.
         let patterns: [String] = [
             // what does ChatGPT say/think about X
@@ -106,13 +143,16 @@ public enum IntentRouter {
                 else { continue }
                 body = body.replacingOccurrences(of: #"^(?:check|look up|look|search|find out|find|see|ask)\s+(?:for\s+|up\s+)?"#, with: "", options: [.regularExpression, .caseInsensitive])
             }
-            let prompt = cleanPrompt(body)
+            let prompt = cleanPrompt(DelegationIntent.stripRunInstructions(body))
             guard prompt.count >= 2 else { continue }
-            let deep = t.lowercased().firstMatch(of: /\b(think (deeply|hard|carefully)|deeper|in depth|in-depth|deep analysis|thoroughly)\b/) != nil
-            return AIRequest(prompt: prompt, original: text, depth: deep ? .deep : .normal, target: .chatgpt)
+            let deep = DelegationIntent.wantsDeepThinking(t)
+            return AIRequest(prompt: prompt, original: text, depth: deep ? .deep : .normal, kind: DelegationIntent.kind(t), target: .chatgpt)
         }
         // Earlier, fixed phrasings ("send this research question to GPT and …").
-        if let h = HandoffRequest.detect(t) { return AIRequest(prompt: sentence(h.task), original: text, depth: h.depth, target: .chatgpt) }
+        if let h = HandoffRequest.detect(t) {
+            let deep = h.depth == .deep || DelegationIntent.wantsDeepThinking(t)
+            return AIRequest(prompt: sentence(h.task), original: text, depth: deep ? .deep : .normal, kind: DelegationIntent.kind(t), target: .chatgpt)
+        }
         return nil
     }
 

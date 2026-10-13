@@ -224,19 +224,19 @@ public final class ChatGPTConnector: BaseConnector, Connector {
 
     /// One request on the user's plan. Only for requests the user started and confirmed; Wren's
     /// background tasks are refused here as well as by the permission system.
-    public func respond(model: String, input: String, instructions: String? = nil, origin: ActionOrigin,
+    public func respond(model: String, input: String, instructions: String? = nil, options: ResponseOptions = .standard, origin: ActionOrigin,
                         onDelta: @escaping @Sendable (String) -> Void = { _ in }) async throws -> ChatGPTReply {
         guard origin.isDirectUser else { throw ChatGPTError.backgroundUseNotAllowed }
         guard let c = connection, c.planUsageAuthorized else { throw ChatGPTError.planNotAuthorized }
         do {
-            let r = try await client.respond(model: model, input: input, instructions: instructions, onDelta: onDelta)
+            let r = try await client.respond(model: model, input: input, instructions: instructions, options: options, onDelta: onDelta)
             usageLimitSeenAt = nil
             succeeded(account: c.email)
             if account != .planEnabled { account = .planEnabled; grant(.externalAI, true) }
             return r
         } catch let e as ChatGPTError {
             switch e {
-            case .incomplete, .interrupted, .unsupportedRequest, .invalidResponse: break
+            case .incomplete, .interrupted, .unsupportedRequest, .unsupportedCapability, .invalidResponse: break
             default: fail(e, keepPrevious: nil)
             }
             throw e

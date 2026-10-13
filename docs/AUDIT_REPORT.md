@@ -1,5 +1,48 @@
 # Wren audit report
 
+## 0.10.0 addendum: personal executor (2026-10-13, branch `feat/personal-executor` from `main` @ `ae70bd1`)
+
+Baseline before changes: `swift test` 311 tests, 0 failures, 4 skipped. Working tree had one
+uncommitted fix (`VoiceSystem.swift`: a fresh `AVAudioEngine` per start and a sample-rate check, to
+avoid an Objective-C exception after a microphone change); it was kept and is part of this branch.
+
+### Gaps found against the brief, and what changed
+
+| Area | Before (0.9.0 on main) | After |
+|---|---|---|
+| Voice activation | Opt-in "Hey Wren" kept the microphone open in the background (gated recognition) | **Removed.** Explicit activation only: shortcut or Voice button (panel, popover, status menu, Connectors › Voice). Microphone never restarts by itself; screen lock/sleep cancel a recording; repeated presses while handling do nothing; a permission prompt answered after Cancel doesn't open the mic. Old preference deleted at launch; a source-level test bans the wake-word code from coming back |
+| Voice transcription | Apple on-device recognition (required) | Unchanged engine (native, local, free; no paid or cloud service). Added model status (installed / not installed / unsupported language) with a link to macOS Dictation settings, and **Record again** for a wrong transcript. Wren bundles no model of its own, so there is nothing for Wren to download or delete; macOS manages Apple's model |
+| Router | `IntentRouter` intents plus ad-hoc connector checks in the app | `ExecutionRouter` names one operation for every input (typed, panel, voice, debug URL), with `ClarifyIntent` for "Ask GPT." with nothing to ask, OpenEmail / MarkEmailRead / OpenDelegationResult, a structured `ExecutionResult` per run and `SubmissionGuard` idempotency (also for notification actions) |
+| GPT thinking/research | Deep requests only added a sentence to the prompt; no tools; nothing recorded about how it ran | `reasoning.effort` (from the model's listed levels) for explicit deep-thinking requests; `web_search` tool for research requests; the record keeps requested vs reported effort, web-search count and cited sources from the stream; unsupported capability is its own failure with an explicit "Run with standard settings" |
+| GPT notifications / result | "GPT finished: … View result." | "GPT has finished · Research: …"; Queued / Needs reconnection labels; find in answer; sources list |
+| Email alerts | "Urgent: Sam"; Snooze only suppressed (an alerted message never came back) | "Important email from Sam" + subject + reason; **Snooze alert for 1 hour** in the notification, and the alert really returns once if still unread |
+| Settings | Voice, ChatGPT, Google and mail controls spread across Connectors and Inbox | Settings › Voice, GPT and Gmail shows real states and scopes in one place, plus **Play notification sounds** |
+| Mailbox persistence while locked | `MailboxStore` and the Gmail cache wrote with complete file protection, so every save failed while the Mac was locked (`NSFileWriteNoPermission`), although Wren keeps checking mail then; alert bookkeeping wasn't persisted and a restart could alert again. Found when the suite failed with the screen locked | Protection "until first user authentication": still encrypted at rest before the first login after boot, writable while locked. The suite passes with the screen locked |
+| Reminders | "Move that reminder to Sunday" right after setting it failed: "No reminder has gone off yet" (found by a new journey test) | "that/this reminder" resolves to the reminder just discussed, then the last one that went off |
+
+### Verification (see docs/MANUAL_TESTS.md, "Last pass: 2026-10-13")
+
+- Automated: `swift test` after this work: 333 tests, 0 failures, 4 skipped (opt-in live tests). The count is lower than "311 + new" because the wake-word, voice-gate and old voice-session tests were removed with that feature.
+- Live, real providers: ChatGPT plan high-effort request (effort reported `high`), research request with web search (1 search, 1 source), model list with reasoning levels; Gmail read-only sync with the real Google sign-in (refresh, full + incremental sync, Spam/Trash excluded, alert dedupe dry run).
+- Live, Wren Dev app: every brief phrase routed to the intended operation; duplicate submission ignored; nothing touches the microphone at launch; clean quit.
+- Not live (needs a person or a permission on this Mac): real microphone, notification delivery and click-through (notifications denied for Wren Dev), Mark as read (account granted read-only), reminder delivery while quit.
+
+### Remaining blockers
+
+| Blocker | Owner | What to do |
+|---|---|---|
+| Notifications denied for Wren Dev | Person at the Mac | Allow them, then run E-GPT-5, E-GMAIL-3, E-REM-1 |
+| Microphone and Speech Recognition never granted to Wren Dev | Person at the Mac | Run M-VOICE 1–8 |
+| `gmail.modify` not granted on the connected account; Google verification for restricted scopes | User / maintainer | Allow Mark as read in the app to test it; the consent screen must list `gmail.modify` |
+| Plan refusal of web search or reasoning can't be produced on this account | — | Mock-tested; watch for it on Business/Enterprise workspaces |
+
+### Notes
+
+- `wren-tools snapshot` renders views with an `AppModel` that reads the real Credentials folder, so a snapshot can show the signed-in ChatGPT email. Snapshots are written to a directory you choose and aren't in the repository. Not changed here.
+- Credentials remain private files (0600) rather than the Keychain, as decided in 0.7 for ad-hoc-signed builds (Keychain prompts on every rebuild); unchanged.
+
+---
+
 Date: 2026-10-11 · Branch: `feat/audit-real-integrations` (from `main` @ `83e90ef`) · Version after this work: 0.9.0 (data schema 6)
 
 This report records what Wren actually does, how that was checked, what was fixed, and what still needs

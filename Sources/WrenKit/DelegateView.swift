@@ -208,7 +208,7 @@ struct DelegateView: View {
     static func describe(_ o: AskOutcome) -> String {
         switch o {
         case .notConnected: "ChatGPT isn't connected. Open Connectors › ChatGPT."
-        case let .reconnect(m), let .needsPermission(m), let .usageLimit(m), let .needsReview(m), let .failed(m, _): m
+        case let .reconnect(m), let .needsPermission(m), let .usageLimit(m), let .needsReview(m), let .unsupported(m), let .failed(m, _): m
         case .answered, .partial: ""
         }
     }

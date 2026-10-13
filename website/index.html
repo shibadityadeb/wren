@@ -156,25 +156,25 @@
       <h2 id="voice-title" class="h-feature">Just say what needs doing.</h2>
       <p class="lede">Wren is being built around a simple idea: your personal assistant should fit into the way you already work. A quick voice command or keyboard shortcut should be enough to capture a thought, create a reminder or start a supported action.</p>
       <ol class="steps" data-steps>
-        <li>Say “Hey Wren”, or press the voice shortcut <span class="keys"><kbd>⌥</kbd><kbd>⇧</kbd><kbd>Space</kbd></span></li>
-        <li>Wren shows that it's listening while you speak</li>
+        <li>Press the voice shortcut <span class="keys"><kbd>⌥</kbd><kbd>⇧</kbd><kbd>Space</kbd></span> or click Voice</li>
+        <li>Wren shows that it's recording while you speak</li>
         <li>Your words appear as they're recognised</li>
         <li>When you pause, you can check and edit them</li>
         <li>Return runs it, through the same path as typing</li>
       </ol>
       <div class="voice-note">
         <p style="margin:0 0 8px"><span class="chip chip--dev">In development</span></p>
-        The voice pipeline is built: Wren uses Apple's on-device speech recognition and refuses to run if on-device recognition isn't available, and no audio is stored. It hasn't yet been verified end to end with a real microphone. “Hey Wren” works only while Wren is running, voice is turned on, and you've allowed Microphone and Speech Recognition. While it's on, macOS shows its microphone indicator. When you quit Wren, it stops listening.
+        The voice pipeline is built: Wren uses Apple's on-device speech recognition and refuses to run if on-device recognition isn't available, and no audio is stored. It hasn't yet been verified end to end with a real microphone. Wren never listens in the background: the microphone opens only when you press the shortcut or click Voice, and closes when your command ends. Voice works only while Wren is running and you've allowed Microphone and Speech Recognition.
       </div>
     </div>
     <div class="reveal" data-delay="1" data-demo="voice">
-      <div class="panel-dark is-listening" role="img" aria-label="Illustration: Wren's panel listening after “Hey Wren”, showing the words “remind me to finish the report by Friday”, then a task, Finish the report, due Friday.">
+      <div class="panel-dark is-listening" role="img" aria-label="Illustration: Wren's panel recording after the voice shortcut, showing the words “remind me to finish the report by Friday”, then a task, Finish the report, due Friday.">
         <div class="panel-dark__top" aria-hidden="true"><span><img src="/assets/brand/wren-mark-on-charcoal.svg" alt="" width="16" height="13">Wren</span><span>esc&nbsp; Cancel</span></div>
         <div class="panel-dark__text" aria-hidden="true" data-voice-text>remind me to finish the report by Friday</div>
         <div class="listening" aria-hidden="true">
           <span class="rec"></span>
           <div class="wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
-          <div><div class="listening__label" data-voice-label>Listening…</div><div class="listening__sub" data-voice-sub>Heard “Hey Wren”. Say what you need, then pause.</div></div>
+          <div><div class="listening__label" data-voice-label>Recording…</div><div class="listening__sub" data-voice-sub>Say what you need, then pause.</div></div>
         </div>
         <div class="panel-dark__result is-in" aria-hidden="true" data-voice-result>
           <div class="result-card__status"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" width="18" height="18"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>Task saved</div>
@@ -194,7 +194,7 @@
       <p class="eyebrow">03 / Give the work a place to go</p>
       <h2 id="gpt-title" class="h-feature">Ask GPT. Get on with your day.</h2>
       <p class="lede">Sometimes you do not need another assistant explaining everything to you. You need a tool to do a piece of work, finish it, and let you know when it is ready.</p>
-      <p>Say “Hey Wren, ask GPT to research the fundamentals of quantum physics.” Wren sends just that request with your own ChatGPT account, keeps a record of it while it runs, and tells you once when it's done. The saved request and its answer stay in Wren for you to open later.</p>
+      <p>Say or type “Ask GPT to research the fundamentals of quantum physics.” Wren sends just that request with your own ChatGPT account, keeps a record of it while it runs, and tells you once when it's done. The saved request and its answer stay in Wren for you to open later.</p>
       <ul class="facts">
         <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m6 12 4 4 8-9"/></svg><span>Uses your ChatGPT sign-in and plan. No API key to paste, and no switch to separate API billing.</span></li>
         <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m6 12 4 4 8-9"/></svg><span>Only your request is sent. Nothing else from Wren is attached unless you add it yourself.</span></li>
@@ -391,7 +391,7 @@
       <div class="conn" role="listitem">
         <span class="conn__icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></span>
         <div class="conn__name">Voice<span class="conn__kind">A capability on your Mac</span></div>
-        <p class="conn__desc">“Hey Wren” and a voice shortcut, through the same path as typing, with a chance to edit what you said.<small>Apple's on-device speech recognition. Needs Microphone and Speech Recognition permission.</small></p>
+        <p class="conn__desc">A voice shortcut and a Voice button, through the same path as typing, with a chance to edit what you said. Never listens in the background.<small>Apple's on-device speech recognition. Needs Microphone and Speech Recognition permission.</small></p>
         <span class="chip chip--dev">In development</span>
       </div>
       <div class="conn" role="listitem">
