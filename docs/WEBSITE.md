@@ -53,7 +53,7 @@ One-time setup at vercel.com:
 After that:
 - every push to `main` deploys production;
 - other branches and pull requests get preview URLs, marked `noindex`;
-- commits that don't touch `website/` or `vercel.json` skip the build (`ignoreCommand`);
+- commits that don't touch `website/` or `vercel.json` since the last deployed commit (`VERCEL_GIT_PREVIOUS_SHA`) skip the build (`ignoreCommand`); the first deploy, or any deploy whose previous commit can't be found, always builds;
 - `404.html` is served for missing pages.
 
 Adding a custom domain later: add it in Vercel › Domains, set it as the production domain (or set a `SITE_URL` environment variable), and redeploy.
