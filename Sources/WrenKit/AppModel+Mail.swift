@@ -99,7 +99,7 @@ extension AppModel {
         if !d.summarized.isEmpty {
             _ = await notifications.deliverMailAlert(id: "summary-\(Int(clock.now.timeIntervalSince1970))",
                                                      title: "\(d.summarized.count) more important emails",
-                                                     body: "Open Wren's Inbox to see them.", canMarkRead: false)
+                                                     body: "Open Wren's Inbox to see them.", canMarkRead: false, isSummary: true)
         }
         if !d.individual.isEmpty || !d.summarized.isEmpty {
             log.notice("mail alerts: \(d.individual.count, privacy: .public) individual, \(d.summarized.count, privacy: .public) summarized")

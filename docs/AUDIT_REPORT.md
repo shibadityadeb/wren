@@ -22,7 +22,7 @@ avoid an Objective-C exception after a microphone change); it was kept and is pa
 
 ### Verification (see docs/MANUAL_TESTS.md, "Last pass: 2026-10-13")
 
-- Automated: `swift test` after this work: 333 tests, 0 failures, 4 skipped (opt-in live tests). The count is lower than "311 + new" because the wake-word, voice-gate and old voice-session tests were removed with that feature.
+- Automated: `swift test` after this work: 335 tests, 0 failures, 4 skipped (opt-in live tests). The count is lower than "311 + new" because the wake-word, voice-gate and old voice-session tests were removed with that feature.
 - Live, real providers: ChatGPT plan high-effort request (effort reported `high`), research request with web search (1 search, 1 source), model list with reasoning levels; Gmail read-only sync with the real Google sign-in (refresh, full + incremental sync, Spam/Trash excluded, alert dedupe dry run).
 - Live, Wren Dev app: every brief phrase routed to the intended operation; duplicate submission ignored; nothing touches the microphone at launch; clean quit.
 - Not live (needs a person or a permission on this Mac): real microphone, notification delivery and click-through (notifications denied for Wren Dev), Mark as read (account granted read-only), reminder delivery while quit.

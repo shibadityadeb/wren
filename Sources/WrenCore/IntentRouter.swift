@@ -28,8 +28,11 @@ public struct AIRequest: Equatable, Sendable {
 /// research that needs outside sources. Nothing is inferred from the topic.
 public enum DelegationIntent {
     /// "think deeply/carefully", "high reasoning effort", "in depth", "investigate … carefully".
+    /// "carefully" or "investigate" alone don't count ("carefully summarize this" is an ordinary request).
     public static func wantsDeepThinking(_ text: String) -> Bool {
-        text.lowercased().firstMatch(of: /\b(think(?:ing)? (?:deeply|hard|harder|carefully|it through)|deep(?:ly)? think\w*|deeper|in[ -]depth|deep analysis|thorough(?:ly)?|carefully|high(?:er)? reasoning(?: effort)?|reason (?:carefully|deeply)|maximum reasoning|investigate)\b/) != nil
+        let lower = text.lowercased()
+        return lower.firstMatch(of: /\b(think(?:ing)? (?:deeply|hard|harder|carefully|it through)|deep(?:ly)? think\w*|deeper|in[ -]depth|deep analysis|thorough(?:ly)?|high(?:er)? reasoning(?: effort)?|reason (?:carefully|deeply)|maximum reasoning)\b/) != nil
+            || lower.firstMatch(of: /\binvestigate(?:\s+\w+){0,4}\s+(?:carefully|thoroughly|deeply)\b/) != nil
     }
 
     /// "research …", "find sources", "with citations", "latest/current news", "search the web".

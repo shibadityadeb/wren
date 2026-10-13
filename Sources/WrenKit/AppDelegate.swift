@@ -183,6 +183,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
     /// The shortcut, the Voice buttons and the menu all do the same thing: start one command, or
     /// end the one being recorded.
     private func startOrStopVoice(_ trigger: VoiceSession.Trigger) {
+        // A command is being handled: a repeated press does nothing (and mustn't reset the panel).
+        guard voice.phase != .handling else { return }
         if !voice.isCapturing {
             showCapture()
             captureState.reply = nil; captureState.ask = nil; captureState.reviewingVoice = false

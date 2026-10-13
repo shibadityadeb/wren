@@ -112,7 +112,7 @@ extension AppModel {
         case let .generalQuestion(request):
             return (operation.name, .ask(request))
         case .createTask, .capture:
-            if let r = await connectorAnswer(trimmed) { return ("SearchGmail", .resolution(r)) }
+            if let r = await connectorAnswer(trimmed) { return (operation.name, .resolution(r)) }
             // Ask the local model only when the text looks like a command or question.
             if ContextResolver.mightBeCommandOrQuestion(trimmed) {
                 switch await modelInterpretation(trimmed, all: all) {

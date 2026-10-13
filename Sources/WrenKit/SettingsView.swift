@@ -383,7 +383,7 @@ struct ExecutorSettings: View {
             } else {
                 Text("Email alerts, quiet hours and the morning email digest appear here once Google is connected.").font(.caption).foregroundStyle(.secondary)
             }
-            Text("Notion and Slack are listed under Connectors as coming soon; they aren't implemented yet.")
+            Text("Notion and Calendar are set up under Connectors. Integrations marked “Coming soon” there aren't available yet.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }

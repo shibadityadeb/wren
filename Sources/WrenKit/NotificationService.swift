@@ -10,6 +10,8 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Wre
     enum Category: String {
         case reminder = "WREN_REMINDER", briefing = "WREN_BRIEFING", checkIn = "WREN_CHECKIN", checkInItem = "WREN_CHECKIN_ITEM"
         case delegation = "WREN_DELEGATION", mail = "WREN_MAIL", mailWithRead = "WREN_MAIL_READ", digest = "WREN_DIGEST"
+        /// "N more important emails": no Snooze or Mark as read (it isn't one message).
+        case mailSummary = "WREN_MAIL_SUMMARY"
     }
     enum Action: String {
         case done = "WREN_DONE", snoozeHour = "WREN_SNOOZE_1H", later = "WREN_LATER", tomorrow = "WREN_TOMORROW"
@@ -62,6 +64,8 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Wre
                                    actions: [UNNotificationAction(identifier: Action.viewResult.rawValue, title: "View result", options: [.foreground])], intentIdentifiers: []),
             UNNotificationCategory(identifier: Category.mail.rawValue, actions: [openMail, snoozeMail, dismissMail], intentIdentifiers: []),
             UNNotificationCategory(identifier: Category.mailWithRead.rawValue, actions: [openMail, markRead, snoozeMail, dismissMail], intentIdentifiers: []),
+            UNNotificationCategory(identifier: Category.mailSummary.rawValue,
+                                   actions: [UNNotificationAction(identifier: Action.openMail.rawValue, title: "Open Inbox", options: [.foreground]), dismissMail], intentIdentifiers: []),
             UNNotificationCategory(identifier: Category.digest.rawValue,
                                    actions: [UNNotificationAction(identifier: Action.openDigest.rawValue, title: "Open digest", options: [.foreground])], intentIdentifiers: []),
         ])
@@ -160,10 +164,10 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Wre
     }
 
     /// One new-mail alert: sender, subject and Wren's reason (never the body).
-    func deliverMailAlert(id: String, title: String, body: String, canMarkRead: Bool) async -> Bool {
+    func deliverMailAlert(id: String, title: String, body: String, canMarkRead: Bool, isSummary: Bool = false) async -> Bool {
         let content = UNMutableNotificationContent()
         content.title = title; content.body = body; content.sound = sound
-        content.categoryIdentifier = (canMarkRead ? Category.mailWithRead : Category.mail).rawValue
+        content.categoryIdentifier = (isSummary ? Category.mailSummary : canMarkRead ? Category.mailWithRead : Category.mail).rawValue
         content.userInfo = ["kind": "mail", "messageID": id]
         content.threadIdentifier = "mail"
         return await add("mail-\(id)", content)

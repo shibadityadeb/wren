@@ -440,6 +440,8 @@ public enum MailAlertPolicy {
             item.heldForQuietHours = false
             defer { state.items[id] = item }
             let c = item.classification.category
+            // Read since it was snoozed: the snooze is over for good, even if it's marked unread later.
+            if !item.message.unread { item.alertSnoozed = nil }
             guard item.message.unread, item.dismissedAt == nil, !item.isSnoozed(at: now), level.includes(c) else { continue }
             let wasSnoozed = item.alertSnoozed == true
             if !wasSnoozed, let prev = item.alertedCategory, !(c < prev) { continue }   // already alerted, no new evidence
