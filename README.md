@@ -365,6 +365,10 @@ scripts/build-app.sh debug --dev-identity
 
 Tests that need a person, a real account, macOS permission prompts or real time passing are listed in [docs/MANUAL_TESTS.md](docs/MANUAL_TESTS.md), with what has and hasn't been run.
 
+## Website
+
+The public website (home page, Privacy Policy, 404) is a static site in `website/`, with no dependencies. Preview it with `python3 -m http.server 4173 --directory website`, and build it with `SITE_URL=https://… website/build.sh`. See docs/WEBSITE.md; the privacy data flows behind the policy are in docs/PRIVACY_DATA_MAP.md.
+
 ## Brand assets
 
 `assets/logo.png` is the source. Running `scripts/build-app.sh` regenerates `Brand/` from it:
