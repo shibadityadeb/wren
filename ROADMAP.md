@@ -1,5 +1,8 @@
 # Wren — Roadmap
 
+> **Status update (0.9.0, 2026-10-11).** Phase plans below are kept for history. Built since: tracked GPT delegation with completion notifications; Gmail inbox intelligence (sync via history, triage, digest, alerts, Mark as read); scoped standing rules; file-based credentials (the Keychain items in Phases 9–10 were replaced by private files). Remaining blockers and what's verified live: docs/AUDIT_REPORT.md. Next: Google client secret in builds and Google verification (restricted scope `gmail.readonly`/`gmail.modify`), live notification and voice passes (docs/MANUAL_TESTS.md), local files and Shortcuts connectors.
+
+
 Each phase ends with: a green build, tests passing (commands recorded), a git commit, and a report of what remains unverified. Phases are run one at a time.
 
 ## Phase 0 — Architecture and plan ✅ (this commit)

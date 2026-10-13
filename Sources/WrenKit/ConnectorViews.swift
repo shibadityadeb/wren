@@ -342,6 +342,11 @@ struct ConnectorDetailView: View {
     @ViewBuilder func voiceSetup(_ state: ConnectorState) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Toggle("Listen for “Hey Wren”", isOn: Binding(get: { model.settings.wakeWordEnabled }, set: { model.setWakeWord($0) }))
+            Text("To hear “Hey Wren”, the microphone stays on while this is on and Wren is running, so macOS shows its orange microphone dot. Wren only measures loudness until someone speaks, recognises speech on this Mac only while someone is talking, never stores audio, and stops listening while your screen is locked or asleep. Quitting Wren turns it off.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Toggle("Let me check and edit what I said before Wren acts", isOn: Binding(get: { model.settings.voiceReviewFirst }, set: { model.settings.voiceReviewFirst = $0; model.connectorsChanged() }))
+            Text("On: after you pause, the words appear in the panel; press Return to run them. Off: Wren acts as soon as you stop speaking.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Text("Off by default. While on, Wren keeps the microphone open in the background and listens only for “Hey Wren”, on this Mac. macOS shows the orange microphone indicator, and Wren's menu-bar bird gets a dot. After it hears “Hey Wren”, Wren captures your request until you pause, then stops recording.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Toggle("Voice shortcut", isOn: Binding(get: { model.settings.voiceEnabled }, set: { model.setVoiceEnabled($0) }))

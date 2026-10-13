@@ -95,7 +95,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
                         saveAsNew: { [weak self] in self?.saveAsNew($0) },
                         openAISetup: { [weak self] in self?.openAISetup() },
                         toggleVoice: { [weak self] in self?.toggleVoice() },
-                        askAction: { [weak self] a in self?.askAction(a) })
+                        askAction: { [weak self] a in self?.askAction(a) },
+                        editedWhileListening: { [weak self] in self?.editedWhileListening() })
         }
         panel.onCancel = { [weak self] in self?.cancelCapture() }
         panel.onResign = { [weak self] in
@@ -109,10 +110,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
         model.applyHotKey = { [weak self] in self?.applyHotKey() }
         model.openMainWindow = { [weak self] in self?.popover.performClose(nil); self?.mainWindow.show() }
         // One voice service: "Hey Wren" and the voice shortcut feed the same capture and command path.
-        voice = VoiceSession(stream: LiveSpeechStream(), permissions: model.hub.voicePermissions)
+        let stream = LiveSpeechStream()
+        stream.onLevel = { [weak self] l in
+            guard let self, self.captureState.recording else { return }
+            self.captureState.voiceLevel = l
+        }
+        voice = VoiceSession(stream: stream, permissions: model.hub.voicePermissions)
+        observeScreenLock()
         // Note: nothing here touches the microphone; it opens only when "Hey Wren" or the shortcut is used.
         voice.onPhase = { [weak self] p in self?.voicePhaseChanged(p) }
-        voice.onLiveCommand = { [weak self] t in self?.captureState.text = t }
+        voice.onLiveCommand = { [weak self] t in
+            guard let self else { return }
+            self.captureState.lastVoiceText = t
+            self.captureState.text = t
+        }
         voice.onCommand = { [weak self] t, trigger in self?.runVoiceCommand(t, trigger) }
         voice.onEndedWithoutCommand = { [weak self] end in
             self?.captureState.voiceStatus = end == .timeLimit ? "Stopped after 20 seconds." : "Didn't hear a command. Try again and say what you need."
@@ -121,6 +132,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
         model.applyVoiceHotKey = { [weak self] in self?.applyVoiceHotKey() }
         model.setWakeWordInService = { [weak self] on in await self?.voice.setWakeWord(on) }
         model.prefillCapture = { [weak self] t in self?.captureState.text = t }
+        // A delegation whose result is on screen in the panel doesn't also get a notification.
+        model.isShowingDelegation = { [weak self] id in
+            guard let self, self.panel.isVisible, self.panel.isKeyWindow else { return false }
+            return self.captureState.ask?.recordID == id
+        }
         applyVoiceHotKey()
         applyHotKey()
         model.start()
@@ -183,15 +199,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
             autoClose?.cancel()
             if !panel.isVisible { showCapture() }
             captureState.reply = nil
+            captureState.ask = nil
+            captureState.reviewingVoice = false
+            captureState.voiceLevel = 0
+            captureState.lastVoiceText = voice.liveCommand
             captureState.text = voice.liveCommand
             captureState.recording = true
-            captureState.voiceStatus = trigger == .wakeWord ? "Listening… (heard “Hey Wren”). Pause when you're done." : "Listening… Pause when you're done, or press the shortcut again."
+            captureState.voiceStatus = trigger == .wakeWord ? "Heard “Hey Wren”. Say what you need, then pause." : "Say what you need, then pause, or press the shortcut again."
             voiceTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { self?.voice.tick() }
             }
         case .handling:
             captureState.recording = false
-            captureState.voiceStatus = "Transcribed on this Mac."
+            captureState.voiceStatus = nil
         case .listening, .off:
             captureState.recording = false
         case let .failed(e):
@@ -208,6 +228,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
     private func runVoiceCommand(_ text: String, _ trigger: VoiceSession.Trigger) {
         appLog.notice("voice command received via \(trigger.rawValue, privacy: .public) (\(text.count, privacy: .public) characters)")
         if !panel.isVisible { showCapture() }
+        if model.settings.voiceReviewFirst {
+            // Show what was heard, editable; nothing happens until the user presses Return.
+            captureState.lastVoiceText = text
+            captureState.text = text
+            captureState.reviewingVoice = true
+            captureState.voiceStatus = nil
+            captureState.presentations += 1
+            panel.makeKey()
+            voice.finishedHandling()
+            appLog.notice("voice command awaiting review")
+            return
+        }
         captureState.text = text
         captureState.voiceStatus = "You said: “\(text)”"
         captureState.busy = true
@@ -279,15 +311,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
 
     private func submitCapture(_ text: String) {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !captureState.busy else { return }
+        // A reviewed spoken command runs as voice (same pipeline, same audit channel).
+        let channel: UserChannel = captureState.reviewingVoice ? .voice : .hotkey
+        if case .capturing = voice.phase { voice.cancel() }
+        captureState.reviewingVoice = false
+        captureState.recording = false
         captureState.busy = true
         Task {
-            let reply = await model.submitFromCapture(text)
+            let reply = await model.submitFromCapture(text, channel: channel)
             captureState.busy = false
             switch reply {
             case .saved: closeCapture()
             case let .resolution(r): captureState.reply = r
             case let .failed(msg): captureState.status = msg
-            case let .ask(r): showAsk(r, channel: .hotkey)
+            case let .ask(r): showAsk(r, channel: channel)
+            }
+        }
+    }
+
+    /// Typing while Wren is listening: stop listening and keep what's in the field for editing.
+    private func editedWhileListening() {
+        guard captureState.recording else { return }
+        voice.cancel()
+        captureState.recording = false
+        captureState.reviewingVoice = true
+        captureState.voiceStatus = nil
+    }
+
+    /// No listening while the screen is locked or the display sleeps; it resumes afterwards.
+    private func observeScreenLock() {
+        let dnc = DistributedNotificationCenter.default()
+        var locked = false
+        dnc.addObserver(forName: .init("com.apple.screenIsLocked"), object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { locked = true; self?.voice?.suspend(); appLog.notice("screen locked: listening paused") }
+        }
+        dnc.addObserver(forName: .init("com.apple.screenIsUnlocked"), object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { locked = false; self?.voice?.resumeIfEnabled() }
+        }
+        let ws = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.screensDidSleepNotification, NSWorkspace.willSleepNotification] {
+            ws.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.voice?.suspend() } }
+        }
+        for name in [NSWorkspace.screensDidWakeNotification, NSWorkspace.didWakeNotification] {
+            ws.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { if !locked { self?.voice?.resumeIfEnabled() } }
             }
         }
     }
@@ -313,28 +380,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
         guard var card = captureState.ask else { return }
         switch a {
         case let .run(dest):
-            // One request at a time: a second Return or click while sending does nothing.
-            guard card.phase != .sending else { return }
+            // One request at a time: a second Return, click or voice event while sending does nothing.
+            guard !card.phase.isSending else { return }
             let target: AskCard.Destination = dest == .choose ? .chatgpt : dest
             if card.destination != target { card.destination = target }
-            card.phase = .sending; card.streamed = ""; card.note = nil
-            captureState.ask = card
-            captureState.busy = true
+            card.streamed = ""; card.note = nil
             let request = card.request, channel = askChannel
-            Task {
-                let outcome: AskOutcome
-                if target == .local {
-                    outcome = await model.askLocalModel(request) ?? .failed("Local AI isn't set up. Set it up in Wren › Local AI, or ask ChatGPT.", retryable: false)
-                } else {
-                    outcome = await model.askChatGPT(request, channel: channel) { [weak self] d in
-                        guard let self, self.captureState.ask?.phase == .sending else { return }
-                        self.captureState.ask?.streamed += d
-                    }
+            if target == .local {
+                card.phase = .sending(recordID: nil)
+                captureState.ask = card
+                captureState.busy = true
+                Task {
+                    let outcome = await model.askLocalModel(request) ?? .failed("Local AI isn't set up. Set it up in Wren › Local AI, or ask ChatGPT.", retryable: false)
+                    captureState.busy = false
+                    guard captureState.ask?.request == request else { return }
+                    captureState.ask?.phase = Self.phase(for: outcome)
                 }
-                captureState.busy = false
-                guard captureState.ask?.request == request else { return }
-                captureState.ask?.phase = Self.phase(for: outcome)
-                appLog.notice("ask \(target == .local ? "local" : "chatgpt", privacy: .public): \(String(describing: Self.phase(for: outcome)).prefix(40), privacy: .public)")
+                return
+            }
+            // ChatGPT runs as a tracked delegation: persisted first, independent of this panel, and
+            // announced when it finishes. A failed earlier attempt is retried on the same record.
+            let start: AskStart
+            if let id = card.recordID, model.asks?.record(id)?.canRetry == true { start = model.retryDelegation(id) }
+            else {
+                start = model.startDelegation(request, channel: channel) { [weak self] d in
+                    guard let self, self.captureState.ask?.request == request, self.captureState.ask?.phase.isSending == true else { return }
+                    self.captureState.ask?.streamed += d
+                }
+            }
+            switch start {
+            case let .notRun(o):
+                card.phase = Self.phase(for: o)
+                captureState.ask = card
+            case let .started(id), let .duplicate(id):
+                card.recordID = id
+                if case .duplicate = start, let r = model.asks?.record(id), r.status != .running, let o = model.asks?.outcome(of: r) {
+                    card.phase = Self.phase(for: o)
+                    card.note = "Already sent a moment ago; nothing new was sent."
+                    captureState.ask = card
+                    return
+                }
+                card.phase = .sending(recordID: id)
+                card.note = "Sent to ChatGPT. You can close this; Wren will tell you when it's finished."
+                captureState.ask = card
+                appLog.notice("delegation \(id.uuidString.prefix(8), privacy: .public) \(String(describing: start).prefix(9), privacy: .public)")
+                Task {
+                    guard let outcome = await model.asks?.outcome(id) else { return }
+                    guard captureState.ask?.request == request else { return }
+                    captureState.ask?.phase = Self.phase(for: outcome)
+                    captureState.ask?.note = nil
+                }
             }
         case .connect:
             card.phase = .connecting; captureState.ask = card
@@ -365,9 +460,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
             closeCapture()
             model.openMainWindow()
         case .openAnswer:
-            model.route = .delegate
             closeCapture()
-            model.openMainWindow()
+            if let id = card.recordID { model.openDelegation(id) } else { model.route = .delegate; model.openMainWindow() }
         case .copyAnswer:
             switch card.phase {
             case let .answered(t, _, _), let .partial(t, _, _, _):
@@ -418,6 +512,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
     }
 
     private func closeCapture() {
+        captureState.reviewingVoice = false
         captureState.text = ""
         captureState.reply = nil
         captureState.ask = nil
@@ -673,9 +768,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
             // Debug only: same path as pressing "Send with ChatGPT" on the preview (that press is the confirmation).
             let task = q.first(where: { $0.name == "task" })?.value ?? "Reply with the single word: ready"
             Task {
-                guard let r = model.newDelegation(task, destination: .chatgptPlan, depth: .normal) else { return }
-                await model.sendToChatGPT(HandoffDraft(task: task, depth: .normal), record: r) { _ in }
-                appLog.notice("debug chatgpt ask status=\(r.status.rawValue, privacy: .public) chars=\(r.response?.count ?? 0, privacy: .public) source=\(r.responseSource ?? "-", privacy: .public) error=\(r.error ?? "none", privacy: .public) account=\(self.model.hub.chatgpt.account.title, privacy: .public)")
+                let start = model.sendToChatGPT(HandoffDraft(task: task, depth: .normal)) { _ in }
+                guard case let .started(id) = start, let asks = model.asks else { appLog.notice("debug chatgpt ask not started: \(String(describing: start), privacy: .public)"); return }
+                _ = await asks.outcome(id)
+                let r = asks.record(id)
+                appLog.notice("debug chatgpt ask id=\(id.uuidString.prefix(8), privacy: .public) status=\(r?.status.rawValue ?? "-", privacy: .public) chars=\(r?.response?.count ?? 0, privacy: .public) requested=\(r?.requestedModel ?? "-", privacy: .public) reported=\(r?.reportedModel ?? "-", privacy: .public) error=\(r?.error ?? "none", privacy: .public) notified=\(r?.notifiedAt != nil, privacy: .public)")
             }
         case "/voice-command":
             // Debug only: the step after transcription, with this text as if it had been spoken.

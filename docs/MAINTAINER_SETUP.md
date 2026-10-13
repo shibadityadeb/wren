@@ -12,20 +12,21 @@ for it, with no setup steps for the user. That is the intended, honest fallback.
 | ChatGPT | None: Sign in with ChatGPT registers Wren dynamically on first sign-in | None | Nothing to configure |
 | Notion | None: Notion MCP registers Wren dynamically at sign-in | None | Nothing to configure |
 | Calendar (this Mac) | None: macOS Calendars permission | None | Nothing to configure |
-| Google (Gmail, Calendar) | Google OAuth client, type **Desktop app** | None: public client, loopback + PKCE | Client ID injected into the app at build time |
+| Google (Gmail, Calendar) | Google OAuth client, type **Desktop app** | The Desktop client's secret (Google requires it at the token endpoint; not confidential for installed apps) | Client ID and secret injected into the app at build time |
 
 ## Build-time injection
 
 `scripts/build-app.sh` reads these variables from the environment, or from `config/providers.env`
 (git-ignored; copy `config/providers.env.example`), and writes them into `Info.plist`. The script
-only reads these four keys from the file and never executes it or prints the values.
+only reads the keys listed below from the file and never executes it or prints the values.
 
 | Variable | Value |
 |---|---|
 | `WREN_GOOGLE_CLIENT_ID` | `….apps.googleusercontent.com` |
+| `WREN_GOOGLE_CLIENT_SECRET` | the same Desktop client's secret (`GOCSPX-…`) |
 | `WREN_GOOGLE_STATUS` | `testing`, `unverified` or `verified` (what Wren tells users to expect) |
 
-For releases, add the same three names as **repository secrets**. The Release workflow passes them to
+For releases, add the same names as repository secrets (`WREN_GOOGLE_CLIENT_ID`, `WREN_GOOGLE_CLIENT_SECRET`) and a variable (`WREN_GOOGLE_STATUS`). The Release workflow passes them to
 packaging. `scripts/verify-dmg.sh` reports whether each provider is included without showing values.
 Pull-request CI builds without them.
 
@@ -81,10 +82,11 @@ You do this once. Everyone who downloads the DMG then just clicks Connect Google
    (the GitHub page is fine) and a privacy policy URL (for example, a page in the repo describing
    docs/privacy).
 3. Audience: **External**.
-4. Data access › Add or remove scopes: add only `.../auth/gmail.readonly` and
-   `.../auth/calendar.readonly`.
+4. Data access › Add or remove scopes: add `.../auth/gmail.readonly`, `.../auth/calendar.readonly`
+   and, for the optional Mark as read, `.../auth/gmail.modify` (requested only when a user chooses
+   "Allow Mark as read…"; Google has no narrower scope that can remove the UNREAD label).
 5. Clients › Create client › Application type **Desktop app**, name "Wren for Mac". Copy the
-   **client ID**. Ignore the client secret: Wren never uses it.
+   **client ID** and the **client secret**. Both go into the build (C).
 
 **B. Choose who can connect**
 - **Just you and a few people:** Audience › Test users › add their Gmail addresses (up to 100). Set
@@ -99,17 +101,25 @@ You do this once. Everyone who downloads the DMG then just clicks Connect Google
 **C. Put it in the DMG**
 - GitHub › Settings › Secrets and variables › Actions:
   - secret `WREN_GOOGLE_CLIENT_ID` = the client ID;
+  - secret `WREN_GOOGLE_CLIENT_SECRET` = the client secret;
   - variable `WREN_GOOGLE_STATUS` = `testing`, `unverified` or `verified`.
 - Tag a release (`git tag v0.9.0-preview.1 && git push --tags`). The DMG the Release workflow builds
   contains the client ID, and `scripts/verify-dmg.sh` reports "Google included".
-- Local builds read the same two values from `config/providers.env`.
+- Local builds read the same values from `config/providers.env`. `scripts/build-app.sh` warns when the
+  client ID is set but the secret isn't.
 
 **D. Check it**
 Install the DMG, Connectors › Gmail › Connect Google, approve with a test account, and follow
 docs/MANUAL_TESTS.md › Google.
 
-Wren is a public client (loopback redirect, PKCE and state). Google documents `client_secret` as
-optional for installed apps, so none is shipped or sent.
+Wren uses the installed-app flow (loopback redirect, PKCE and state) **and** sends the Desktop
+client's secret to the token endpoint. Earlier builds sent no secret on the assumption that PKCE made
+it optional; Google rejects that for Desktop clients. Verified 2026-10-11 against Wren's real client ID
+with a deliberately invalid code: without a secret Google answers `invalid_request: client_secret is
+missing.`, with a wrong one `invalid_client`. Google's documentation for installed apps treats this
+secret as not confidential (it ships inside the app), so it's injected at build time like the client ID
+and never committed. Without it, every Connect Google fails after the user approves, and Wren reports
+it as a build problem, not the user's.
 
 ### Google verification: what's needed before ordinary users can connect
 

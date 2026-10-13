@@ -80,7 +80,7 @@ final class IntentTests: XCTestCase {
     func testRulesOnly() {
         let a = proc.rulesOnly("Remind me to call my friend at 8 tonight.", now: now)
         XCTAssertEqual(a.kind, .commitment)
-        XCTAssertEqual(a.title, "Call my friend at 8 tonight")
+        XCTAssertEqual(a.title, "Call my friend", "the date is kept as the deadline, not repeated in the title")
         XCTAssertEqual(a.deadline, at(cal, 2026, 10, 8, 20))
         let b = proc.rulesOnly("I have an idea for a new AI startup.", now: now)
         XCTAssertEqual(b.kind, .unsorted)

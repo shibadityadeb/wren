@@ -6,7 +6,9 @@
 > 3. **Data:** a single `Commitment` model holds the verbatim `originalText`, a `kind` (commitment, idea, question, waiting, research, unsorted) and a `processing` state. This replaces a separate `Capture` entity. Only `kind == .commitment` gets automatic reminders. A separate `Capture` can be split out later if Phase 5 needs it.
 > 4. **UI:** the menu bar uses `NSStatusItem` + `NSPopover` rather than `MenuBarExtra`, so a notification tap can open the popover programmatically.
 
-> **Milestone 6 (2026-10-11).** Connectors, voice, ChatGPT handoff and delegation are documented in §35–§41.
+> **0.9.0 (2026-10-11).** §35–§44 are rewritten as built: file-based credentials (no Keychain), Sign in with ChatGPT, tracked GPT delegations, Gmail inbox intelligence, Notion MCP, the continuous "Hey Wren" listener and schema v6. §16 and §17 are the original plans and are superseded by §37–§39. docs/AUDIT_REPORT.md lists what is verified live.
+>
+> **Milestone 6 (2026-10-11).** Connectors, voice, ChatGPT handoff and delegation (rewritten in 0.9.0, §35–§44).
 >
 > **Milestone 5 (2026-10-11).** Main window, export, backups and restore, notification pause and reset are documented in §30–§34.
 >
@@ -342,7 +344,7 @@ The popover gets a Connections screen listing each tool, its grants, its standin
 
 `MockTool` implementations with configurable effect classes, failures, and verification results. Required tests include an email body containing "delete all messages" producing no executable request, a model tool call with a forged `authorization` field being rejected, and replayed or altered approvals failing. See TEST_PLAN.md Phase 9.
 
-## 16. Email (Phase 10)
+## 16. Email (Phase 10) — original plan, superseded by §37
 
 - `EmailProvider` protocol: `listChanges(since:)`, `fetchMetadata(ids:)`, `fetchBody(id:)`, `search(query:)`, plus write capabilities registered as broker tools. Gmail is the only implementation until another is built and tested.
 - **Gmail auth.** OAuth 2.0 for installed apps with PKCE and a loopback redirect on `127.0.0.1:<random port>`, opened in the default browser through `ASWebAuthenticationSession` or `NSWorkspace`. Tokens go to Keychain under service `com.shibadityadeb.wren.oauth.gmail`.
@@ -353,7 +355,7 @@ The popover gets a Connections screen listing each tool, its grants, its standin
 - **Classifier.** Deterministic signals first: your important-senders list, Gmail category labels, `List-Unsubscribe` header, known billing and security sender patterns, calendar invites. The local model then labels the remainder with a category and a one-line reason, validated like intents. Corrections you make are stored as sender or domain overrides that win over both. Email text is wrapped as quoted data in the prompt, and the model output schema has no tool-call field.
 - **Briefing.** Details pending the rest of the Phase 10 prompt.
 
-## 17. External AI delegation (phase to be specified)
+## 17. External AI delegation — original plan, superseded by §39 (there is no API-key path)
 
 Default is the handoff flow in PROJECT_SPEC §9.4. The optional API path is a broker tool `openai.delegate` with effect `sensitive`, because content leaves the Mac. It always shows a review screen containing the exact outbound text. The key lives in Keychain. The returned `model` and reasoning fields are compared with what was requested. Scripted control of the ChatGPT site or app is not planned.
 
@@ -593,56 +595,72 @@ Frame is remembered (`WrenMainWindow` autosave). The logo is the bundled `Wren.i
 - No "clear test data": Wren can't distinguish test entries reliably.
 
 
-## 35. Connector framework (Milestone 6)
+## 35. Connector framework (as built, 0.9.0)
 
 Files: `Sources/WrenCore/Connectors/`.
 
-- `ConnectorCatalog` declares every connector once: id, name, icon, summary, `ConnectorAuth`, capabilities (implemented or not, on-Mac or external), Wren permissions, privacy text, cleanup on disconnect, allowed hosts, planned flag. Settings is generated from it; adding a connector means adding a descriptor and an implementation.
-- `ConnectorState`: available · setupRequired · connecting · connected(account) · partiallyConnected · temporarilyUnavailable · permissionDenied · disconnected · planned, grouped into summary buckets. `.connected` is set only by a successful provider call.
-- `Connector` protocol (`refresh`, `disconnect`); `BaseConnector` records last success/error (`ConnectorStatus`, user defaults) and grants/revokes the connector's Wren permissions through the policy store on success/disconnect.
-- `CredentialStore`: `KeychainCredentialStore` (generic passwords, `WhenUnlockedThisDeviceOnly`, never synced) in the app, in-memory in tests. Credentials never enter SwiftData, exports, backups or logs.
+- `ConnectorCatalog` declares every connector once: id, name, icon, summary, `ConnectorAuth`, capabilities (each marked implemented or not), Wren permissions, privacy text, cleanup on disconnect, allowed hosts. Settings is generated from it.
+- `ConnectorState` is `.connected` only after a successful, authorized provider call.
+- `CredentialStore`: `FileCredentialStore` in the app: `<data folder>/Credentials/<key>`, folder 0700, files 0600, atomic writes. There is **no Keychain** use (it caused password prompts); legacy Keychain items are left untouched. Credentials never enter SwiftData, exports, backups or logs. "Remove all Wren data" revokes and deletes them.
 - `ConnectorHTTP`: HTTPS only, per-connector host allowlist, maps 401/403/429/5xx/timeouts to `ConnectorError`, never logs bodies or headers.
+- `ProviderConfig`: maintainer registrations injected into `Info.plist` at build time (`WrenGoogleClientID`, `WrenGoogleClientSecret`, `WrenGoogleStatus`). ChatGPT and Notion register Wren dynamically.
 
-| Connector | Auth | Validation | Hosts |
+| Connector | Auth | "Connected" means | Hosts |
 |---|---|---|---|
-| Gmail | Google OAuth (PKCE, loopback) | `users/me/profile` | gmail.googleapis.com, oauth2.googleapis.com, accounts.google.com |
-| Google Calendar | Google OAuth | `calendars/primary` | www.googleapis.com, … |
-| Notion | internal integration token | `users/me` | api.notion.com |
-| OpenAI API | API key | `GET /v1/models` | api.openai.com |
-| ChatGPT | none (user handoff) | a destination (browser or app) exists; shown as *partially connected* because sign-in can't be checked | — (opened, not called) |
-| Voice | macOS Microphone + Speech | permission status + `supportsOnDeviceRecognition` | — |
+| ChatGPT | Sign in with ChatGPT (OAuth code + PKCE + nonce, dynamic client) | `GET /v1/models` succeeded with plan scope | auth.openai.com, api.openai.com |
+| Gmail | Google installed-app OAuth (PKCE, loopback, Desktop client ID + secret) | `users/me/profile` read | gmail.googleapis.com, oauth2.googleapis.com, accounts.google.com |
+| Google Calendar | same sign-in | `calendars/primary` read | www.googleapis.com |
+| Calendar (this Mac) | macOS Calendars permission (EventKit) | access granted, calendars listed | — |
+| Notion | Notion MCP (dynamic registration, OAuth + PKCE) | `notion-get-self` tool call | mcp.notion.com |
+| Voice | macOS Microphone + Speech Recognition | permissions + on-device recognizer available | — |
 
 ## 36. Google OAuth
 
-`GoogleOAuth`: authorization URL with `code_challenge` (S256), `state`, `access_type=offline`, `prompt=consent`; `LoopbackReceiver` listens on `127.0.0.1` (random port, local-only) for one GET, parses the request line, replies with a "you can close this tab" page; `parseCallback` checks `state`, maps `access_denied`, requires `code`; `exchange` sends code + verifier (+ the desktop client's secret if configured) and requires the requested scope in the response and a refresh token; `GoogleSession` refreshes tokens a minute before expiry and keeps the refresh token; `invalid_grant` → unauthorized → *permission denied*; `invalid_client` → setup problem; `revoke` on disconnect. The OAuth client (ID, optional secret) is entered by the user and kept in the Keychain; nothing is hardcoded.
+`GoogleOAuth`: authorization URL with S256 `code_challenge`, `state`, `access_type=offline`, `prompt=consent`, `include_granted_scopes=true`; `LoopbackReceiver` on `127.0.0.1` (random port, local-only) accepts exactly one GET with the expected `state`. `exchange` and `refresh` send the Desktop client's `client_secret`: Google rejects Desktop-client token requests without it (`invalid_request: client_secret is missing`, verified live 2026-10-11), and documents installed-app secrets as non-confidential. A build without the secret maps that answer to `OAuthError.clientSecretMissing` → state "not available in this build" (a maintainer problem, not the user's). One token (`google.account.tokens`) serves Gmail (`gmail.readonly`, optionally `gmail.modify`) and Calendar (`calendar.readonly`); each feature turns on only for the scopes Google granted. Disconnect revokes at Google.
 
-## 37. Gmail and Calendar
+## 37. Gmail inbox intelligence
 
-- `GmailClient`: `messages.list` (q, pagination) + `messages.get?format=metadata` (From, To, Subject, Date, snippet, labels). No bodies, no attachments, GET only.
-- `EmailTriage`: deterministic reasons (request, deadline via `DateParser`, bill, interview, security, Gmail IMPORTANT, important sender); promotions/social/forums are low-value. Email text never reaches the authorizer as an instruction.
-- `EmailQuestion.gmailQuery`: "anything from the recruiter?" → `recruiter newer_than:30d`; "today", "unread", "attention" refine it.
-- `EmailCache`: optional, 7 days, headers and snippets, file-protected, deleted on disconnect.
-- `GoogleCalendarClient`: `events.list` with `singleEvents=true` (recurring events expanded), `orderBy=startTime`, `timeZone`, pagination, cancelled instances skipped; `dateTime` parsed with its offset, all-day `date` as a local calendar day.
-- Reads go through `ActionBroker.performExternal` as `email.read` / `calendar.read` (external read): allowed for the user when connected; allowed for the briefing (origin `.system`) only under the standing rule `includeConnectedSourcesInBriefing`; asks if a model proposes it; denied when disconnected. Each read is audited with a count only.
+Files: `Gmail.swift` (client), `MailIntelligence.swift` (pure logic), `WrenKit/AppModel+Mail.swift` (monitor), `WorkflowViews.swift` (Inbox UI).
+
+- **Client** (`GmailClient: GmailAPI`): `profile` (email + `historyId`), `inboxMessageIDs` (`labelIds=INBOX`, `includeSpamTrash=false`), `history(since:)` (`messageAdded/Deleted`, `labelAdded/Removed`; HTTP 404 → `GmailSyncError.historyExpired`), metadata fetches (From, To, Subject, Date, `List-Unsubscribe`, labels, snippet; no bodies or attachments) a few at a time. The only write is `perform(_:on:)` over `GmailAllowedAction`, whose single case is `markRead` (`messages.modify` with `{"removeLabelIds":["UNREAD"]}`). No send, archive, trash, delete, label or filter code exists.
+- **Sync** (`MailSync`): first run reads recent inbox mail (`newer_than:7d OR (is:unread is:important newer_than:30d)`, ≤150) as a *baseline* (never alerted as new). Afterwards only history changes: new inbox messages are fetched, label changes update read state, leaving INBOX or entering SPAM/TRASH removes the message. An expired cursor falls back to a full read where mail newer than the last sync still counts as new. A different account resets the state. Items older than 30 days are pruned.
+- **Triage** (`MailTriage`): deterministic and explainable. Signals: user sender rules and important senders, Gmail IMPORTANT/STARRED, bulk (promotions/social/forums, `List-Unsubscribe`, no-reply senders), security notices, urgency words, deadlines parsed by `DateParser` (≤24 h urgent, ≤72 h time-sensitive), meeting changes, requests, recruiting/work, financial notices. Categories: urgent, timeSensitive, needsResponse, professional, financial, informational. Output = category, reasons, score, deadline, suggested action. The snippet shown is factual; reasons and suggestions are labelled inferred. Corrections: per-message category (sticky) and per-sender always/never-important rules.
+- **Alerts** (`MailAlertPolicy`): only new, unread, not dismissed/snoozed messages whose category meets the user's level; once per message (`alertedAt`, `alertedCategory`); one per conversation within 6 h unless more urgent; at most 3 individual alerts, the rest as one summary; quiet hours hold alerts and release them afterwards.
+- **Digest** (`MailDigest`): one per slot (`yyyy-MM-dd` in the chosen zone). `due` returns the latest slot without a record (missed slots collapse into one, marked late). `build` records the digest in state *before* delivery (at-most-once across restarts); it covers unread mail since the previous digest plus important unread mail ≤14 days, grouped by thread, most pressing first. With the digest on, the morning briefing omits email.
+- **Monitor** (`AppModel+Mail`): a timer (default 5 min, 2–60) while Wren runs and Gmail is connected; also after wake. Each check is `ActionBroker.performExternal(email.read)` from origin `.system("mail monitor")`, allowed only by the standing rule `monitorConnectedEmail` (scoped to that origin, §15/§18), or `.user` for Check now. Errors: 401/403 → reconnect state; 429 and network errors → back off up to 6× the interval. Mark as read is `email.markRead` (external write, permission `emailModify`, granted only while Google granted `gmail.modify`; the button press on that message is the confirmation); success requires Gmail's returned labels to lack UNREAD; failure keeps the message unread and offers Retry.
+- **Storage**: `MailboxStore` → `<data folder>/Mail/mailbox.json` (0600, complete file protection), outside `Wren.store`, so never in backups or exports; deleted on disconnect and "Remove all data". No email content goes to any AI service; the local model isn't used for mail either.
+
+Calendar (`GoogleCalendarClient`, `MacCalendarConnector`) is unchanged: read-only, merged, de-duplicated.
 
 ## 38. Notion
 
-`NotionClient` (Notion-Version 2026-03-11): `users/me` (workspace, integration), `search` (pages, cursor pagination, trashed excluded), `blocks/{id}/children` (two levels; text blocks rendered; unsupported types kept as markers), `pages` (create under a shared parent page; external write, always confirmed), one retry after 429 honouring `Retry-After` (capped).
+Notion's hosted MCP server (`https://mcp.notion.com/mcp`): OAuth discovery, dynamic client registration, PKCE + state over the loopback receiver, token refresh, revocation. Tools used: `notion-get-self`, `notion-search`, `notion-fetch`, `notion-create-pages` (create is an external write, always confirmed). There is no integration token or REST client.
 
-## 39. ChatGPT handoff, OpenAI API and delegation
+## 39. GPT delegation (Sign in with ChatGPT)
 
-- `HandoffRequest.detect` recognises "ask/tell ChatGPT to …", "send … to GPT", "use my ChatGPT account to …", "prepare a prompt for ChatGPT to …" and "deeper/think carefully" wording.
-- `HandoffDraft.prompt` = task + optional deeper-thinking paragraph + approved context. Private items are excluded unless the user ticks them; `SensitiveScanner` redacts API keys/tokens, private keys, `password:` values, verification codes and Luhn-valid card numbers unless the user opts in.
-- Action `chatgpt.handoff` (external write, always confirmed): the preview button press mints a confirmation bound to the exact prompt (it's a request parameter, so it's part of the fingerprint). The handler copies, checks the pasteboard, and opens chatgpt.com or the ChatGPT app. Status becomes `handedOff` ("waiting for you to send it and paste the answer"), never "sent".
-- Action `ai.delegate` (OpenAI API): same confirmation per request; result attributed with the API's reported `model`.
-- Private content: with the protected rule `noPrivateDataToExternalAI`, any external write with private content is denied unless the confirmation was minted with `includingPrivate: true` (the user ticked the private item).
-- `DelegationRecord` (SwiftData): task, destination, depth, exact prompt, status, response, response source, local summary, error. Local summary uses the local model (structured JSON) or an excerpt.
-- Untrusted origins can't trigger external writes at all (existing rule), so text in an email, page or tool output can't send anything.
+- **Routing** (`IntentRouter.aiRequest`): deterministic patterns for "ask/get/tell/have/search in/check with GPT …", "… on GPT", "GPT, …" and fixed handoff phrasings. The prompt keeps the whole request and drops only framing meant for Wren ("let me know when it's finished"). Reminders, explicit notes and stored-data questions are routed first and stay theirs; a pending reminder question never captures a new GPT request (`ReminderFollowUp`).
+- **Auth** (`ChatGPTAuth`): OIDC discovery at auth.openai.com, dynamic client (`dynamic_agent_client` → `oaiapp_…`), scopes incl. `chatgpt.tokens.use.direct` (plan usage), RS256 ID-token verification against JWKS, refresh with rotation persisted before use, revocation.
+- **Requests** (`ChatGPTPlanClient`): `GET /v1/models`, `POST /v1/responses` (`stream: true`, `store: false`) with the user's token only. Success requires `response.completed`. No API key, no fallback billing. The Responses call returns no ChatGPT conversation URL, so none is stored (`providerURL` stays nil).
+- **Jobs** (`AskService`): `start` persists a `DelegationRecord` as `running` (original words, prompt, channel) before sending, then runs independently of any UI; outcome `completed` / `partial` / `failed(failure)` / `cancelled`, with requested and reported model, start/completion times and attempts. Duplicates (same normalized prompt running, or finished within 15 s) return the existing record. `retry` reruns a retryable failure on the same record and refuses completed ones. `recoverInterrupted` (at launch) marks leftover `running` records as interrupted (and relabels pre-v6 plan answers as completed). `onFinished` fires once; the app sets `notifiedAt` and posts "GPT finished: … View result." unless that result is on screen; the notification, panel, overview and Delegate open `Route.delegation(id)`.
+- **Privacy**: only the request text is sent by default. Delegate can add Wren items or Notion pages the user picks; private ones need ticking (`noPrivateDataToExternalAI` requires a confirmation minted with `includingPrivate`), secrets are redacted unless the user opts in. A retry re-sends exactly the same text with the same approval. Audit records hold labels and model names only.
+- **Handoff fallback**: `chatgpt.handoff` copies the prompt and opens ChatGPT; status `handedOff` = "Awaiting submission" until the user pastes an answer. It is never reported as a completed GPT query.
 
 ## 40. Voice
 
-`VoiceCapture` (core) drives push-to-talk: permissions asked only on first use; `AudioRecording` starts on key down; on key up the file is transcribed by `SpeechTranscribing` and deleted; results under 0.4 s, empty text or non-on-device transcripts are rejected; 60-second limit; cancel and retry. App implementations: `SystemRecorder` (`AVAudioRecorder`, 16 kHz mono PCM, temp file), `OnDeviceTranscriber` (`SFSpeechURLRecognitionRequest`, `requiresOnDeviceRecognition = true`), `SystemVoicePermissions`. Push-to-talk uses a second Carbon hotkey (id 2) with release events. The transcript is placed in the capture panel's text field, so it follows the typed path exactly. The app bundle declares `NSMicrophoneUsageDescription`, `NSSpeechRecognitionUsageDescription` and the hardened-runtime entitlement `com.apple.security.device.audio-input`.
+One `VoiceSession` (WrenCore) for both triggers, fed by `LiveSpeechStream` (`AVAudioEngine` tap → `SFSpeechAudioBufferRecognitionRequest`, `requiresOnDeviceRecognition = true`). With "Hey Wren" on, the session stays in `.listening` with the stream in *gated* mode (`wakeListening`): the audio tap measures loudness and feeds `VoiceActivityGate` (adaptive noise floor, hysteresis, 50 s cap); only when it opens does a recognition request start (fed ~0.8 s of pre-roll), and it ends after ~2.5 s of quiet. Transcripts of each burst are scanned for the wake phrase; on a match the stream switches to continuous recognition and the command is captured until a pause (endpointer) or 20 s. `suspend()`/`resumeIfEnabled()` release the microphone while the screen is locked or the display/Mac sleeps. With "review first" (default) the final text is put in the panel's editable field ("Transcribed") and runs only on Return, as channel `.voice`; typing during capture cancels listening and keeps the text. The voice shortcut starts capture directly. Both hand the final text to `AppDelegate.runVoiceCommand` → `AppModel.submitFromCapture(channel: .voice)`, the same path as typed input. Phases (`off/listening/capturing/handling/failed`) drive the menu-bar dot and panel status; a second trigger while handling is ignored. Quitting stops the engine. No audio is stored.
 
-## 41. Schema v4
+## 41. Scheduled reminders
 
-`Commitment.isPrivate` (default false) and `DelegationRecord`. A consistent pre-upgrade backup is taken on first open, as for earlier schema changes.
+`ReminderScheduler` keeps macOS's pending `UNCalendarNotificationTrigger` requests equal to the store: identifiers encode item + time (`wren.reminder.<id>.at.<epoch>` / `.rep.<weekday>.<hhmm>`), so a changed time is a new request and stale ones are cancelled. Reconciled at launch, on every store change, on wake, time-zone/clock changes and when notification permission changes. Repeating rules use wall-clock components (DST-safe). Scheduled IDs are saved on the item. Delivered while Wren is quit.
+
+## 42. Lifecycle
+
+Single instance (`InstanceGuard` + `flock` on `Wren.lock`), one status item created in `applicationDidFinishLaunching` and removed on terminate, closing the window keeps Wren running, ⌘Q terminates (voice off, shortcuts released, lock freed). When quit, Wren neither listens nor checks mail; macOS still delivers already-scheduled reminders.
+
+## 43. Schema history
+
+v4: `Commitment.isPrivate`, `DelegationRecord`. v5: `recurrenceRaw`, `notificationIDsRaw`. v6 (0.9.0): `DelegationRecord.original, channelRaw, requestedModel, reportedModel, startedAt, completedAt, attempts, failureRaw, notifiedAt, seenAt, providerURL, includesPrivate`; new statuses `running` and `partial`. Every change is additive (lightweight migration); a consistent backup is taken before a new schema first opens data, and a newer schema is refused by older Wren (`Wren.schema` marker). Verified on a copy of a real 0.8.0 store.
+
+## 44. Standing-rule scope
+
+Rules that let Wren read external data on its own name the scheduler they speak for (`systemScope`): `includeConnectedSourcesInBriefing` → `.system("briefing")`, `monitorConnectedEmail` → `.system("mail monitor")`. The Authorizer matches rule and origin, so turning one off can't be bypassed through the other.

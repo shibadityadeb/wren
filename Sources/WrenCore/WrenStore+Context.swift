@@ -229,6 +229,8 @@ extension WrenStore {
         try context.fetch(FetchDescriptor<GoalEvent>()).forEach(context.delete)
         try context.fetch(FetchDescriptor<InsightRecord>()).forEach(context.delete)
         try context.fetch(FetchDescriptor<DailyRun>()).forEach(context.delete)
+        // GPT requests and their answers are user content too.
+        try context.fetch(FetchDescriptor<DelegationRecord>()).forEach(context.delete)
         try context.fetch(FetchDescriptor<DenialRecord>()).forEach(context.delete)
         try context.fetch(FetchDescriptor<AuditRecord>()).filter { $0.requestID != requestID }.forEach(context.delete)
         try context.fetch(FetchDescriptor<PermissionGrantRecord>()).forEach(context.delete)

@@ -4,11 +4,13 @@ import Network
 
 /// Wren's Google OAuth client (type "Desktop app"), registered by Wren's maintainers and injected into
 /// the app bundle at build time (see `ProviderConfig`). Never entered by a user and never committed.
-/// It's a public client: the installed-app flow (loopback redirect + PKCE) doesn't need a client
-/// secret (Google documents `client_secret` as optional for it), so none is shipped or sent.
+/// Installed-app flow: loopback redirect + PKCE + state. Google's token endpoint still requires the
+/// Desktop client's `client_secret` (verified live: without it Google answers "client_secret is
+/// missing"); Google documents installed-app secrets as not confidential, so it's embedded in the build.
 public struct GoogleOAuthConfig: Codable, Equatable, Sendable {
     public var clientID: String
-    public init(clientID: String) { self.clientID = clientID }
+    public var clientSecret: String?
+    public init(clientID: String, clientSecret: String? = nil) { self.clientID = clientID; self.clientSecret = clientSecret }
     public var isPlausible: Bool { clientID.hasSuffix(".apps.googleusercontent.com") && clientID.count > 40 }
 }
 
@@ -44,6 +46,8 @@ public enum OAuthError: Error, Equatable, LocalizedError {
     case scopeNotGranted(String)
     case noRefreshToken
     case invalidClient
+    /// This build lacks the client secret Google requires for its Desktop client.
+    case clientSecretMissing
     case timedOut
 
     public var errorDescription: String? {
@@ -55,6 +59,7 @@ public enum OAuthError: Error, Equatable, LocalizedError {
         case let .scopeNotGranted(s): "Missing permission: Google didn't grant \(Self.plain(s)). Connect again and leave that box ticked on Google's consent screen."
         case .noRefreshToken: "Google didn't return a refresh token. Remove Wren's access in your Google account and connect again."
         case .invalidClient: "Google rejected this copy of Wren's sign-in configuration. That's a problem with how Wren was built, not with your account; it needs a fix from Wren's maintainers."
+        case .clientSecretMissing: "Google accepted your sign-in, but this copy of Wren is missing part of its Google registration (the Desktop client secret), so Google wouldn't issue access. Nothing is wrong with your account; Wren's maintainers have to include it in the build."
         case .timedOut: "Sign-in wasn't completed within 5 minutes."
         }
     }
@@ -63,6 +68,7 @@ public enum OAuthError: Error, Equatable, LocalizedError {
         switch scope {
         case ConnectorCatalog.gmailScope: "read-only access to your email"
         case ConnectorCatalog.calendarScope: "read-only access to your calendars"
+        case ConnectorCatalog.gmailModifyScope: "permission to change your email's read state"
         default: scope
         }
     }
@@ -124,6 +130,8 @@ public struct GoogleOAuth: Sendable {
             return v
         } catch let ConnectorError.http(400, m) where m.contains("invalid_grant") {
             throw ConnectorError.unauthorized
+        } catch let ConnectorError.http(400, m) where m.contains("client_secret is missing") {
+            throw OAuthError.clientSecretMissing
         } catch let ConnectorError.http(_, m) where m.contains("invalid_client") || m.contains("unauthorized_client") {
             throw OAuthError.invalidClient
         } catch ConnectorError.unauthorized {
@@ -147,8 +155,9 @@ public struct GoogleOAuth: Sendable {
     }
 
     public func exchange(code: String, pkce: PKCE, redirect: URL, requestedScopes: [String]) async throws -> OAuthTokens {
-        let p = [("code", code), ("client_id", config.clientID), ("code_verifier", pkce.verifier),
+        var p = [("code", code), ("client_id", config.clientID), ("code_verifier", pkce.verifier),
                  ("redirect_uri", redirect.absoluteString), ("grant_type", "authorization_code")]
+        if let s = config.clientSecret { p.append(("client_secret", s)) }
         let t = try tokens(from: try await postForm(Self.tokenURL, p), anyOf: requestedScopes, previousRefresh: nil)
         guard t.refreshToken != nil else { throw OAuthError.noRefreshToken }
         return t
@@ -157,6 +166,7 @@ public struct GoogleOAuth: Sendable {
     public func refresh(_ t: OAuthTokens) async throws -> OAuthTokens {
         guard let rt = t.refreshToken else { throw OAuthError.noRefreshToken }
         var p = [("client_id", config.clientID), ("refresh_token", rt), ("grant_type", "refresh_token")]
+        if let s = config.clientSecret { p.append(("client_secret", s)) }
         var n = try tokens(from: try await postForm(Self.tokenURL, p), anyOf: [], previousRefresh: rt)
         n.account = t.account
         if n.scope.isEmpty { n.scope = t.scope }

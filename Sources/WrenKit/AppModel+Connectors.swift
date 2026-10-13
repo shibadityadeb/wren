@@ -42,6 +42,11 @@ final class ConnectorHub {
             let perms = c.descriptor.permissions
             c.onPermissions = { on in perms.forEach { try? policy?.setGrant($0, granted: on) } }
         }
+        // Mark as read: granted in Wren only while Google has granted gmail.modify.
+        gmail.onPermissions = { [weak google] on in
+            try? policy?.setGrant(.emailRead, granted: on)
+            try? policy?.setGrant(.emailModify, granted: on && (google?.canMarkRead ?? false))
+        }
         try? policy?.setGrant(.chatgptHandoff, granted: chatgpt.handoffAvailable)
         let calPerm = ConnectorCatalog.descriptor(.macCalendar).permissions
         macCalendar.onPermissions = { [weak calendar] on in
@@ -169,7 +174,8 @@ extension AppModel {
                 out.events = ConnectorAnswers.briefingEvents(es, now: now, calendar: cal)
             } catch { out.problems.append("Calendar: \(errorText(error))") }
         }
-        if hub.gmail.state.isUsable {
+        // When the email digest is on, mail is covered there; the briefing doesn't notify about it twice.
+        if hub.gmail.state.isUsable, !mailPrefs.digest.enabled {
             do { out.emails = ConnectorAnswers.briefingEmails(try await fetchTriaged("newer_than:1d -category:promotions -category:social", origin: .system("briefing"))) }
             catch { out.problems.append("Gmail: \(errorText(error))") }
         }
@@ -192,6 +198,7 @@ extension AppModel {
             openMainWindow()
             await hub.gmail.refresh(); await hub.calendar.refresh()
             connectorsChanged()
+            if gmailUsable { await checkMail(.user(.settings)) }
         }
     }
 
@@ -211,6 +218,7 @@ extension AppModel {
     func disconnectGoogle() {
         Task {
             await hub.gmail.disconnect()
+            clearMailData()
             await hub.calendar.refresh()
             connectorsChanged()
         }
@@ -317,43 +325,11 @@ extension AppModel {
         saveDelegation(r)
     }
 
-    /// ChatGPT plan: one request per confirmation, streamed back. Uses the signed-in user's plan
-    /// allowance only; there is no API-billing fallback. Attribution names the model Wren requested
-    /// and the one the response reports.
-    func sendToChatGPT(_ draft: HandoffDraft, record: DelegationRecord, onDelta: @escaping @MainActor (String) -> Void) async {
-        let c = hub.chatgpt
-        guard let broker, let model = c.selectedModel, c.account.canSend else {
-            record.status = .failed
-            record.error = c.account.canSend ? "Choose a model in Connectors › ChatGPT." : (c.account.reason ?? "ChatGPT isn't connected. Open Connectors › ChatGPT.")
-            saveDelegation(record); return
-        }
-        let prompt = draft.prompt
-        let origin: ActionOrigin = .user(.popover)
-        let req = ActionRequest(action: BuiltInAction.delegateToExternalAI, target: TargetRef(kind: "prompt", id: record.id.uuidString, label: draft.task),
-                                parameters: ["prompt": .string(prompt), "model": .string(model), "allowance": .string("ChatGPT plan")],
-                                origin: origin, createdAt: clock.now, containsPrivateContent: draft.containsPrivate)
-        record.prompt = prompt
-        do {
-            let r = try await broker.performExternal(req, confirmation: broker.confirm(req, includingPrivate: draft.containsPrivate),
-                                                     detail: { "ChatGPT plan · requested \($0.requestedModel) · reported \($0.reportedModel ?? "not reported")" }) {
-                try await c.respond(model: model, input: prompt, origin: origin) { d in Task { @MainActor in onDelta(d) } }
-            }
-            record.response = r.text
-            record.responseSource = "ChatGPT plan\(c.email.map { " (\($0))" } ?? "") · requested model \(r.requestedModel)\(r.reportedModel.map { $0 == r.requestedModel ? "" : " · response reports \($0)" } ?? "")"
-            record.status = .responseImported
-        } catch let e as ChatGPTError {
-            switch e {
-            case let .incomplete(partial), let .interrupted(partial) where !partial.isEmpty:
-                record.response = partial
-                record.responseSource = "ChatGPT plan · incomplete answer (\(model))"
-                record.status = .responseImported
-                record.error = e.errorDescription
-            default:
-                record.status = .failed; record.error = e.errorDescription
-            }
-        } catch { record.status = .failed; record.error = errorText(error) }
-        connectorVersion += 1
-        saveDelegation(record)
+    /// ChatGPT plan from the Delegate pane: the same tracked path as the capture panel, with the
+    /// prompt the user reviewed (and any context they explicitly chose to include).
+    func sendToChatGPT(_ draft: HandoffDraft, onDelta: @escaping @MainActor (String) -> Void) -> AskStart {
+        startDelegation(AIRequest(prompt: draft.task, original: draft.task, depth: draft.depth, target: .chatgpt),
+                        channel: .popover, reviewed: draft, onDelta: onDelta)
     }
 
     /// Local model only. Summary and follow-up suggestions; nothing leaves the Mac.

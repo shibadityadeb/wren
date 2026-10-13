@@ -8,13 +8,14 @@ struct MainWindowView: View {
     @Bindable var model: AppModel
 
     enum Section: String, CaseIterable, Identifiable {
-        case overview = "Overview", items = "Items", goals = "Goals", review = "Review", delegate = "Delegate",
+        case overview = "Overview", items = "Items", inbox = "Inbox", goals = "Goals", review = "Review", delegate = "Delegate",
              connectors = "Connectors", localAI = "Local AI", settings = "Settings"
         var id: String { rawValue }
         var icon: String {
             switch self {
             case .overview: "house"
             case .items: "checklist"
+            case .inbox: "envelope"
             case .goals: "scope"
             case .review: "tray.full"
             case .delegate: "arrow.up.forward.app"
@@ -27,6 +28,7 @@ struct MainWindowView: View {
             switch self {
             case .overview: .overview
             case .items: .list
+            case .inbox: .inbox
             case .goals: .goals
             case .review: .review
             case .delegate: .delegate
@@ -45,7 +47,8 @@ struct MainWindowView: View {
             case .goals, .goal: .goals
             case .review: .review
             case .aiSetup: .localAI
-            case .delegate: .delegate
+            case .delegate, .delegation: .delegate
+            case .inbox, .mailMessage: .inbox
             case .connectors, .connector: .connectors
             case .settings, .activity: .settings
             }
@@ -62,6 +65,9 @@ struct MainWindowView: View {
                             Spacer()
                             if s == .review && !model.insights.isEmpty {
                                 Text("\(model.insights.count)").font(.caption).foregroundStyle(.secondary)
+                            }
+                            if s == .delegate && model.unseenDelegations > 0 {
+                                Text("\(model.unseenDelegations)").font(.caption).foregroundStyle(WrenTheme.accent)
                             }
                         }
                     } icon: { Image(systemName: s.icon) }
@@ -116,7 +122,9 @@ struct OverviewView: View {
                     Notice(text: msg, systemImage: "info.circle").clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 tiles
+                RecentDelegations(model: model)
                 today(b)
+                ImportantMailSummary(model: model)
                 ConnectedToday(model: model)
                 aiCard
                 Text("Your data stays on this Mac in ~/Library/Application Support/Wren. Wren lives in the menu bar too: close this window and it keeps reminding you.")
@@ -322,7 +330,7 @@ struct ConnectedToday: View {
                 Button("Connectors") { model.route = .connectors }.buttonStyle(.link)
             }
             if !cal && !gm {
-                Text("Connect Gmail or Google Calendar to see today's events and the mail that needs you here. Nothing is connected now.")
+                Text("Connect a calendar or Gmail to see today's events and the mail that needs you here. Nothing is connected now.")
                     .font(.callout).foregroundStyle(.secondary)
             }
             if cal {
@@ -333,21 +341,6 @@ struct ConnectedToday: View {
                         Text("\(e.timeText(calendar: model.clock.calendar, now: model.clock.now)) · \(e.title)").lineLimit(1)
                         Spacer()
                         Button("Remind me") { model.reminderFromEvent(e) }.controlSize(.small)
-                    }
-                }
-            }
-            if gm {
-                Text("Mail that may need you (read-only)").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                if mail.isEmpty { Text("Nothing flagged in the last day.").font(.callout).foregroundStyle(.secondary) }
-                ForEach(mail.prefix(6), id: \.message.id) { t in
-                    HStack(alignment: .firstTextBaseline) {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("\(t.message.senderName): \(t.message.subject)").lineLimit(1)
-                            Text(t.explanation).font(.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Button("Add task…") { model.openCapturePanel(); model.prefillCapture?("Reply to \(t.message.senderName) about \(t.message.subject)") }.controlSize(.small)
-                        Link("Open", destination: t.message.webURL).font(.caption)
                     }
                 }
             }
@@ -362,10 +355,6 @@ struct ConnectedToday: View {
         if model.calendarUsable {
             do { events = try await model.fetchEvents(from: now, to: c.date(byAdding: .day, value: 1, to: c.startOfDay(for: now))!, origin: .user(.popover)) }
             catch { problems.append("Calendar: \(model.errorText(error))") }
-        }
-        if model.hub.gmail.state.isUsable {
-            do { mail = try await model.fetchTriaged("newer_than:1d -category:promotions -category:social", origin: .user(.popover)).filter(\.needsAttention) }
-            catch { problems.append("Gmail: \(model.errorText(error))") }
         }
     }
 }

@@ -76,7 +76,16 @@ public struct HandoffDraft: Equatable, Sendable {
 
     public var includedContext: [HandoffContextItem] { context.filter { !$0.isPrivate || includedPrivate.contains($0.id) } }
     public var excludedContext: [HandoffContextItem] { context.filter { $0.isPrivate && !includedPrivate.contains($0.id) } }
-    public var containsPrivate: Bool { includedContext.contains { $0.isPrivate } || (includeSensitive && !findings.isEmpty) }
+    public var containsPrivate: Bool { privateOverride ?? (includedContext.contains { $0.isPrivate } || (includeSensitive && !findings.isEmpty)) }
+    /// Set only by `exact`: whether the text being re-sent contained private content when the user approved it.
+    var privateOverride: Bool?
+
+    /// A prompt already sent once, re-sent exactly as it was (a retry): no redaction, no additions.
+    public static func exact(_ prompt: String, depth: HandoffDepth, containsPrivate: Bool) -> HandoffDraft {
+        var d = HandoffDraft(task: prompt, depth: .normal, includeSensitive: true)
+        d.privateOverride = containsPrivate
+        return d
+    }
     public var findings: [SensitiveFinding] {
         let all = ([task] + includedContext.map(\.text)).joined(separator: "\n")
         var seen = Set<String>()

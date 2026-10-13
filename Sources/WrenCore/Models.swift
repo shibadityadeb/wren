@@ -357,17 +357,40 @@ public enum DelegationDestination: String, Codable, Sendable, CaseIterable {
 public enum DelegationStatus: String, Codable, Sendable {
     /// Prompt prepared and shown; nothing has left the Mac.
     case prepared
-    /// Copied and ChatGPT opened. Not sent: the user sends it.
+    /// Copied and ChatGPT opened. Not sent by Wren: the user submits it in ChatGPT and pastes the answer.
     case handedOff
-    case responseImported, completed, cancelled, failed
+    /// Sent to the provider; no final answer yet. Persisted before anything leaves the Mac.
+    case running
+    /// The user pasted an answer for a handoff (Wren can't see the model or mode).
+    case responseImported
+    /// The provider reported a complete answer (`response.completed`).
+    case completed
+    /// The provider stopped early; the partial text is kept. Retryable.
+    case partial
+    case cancelled, failed
     public var label: String {
         switch self {
         case .prepared: "Prepared (not sent)"
-        case .handedOff: "Copied and opened ChatGPT — waiting for you to send it and paste the answer"
-        case .responseImported: "Answer imported"
-        case .completed: "Done"
+        case .handedOff: "Awaiting submission: copied and opened ChatGPT; you send it there and paste the answer back"
+        case .running: "Running"
+        case .responseImported: "Answer pasted by you"
+        case .completed: "Completed"
+        case .partial: "Incomplete answer"
         case .cancelled: "Cancelled"
         case .failed: "Failed"
+        }
+    }
+    /// Finished one way or another (no request in flight).
+    public var isFinal: Bool { self != .running && self != .prepared && self != .handedOff }
+}
+
+/// Why a delegation didn't complete, so the UI can offer the right recovery.
+public enum DelegationFailure: String, Codable, Sendable {
+    case notConnected, reauthorizationRequired, planNotAuthorized, usageLimit, unavailable, rejected, interrupted, needsReview, other
+    public var retryable: Bool {
+        switch self {
+        case .usageLimit, .unavailable, .interrupted: true
+        default: false
         }
     }
 }
@@ -390,6 +413,26 @@ public final class DelegationRecord {
     public var summary: String?
     public var error: String?
     public var linkedItemID: UUID?
+    // Schema v6: tracked, notified delegations. Optional/defaulted so v5 records load unchanged.
+    /// Exactly what the user typed or said (the prompt is the cleaned request).
+    public var original: String?
+    public var channelRaw: String?
+    public var requestedModel: String?
+    /// The model the completed response named, when it did.
+    public var reportedModel: String?
+    public var startedAt: Date?
+    public var completedAt: Date?
+    public var attempts: Int = 0
+    var failureRaw: String?
+    /// When Wren told the user it finished (notification or in-app entry), so it's announced once.
+    public var notifiedAt: Date?
+    /// When the user opened the result in Wren.
+    public var seenAt: Date?
+    /// A provider web link to the conversation, only if the provider actually returned one. The
+    /// ChatGPT-plan Responses call (`store: false`) returns none, so this stays nil; never fabricated.
+    public var providerURL: String?
+    /// The user explicitly included private content in this prompt (needed again to retry it).
+    public var includesPrivate: Bool = false
 
     public init(task: String, destination: DelegationDestination, depth: HandoffDepth, now: Date) {
         id = UUID(); createdAt = now; updatedAt = now; self.task = task
@@ -401,4 +444,17 @@ public final class DelegationRecord {
         set { statusRaw = newValue.rawValue }
     }
     public var depth: HandoffDepth { HandoffDepth(rawValue: depthRaw) ?? .normal }
+    public var failure: DelegationFailure? {
+        get { failureRaw.flatMap(DelegationFailure.init(rawValue:)) }
+        set { failureRaw = newValue?.rawValue }
+    }
+    public var channel: UserChannel? { channelRaw.flatMap(UserChannel.init(rawValue:)) }
+    /// Retry is offered only for a failure that may succeed later; a completed request never re-runs.
+    public var canRetry: Bool {
+        switch status {
+        case .partial: true
+        case .failed, .cancelled: failure?.retryable ?? (status == .cancelled)
+        default: false
+        }
+    }
 }

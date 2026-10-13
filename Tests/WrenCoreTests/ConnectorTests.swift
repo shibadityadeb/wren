@@ -348,7 +348,8 @@ final class HandoffTests: XCTestCase {
         do { let d = await h.broker.submit(r); XCTAssertEqual(d.status, .denied, "not enabled yet: no permission") }
         try h.policy.setGrant(.chatgptHandoff, granted: true)
         do { let d = await h.broker.submit(r); XCTAssertEqual(d.status, .awaitingConfirmation) }
-        XCTAssertTrue(DelegationStatus.handedOff.label.contains("waiting for you to send it"))
+        XCTAssertTrue(DelegationStatus.handedOff.label.hasPrefix("Awaiting submission"))
+        XCTAssertTrue(DelegationStatus.handedOff.label.contains("you send it there"))
         XCTAssertFalse(DelegationStatus.handedOff.label.lowercased().contains("sent to"))
     }
 
@@ -378,6 +379,11 @@ final class ExternalReadPolicyTests: XCTestCase {
         XCTAssertEqual(r2, 2, "default rule lets the briefing read")
         try h.policy.setRule(.includeConnectedSourcesInBriefing, enabled: false)
         do { _ = try await h.broker.performExternal(read(.system("briefing"))) { 3 }; XCTFail() } catch {}
+        // The mail monitor has its own rule; it doesn't reopen the briefing's access, and vice versa.
+        let r3 = try await h.broker.performExternal(read(.system("mail monitor"))) { 6 }
+        XCTAssertEqual(r3, 6)
+        try h.policy.setRule(.monitorConnectedEmail, enabled: false)
+        do { _ = try await h.broker.performExternal(read(.system("mail monitor"))) { 7 }; XCTFail("monitor rule off") } catch {}
         do { _ = try await h.broker.performExternal(read(.model("m"))) { 4 }; XCTFail("a model can't read mail on its own") } catch {}
         try h.policy.setGrant(.emailRead, granted: false)
         do { _ = try await h.broker.performExternal(read(.user(.hotkey))) { 5 }; XCTFail("revoked") } catch {}
@@ -412,6 +418,7 @@ final class VoiceTests: XCTestCase {
         var isRunning = false
         var starts = 0, stops = 0
         var failStart: VoiceError?
+        var wakeListening = false
         func start() throws { if let failStart { throw failStart }; starts += 1; isRunning = true }
         func stop() { if isRunning { stops += 1 }; isRunning = false }
         func say(_ t: String) { onTranscript?(t) }

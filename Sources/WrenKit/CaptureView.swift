@@ -13,6 +13,8 @@ struct CaptureView: View {
     var toggleVoice: () -> Void = {}
     /// Actions on the Ask card (run, connect, retry, copy…).
     var askAction: (AskAction) -> Void = { _ in }
+    /// The user started typing while Wren was still listening: stop listening, keep the text.
+    var editedWhileListening: () -> Void = {}
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -25,15 +27,13 @@ struct CaptureView: View {
                 Spacer()
                 Text(state.status).font(.caption).foregroundStyle(.tertiary)
                 if state.voiceEnabled {
-                    Button { toggleVoice() } label: {
-                        Label(state.recording ? "Stop" : "Speak", systemImage: state.recording ? "stop.circle.fill" : "mic")
-                            .foregroundStyle(state.recording ? Color.red : Color.secondary)
-                    }
-                    .buttonStyle(.borderless).font(.caption)
-                    .help("Or press the voice shortcut, or say “Hey Wren”")
                     if state.recording {
                         Button("Cancel", role: .cancel) { cancel() }.buttonStyle(.borderless).font(.caption)
                             .help("Stop listening without doing anything (Escape)")
+                    } else {
+                        Button { toggleVoice() } label: { Label("Speak", systemImage: "mic").foregroundStyle(.secondary) }
+                            .buttonStyle(.borderless).font(.caption)
+                            .help("Or press the voice shortcut, or say “Hey Wren”")
                     }
                 }
                 if !state.aiAvailable {
@@ -41,7 +41,9 @@ struct CaptureView: View {
                         .help("Wren still saves everything. Set up local AI for better understanding.")
                 }
             }
-            TextField("What do you need to do?", text: $state.text)
+            // Grows to show a whole spoken sentence so it can be checked and edited. Return still submits.
+            TextField("What do you need to do?", text: $state.text, axis: .vertical)
+                .lineLimit(1...4)
                 .textFieldStyle(.plain)
                 .font(.system(size: 20))
                 .focused($focused)
@@ -52,24 +54,43 @@ struct CaptureView: View {
                     } else if case let .proposal(p)? = state.reply { confirm(p) } else { submit(state.text) }
                 }
                 .onChange(of: state.text) {
+                    if state.recording, state.text != state.lastVoiceText { editedWhileListening() }
                     guard !state.busy else { return }
                     if state.reply != nil { state.reply = nil }
                     // Editing the text after a card was shown starts a new request.
-                    if let card = state.ask, card.phase != .sending, state.text != card.request.original { state.ask = nil }
+                    if let card = state.ask, !card.phase.isSending, state.text != card.request.original { state.ask = nil }
                 }
-            if let v = state.voiceStatus {
-                HStack(spacing: 6) {
-                    if state.recording { Circle().fill(Color.red).frame(width: 8, height: 8) }
-                    Text(v).font(.caption).foregroundStyle(state.recording ? Color.red : Color.secondary)
+            if state.recording {
+                HStack(spacing: 12) {
+                    ListeningOrb(level: state.voiceLevel)
+                        .frame(width: 44, height: 44)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Listening…").font(.headline)
+                        Text(state.voiceStatus ?? "Say what you need, then pause.").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Done") { toggleVoice() }.controlSize(.small).help("Stop listening now")
                 }
+                .transition(.opacity)
+            } else if state.reviewingVoice {
+                HStack(spacing: 8) {
+                    Image(systemName: "waveform.badge.checkmark").foregroundStyle(WrenTheme.accent)
+                    Text("Transcribed. Edit it if you like, then press Return. Esc cancels.").font(.caption).foregroundStyle(.secondary)
+                }
+            } else if let v = state.voiceStatus {
+                Text(v).font(.caption).foregroundStyle(.secondary)
             }
             if let card = state.ask { AskCardView(card: card, aiAvailable: state.aiAvailable, act: askAction) }
             else if let reply = state.reply { replyView(reply) }
             HStack(spacing: 14) {
-                if let card = state.ask {
+                if state.recording {
+                    hint("esc", "Cancel")
+                } else if let card = state.ask {
                     if let p = card.primary { hint("return", p.title(card)) }
-                } else if case .proposal? = state.reply { hint("return", "Confirm") } else { hint("return", "Save") }
-                hint("esc", "Close")
+                } else if case .proposal? = state.reply { hint("return", "Confirm") }
+                else if state.reviewingVoice { hint("return", "Run") }
+                else { hint("return", "Save") }
+                if !state.recording { hint("esc", "Close") }
                 Spacer()
                 if state.busy { ProgressView().controlSize(.small) }
             }
@@ -147,6 +168,12 @@ final class CaptureState {
     var voiceEnabled = false
     var recording = false
     var voiceStatus: String?
+    /// Input loudness 0…1 while listening (drives the animation).
+    var voiceLevel: Float = 0
+    /// Text the voice service last wrote into the field (to tell it apart from typing).
+    var lastVoiceText = ""
+    /// A spoken command is in the field, waiting for the user to check it and press Return.
+    var reviewingVoice = false
     var busy = false
     /// The Ask card, when the input is a request for an assistant. Shown instead of `reply`.
     var ask: AskCard?
@@ -185,17 +212,18 @@ struct AskCardView: View {
                     HStack { Button("Ask ChatGPT") { act(.run(.chatgpt)) }; Button("Save as a note instead") { act(.saveAsNote) } }.controlSize(.small)
                 }
             case .sending:
-                HStack(spacing: 6) { ProgressView().controlSize(.small); Text(card.destination == .local ? "Asking the local model…" : "Asking ChatGPT…").font(.caption) }
+                HStack(spacing: 6) { ProgressView().controlSize(.small); Text(card.destination == .local ? "Asking the local model…" : "Running in ChatGPT…").font(.caption) }
                 if !card.streamed.isEmpty { answerText(card.streamed) }
+                if card.recordID != nil { Button("Open in Wren") { act(.openAnswer) }.controlSize(.small) }
             case let .answered(text, source, _):
                 answerText(text)
                 Text(source).font(.caption2).foregroundStyle(.tertiary)
-                HStack { Button("Copy answer") { act(.copyAnswer) }; Button("Open in Wren") { act(.openAnswer) } }.controlSize(.small)
+                HStack { Button("Copy answer") { act(.copyAnswer) }; Button("Open result") { act(.openAnswer) } }.controlSize(.small)
             case let .partial(text, source, _, message):
                 answerText(text)
                 Text(message).font(.caption).foregroundStyle(.orange)
                 Text(source).font(.caption2).foregroundStyle(.tertiary)
-                HStack { Button("Try again") { act(.run(card.destination == .choose ? .chatgpt : card.destination)) }; Button("Copy answer") { act(.copyAnswer) } }.controlSize(.small)
+                HStack { Button("Try again") { act(.run(card.destination == .choose ? .chatgpt : card.destination)) }; Button("Copy answer") { act(.copyAnswer) }; Button("Open result") { act(.openAnswer) } }.controlSize(.small)
             case .notConnected:
                 Text("ChatGPT isn't connected. Connect your account, then ask; your question stays here.").font(.caption).foregroundStyle(.orange)
                 HStack { Button("Connect ChatGPT") { act(.connect) }; Button("Save as a note instead") { act(.saveAsNote) } }.controlSize(.small)
@@ -229,5 +257,39 @@ struct AskCardView: View {
     func answerText(_ t: String) -> some View {
         ScrollView { Text(t).font(.callout).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
             .frame(maxHeight: 260)
+    }
+}
+
+
+/// Siri-style listening indicator: soft, overlapping coloured rings that swell with your voice.
+struct ListeningOrb: View {
+    var level: Float
+    @Environment(\.colorScheme) private var scheme
+    static let colors: [Color] = [.cyan, .purple, .pink]
+
+    var body: some View {
+        TimelineView(.animation) { ctx in
+            let t = ctx.date.timeIntervalSinceReferenceDate
+            ZStack {
+                ForEach(0..<3, id: \.self) { i in ring(i, t) }
+                Circle().fill(scheme == .dark ? Color.white.opacity(0.9) : Color.purple.opacity(0.85)).frame(width: dot, height: dot).blur(radius: 1)
+            }
+        }
+        .accessibilityLabel("Listening")
+    }
+
+    var l: CGFloat { CGFloat(level) }
+    var dot: CGFloat { 8 + l * 6 }
+
+    func ring(_ i: Int, _ t: Double) -> some View {
+        let phase: Double = t * (1.4 + Double(i) * 0.5) + Double(i) * 2.1
+        let wobble: CGFloat = CGFloat(sin(phase)) * (0.05 + l * 0.12)
+        let scale: CGFloat = 0.62 + l * 0.42 + wobble
+        let drift: CGFloat = 2 + l * 5
+        let gradient = RadialGradient(colors: [Self.colors[i].opacity(0.85), Color.clear], center: .center, startRadius: 2, endRadius: 24)
+        return Circle().fill(gradient)
+            .scaleEffect(scale)
+            .offset(x: CGFloat(cos(phase)) * drift, y: CGFloat(sin(phase * 1.3)) * drift)
+            .blendMode(scheme == .dark ? .plusLighter : .multiply)
     }
 }

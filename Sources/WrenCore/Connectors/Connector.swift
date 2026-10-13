@@ -144,6 +144,11 @@ public extension Permission {
 public enum ConnectorCatalog {
     public static let gmailScope = "https://www.googleapis.com/auth/gmail.readonly"
     public static let calendarScope = "https://www.googleapis.com/auth/calendar.readonly"
+    /// Needed only for Mark as read. Google has no narrower scope that can remove the UNREAD label
+    /// (`gmail.labels` manages label definitions only; `gmail.metadata` and `gmail.readonly` can't
+    /// change messages). At the OAuth level `gmail.modify` also allows archiving, trashing and
+    /// sending drafts; Wren's code implements only Mark as read (`GmailAllowedAction`).
+    public static let gmailModifyScope = "https://www.googleapis.com/auth/gmail.modify"
 
     public static let all: [ConnectorDescriptor] = [
         .init(id: .chatgpt, name: "ChatGPT", systemImage: "bubble.left.and.text.bubble.right",
@@ -171,16 +176,19 @@ public enum ConnectorCatalog {
               cleanup: "Turning it off stops listening. Quitting Wren stops the microphone. Revoke the macOS permissions in System Settings › Privacy & Security.",
               hosts: [], isPlanned: false),
         .init(id: .gmail, name: "Gmail", systemImage: "envelope",
-              summary: "Read-only: search mail, flag what needs attention (requests, deadlines, bills, interviews, security alerts), summarise it, add it to the morning briefing, and suggest tasks you review first.",
+              summary: "Inbox intelligence: Wren checks new inbox mail while it runs, ranks it with reasons you can see and correct, sends a daily email digest and alerts you about urgent mail. Read-only by default; Mark as read is a separate, optional permission.",
               auth: .googleOAuth(scopes: [gmailScope]),
-              capabilities: [.init(name: "Search and read messages", implemented: true, external: true),
-                             .init(name: "Flag important mail with reasons", implemented: true, external: false),
-                             .init(name: "Email in the morning briefing", implemented: true, external: false),
-                             .init(name: "Suggest tasks (you review them)", implemented: true, external: false),
-                             .init(name: "Send, archive, delete, mark read", implemented: false, external: true)],
+              capabilities: [.init(name: "Search inbox mail (headers and Gmail's snippet)", implemented: true, external: true),
+                             .init(name: "Rank mail into categories with reasons; correct them", implemented: true, external: false),
+                             .init(name: "Daily email digest at a time you choose", implemented: true, external: false),
+                             .init(name: "Alerts for urgent new mail while Wren runs (Spam and Trash excluded)", implemented: true, external: true),
+                             .init(name: "Add a task from an email (you review it)", implemented: true, external: false),
+                             .init(name: "Mark as read (separate permission)", implemented: true, external: true),
+                             .init(name: "Send, archive, delete", implemented: false, external: true),
+                             .init(name: "Summarise email with an external AI", implemented: false, external: true)],
               permissions: [.emailRead],
-              privacy: "Read-only access. Messages are fetched on demand; by default nothing is stored on disk. Optional 7-day local cache of headers and snippets. Tokens are kept in a private file in Wren's data folder that only your macOS account can read. Instructions inside emails are treated as text, never as commands.",
-              cleanup: "Disconnecting revokes Wren's access with Google, deletes the token from this Mac and deletes any cached mail.",
+              privacy: "Read-only unless you add Mark as read. Wren reads headers, labels and Gmail's short snippet of recent inbox mail (never attachments or full bodies), triages it on this Mac with rules, and never sends email content to ChatGPT or any other AI service. Recent inbox metadata is kept in a private file (not in Wren's database, exports or backups) and pruned after 30 days. Tokens are kept in a private file only your macOS account can read. Text inside emails is treated as data and can never trigger an action.",
+              cleanup: "Disconnecting revokes Wren's access with Google, deletes the token from this Mac and deletes all cached mail and digests.",
               hosts: ["gmail.googleapis.com", "oauth2.googleapis.com", "accounts.google.com"], isPlanned: false),
         .init(id: .notion, name: "Notion", systemImage: "doc.text",
               summary: "Connect your Notion workspace on Notion's own sign-in page. Search and read pages, include them in a request, and create a page after you confirm.",
@@ -191,7 +199,7 @@ public enum ConnectorCatalog {
               permissions: [.notionRead, .notionWrite],
               privacy: "Wren connects through Notion's official connection for apps (Notion MCP) and sees what your Notion account can see in that workspace. Page content is fetched when you ask and not stored. Creating a page always asks first. The token is kept in a private file in Wren's data folder that only your macOS account can read.",
               cleanup: "Disconnecting revokes the token with Notion and deletes it from this Mac.",
-              hosts: ["api.notion.com"], isPlanned: false),
+              hosts: ["mcp.notion.com"], isPlanned: false),
         .init(id: .macCalendar, name: "Calendar", systemImage: "calendar",
               summary: "Read-only: the calendars already on this Mac in Apple's Calendar app, including Google, iCloud and Outlook accounts added in System Settings › Internet Accounts. Today's schedule, “what meetings do I have tomorrow?”, events in the briefing, and reminders from events.",
               auth: .macOSPermission(["Calendars"]),

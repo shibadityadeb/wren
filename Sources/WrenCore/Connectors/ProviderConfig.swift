@@ -15,6 +15,7 @@ public struct ProviderConfig: Equatable, Sendable {
 
     public enum Key {
         public static let googleClientID = "WrenGoogleClientID"
+        public static let googleClientSecret = "WrenGoogleClientSecret"
         public static let googleStatus = "WrenGoogleStatus"
     }
 
@@ -26,7 +27,7 @@ public struct ProviderConfig: Equatable, Sendable {
         }
         var out = ProviderConfig()
         if let id = value(Key.googleClientID) {
-            let c = GoogleOAuthConfig(clientID: id)
+            let c = GoogleOAuthConfig(clientID: id, clientSecret: value(Key.googleClientSecret))
             if c.isPlausible { out.google = c }
         }
         out.googleStatus = value(Key.googleStatus).flatMap(GoogleAppStatus.init(rawValue:)) ?? .testing

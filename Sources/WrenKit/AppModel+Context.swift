@@ -122,6 +122,8 @@ extension AppModel {
         var candidate = text
         let isNewRequest = ReminderCommand.parse(text, now: now, calendar: cal, defaultHour: reminderHour) != nil
         if !isNewRequest, let prefix = reminderFollowUp {
+            // A new, explicit request (ask GPT, save a note) is never read as the answer to the earlier question.
+            if !ReminderFollowUp.mayAnswer(text) { reminderFollowUp = nil; return nil }
             let looksLikeAnswer = DateParser(calendar: cal).parse(text, now: now) != nil
                 || RecurrenceRule.find(in: text, calendar: cal) != nil
                 || text.range(of: #"^\s*(a\.?m\.?|p\.?m\.?)\s*$"#, options: [.regularExpression, .caseInsensitive]) != nil

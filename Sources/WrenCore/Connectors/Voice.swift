@@ -77,6 +77,50 @@ public struct CommandEndpointer: Sendable, Equatable {
     }
 }
 
+/// Decides, from input loudness alone, when someone is speaking. While Wren waits for "Hey Wren",
+/// speech recognition runs only between `open` and `close`; silence and background noise are never
+/// transcribed. Adapts to the room's noise floor. Pure, so it's tested without a microphone.
+public struct VoiceActivityGate: Sendable, Equatable {
+    public enum Event: Equatable, Sendable { case open, close }
+    /// How far above the noise floor counts as speech (dB).
+    public var margin: Float = 10
+    /// Never treat anything quieter than this as speech (dBFS).
+    public var absoluteMinimum: Float = -52
+    /// Consecutive loud buffers (~23 ms each) before opening.
+    public var loudBuffersToOpen = 3
+    /// Quiet time before closing.
+    public var closeAfter: TimeInterval = 2.5
+    /// A single burst is closed after this long (the recogniser has a time limit).
+    public var maxOpen: TimeInterval = 50
+    public private(set) var noiseFloor: Float = -60
+    public private(set) var isOpen = false
+    var loudRun = 0
+    var lastLoud: TimeInterval = 0
+    var openedAt: TimeInterval = 0
+
+    public init() {}
+
+    public mutating func feed(level db: Float, at t: TimeInterval) -> Event? {
+        let threshold = max(absoluteMinimum, noiseFloor + margin)
+        let loud = db >= threshold
+        if !isOpen {
+            // Track the room: fall quickly to quieter levels, rise slowly.
+            noiseFloor = db < noiseFloor ? noiseFloor * 0.7 + db * 0.3 : noiseFloor * 0.995 + db * 0.005
+            noiseFloor = min(-25, max(-90, noiseFloor))
+            loudRun = loud ? loudRun + 1 : 0
+            guard loudRun >= loudBuffersToOpen else { return nil }
+            isOpen = true; openedAt = t; lastLoud = t; loudRun = 0
+            return .open
+        }
+        // Keep learning slowly while open, so a steady noise (fan, hum) can't hold the gate open.
+        noiseFloor = min(-25, max(-90, noiseFloor * 0.998 + db * 0.002))
+        // Hysteresis: once open, quieter speech still counts.
+        if db >= max(absoluteMinimum, noiseFloor + margin) - margin * 0.4 { lastLoud = t }
+        if t - lastLoud >= closeAfter || t - openedAt >= maxOpen { isOpen = false; return .close }
+        return nil
+    }
+}
+
 /// Live, on-device speech from the microphone (AVAudioEngine + Apple Speech in the app; a fake in
 /// tests). Each `start()` begins a fresh transcript.
 @MainActor
@@ -85,6 +129,9 @@ public protocol SpeechStreaming: AnyObject {
     /// The recogniser stopped on its own (time limit, silence or error). nil error: just ended.
     var onEnded: ((VoiceError?) -> Void)? { get set }
     var isRunning: Bool { get }
+    /// True while only waiting for "Hey Wren": recognise speech only while someone is talking.
+    /// False while capturing a command: recognise continuously until stopped.
+    var wakeListening: Bool { get set }
     func start() throws
     func stop()
 }
@@ -110,6 +157,8 @@ public final class VoiceSession {
     let now: () -> Date
     public private(set) var phase: Phase = .off { didSet { if phase != oldValue { onPhase?(phase) } } }
     public private(set) var wakeWordEnabled = false
+    /// Listening is paused (screen locked or asleep); it resumes by itself afterwards.
+    public private(set) var suspended = false
     public private(set) var liveCommand = ""
     var endpointer: CommandEndpointer?
 
@@ -144,13 +193,28 @@ public final class VoiceSession {
             return nil
         }
         if let e = await ensurePermissions() { wakeWordEnabled = false; phase = .failed(e); return e }
-        if phase == .off || isFailed { return startListening() }
+        if (phase == .off || isFailed) && !suspended { return startListening() }
         return nil
+    }
+
+    /// Screen locked or display asleep: the microphone is released. A command already being
+    /// captured is left to finish.
+    public func suspend() {
+        suspended = true
+        if phase == .listening { stream.stop(); phase = .off }
+    }
+
+    /// Screen unlocked or awake again: back to listening if "Hey Wren" is on.
+    public func resumeIfEnabled() {
+        guard suspended else { return }
+        suspended = false
+        if wakeWordEnabled, phase == .off || isFailed { _ = startListening() }
     }
 
     var isFailed: Bool { if case .failed = phase { true } else { false } }
 
     func startListening() -> VoiceError? {
+        stream.wakeListening = true
         do { try stream.start() } catch {
             let e = (error as? VoiceError) ?? .recordingFailed(error.localizedDescription)
             phase = .failed(e); return e
@@ -170,6 +234,7 @@ public final class VoiceSession {
         }
         if let e = await ensurePermissions() { phase = .failed(e); return e }
         stream.stop()
+        stream.wakeListening = false
         do { try stream.start() } catch {
             let e = (error as? VoiceError) ?? .recordingFailed(error.localizedDescription)
             phase = .failed(e); return e
@@ -179,6 +244,8 @@ public final class VoiceSession {
     }
 
     func beginCapture(_ t: Trigger, initial: String) {
+        // From here on, keep recognising (don't stop at a pause in the gate; the endpointer decides).
+        stream.wakeListening = false
         liveCommand = initial
         endpointer = CommandEndpointer(start: now())
         endpointer?.transcript(initial, at: now())
@@ -225,6 +292,9 @@ public final class VoiceSession {
         resume()
     }
 
+    /// Ends the command being captured now, as if the speaker had paused.
+    public func stopCapturing() { finish(.pause) }
+
     /// Escape or the Cancel button: drops the command being captured.
     public func cancel() {
         switch phase {
@@ -237,7 +307,7 @@ public final class VoiceSession {
 
     func resume() {
         liveCommand = ""
-        if wakeWordEnabled { _ = startListening() } else { stream.stop(); phase = .off }
+        if wakeWordEnabled && !suspended { _ = startListening() } else { stream.stop(); phase = .off }
     }
 
     func streamEnded(_ error: VoiceError?) {

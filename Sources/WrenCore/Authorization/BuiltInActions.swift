@@ -26,6 +26,7 @@ public enum BuiltInAction {
     // Reserved for later phases: declared so policy and tests cover them, no handlers yet.
     public static let readEmail: ActionID = "email.read"
     public static let archiveEmail: ActionID = "email.archive"
+    public static let markEmailRead: ActionID = "email.markRead"
     public static let sendEmail: ActionID = "email.send"
     public static let deleteEmailPermanently: ActionID = "email.deletePermanently"
     public static let delegateToExternalAI: ActionID = "ai.delegate"
@@ -37,6 +38,8 @@ public enum BuiltInAction {
     public static let reservedExternal: [ActionDescriptor] = [
         .init(id: readEmail, category: .externalRead, permission: .emailRead, confirmation: .none,
               summary: "Read email", verification: "Provider returns the messages"),
+        .init(id: markEmailRead, category: .externalWrite, permission: .emailModify, confirmation: .always,
+              summary: "Mark an email as read in Gmail", verification: "Gmail returns the message's labels without UNREAD"),
         .init(id: archiveEmail, category: .externalWrite, permission: .emailModify, confirmation: .always,
               summary: "Archive email", verification: "Re-fetch labels; INBOX absent"),
         .init(id: sendEmail, category: .irreversible, permission: .emailSend, confirmation: .always,

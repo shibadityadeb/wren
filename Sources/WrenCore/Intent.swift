@@ -42,9 +42,17 @@ public struct IntentProcessor: Sendable {
     /// otherwise it stays unsorted. Nothing is invented.
     public func rulesOnly(_ text: String, now: Date) -> Interpretation {
         let parsed = parser.parse(text, now: now)
+        var title = Self.cleanTitle(text)
+        // The deadline is stored separately: "Finish this report by Friday" → "Finish this report".
+        if let p = parsed {
+            let pattern = "\\s*,?\\s*(?:by|on|before|due|at|until|for)?\\s*" + NSRegularExpression.escapedPattern(for: p.phrase) + "[.!]?$"
+            let stripped = title.replacingOccurrences(of: pattern, with: "", options: [.regularExpression, .caseInsensitive])
+                .trimmingCharacters(in: .whitespaces)
+            if stripped.count >= 3 { title = stripped.prefix(1).uppercased() + stripped.dropFirst() }
+        }
         return Interpretation(
             kind: parsed == nil ? .unsorted : .commitment,
-            title: Self.cleanTitle(text),
+            title: title,
             priority: .normal,
             deadline: parsed?.date,
             deadlineHasTime: parsed?.hasTime ?? false,
@@ -53,7 +61,9 @@ public struct IntentProcessor: Sendable {
 
     static func cleanTitle(_ text: String) -> String {
         var t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        for prefix in ["remind me to ", "remind me ", "i need to ", "i have to ", "i must ", "i should ", "i will ", "i'll "] {
+        for prefix in ["remind me to ", "remind me ", "create a task for the ", "create a task for ", "create a task to ", "add a task for the ",
+                       "add a task for ", "add a task to ", "new task: ", "task: ", "todo: ", "to do: ",
+                       "i need to ", "i have to ", "i must ", "i should ", "i will ", "i'll "] {
             if t.lowercased().hasPrefix(prefix) { t = String(t.dropFirst(prefix.count)); break }
         }
         if t.hasSuffix(".") { t.removeLast() }

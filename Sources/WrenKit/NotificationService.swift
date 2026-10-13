@@ -7,15 +7,25 @@ import os
 /// System Settings can suppress banners, and Wren never claims otherwise.
 @MainActor
 final class NotificationService: NSObject, UNUserNotificationCenterDelegate, WrenNotifier, ReminderNotificationCenter {
-    enum Category: String { case reminder = "WREN_REMINDER", briefing = "WREN_BRIEFING", checkIn = "WREN_CHECKIN", checkInItem = "WREN_CHECKIN_ITEM" }
+    enum Category: String {
+        case reminder = "WREN_REMINDER", briefing = "WREN_BRIEFING", checkIn = "WREN_CHECKIN", checkInItem = "WREN_CHECKIN_ITEM"
+        case delegation = "WREN_DELEGATION", mail = "WREN_MAIL", mailWithRead = "WREN_MAIL_READ", digest = "WREN_DIGEST"
+    }
     enum Action: String {
         case done = "WREN_DONE", snoozeHour = "WREN_SNOOZE_1H", later = "WREN_LATER", tomorrow = "WREN_TOMORROW"
         case openBriefing = "WREN_OPEN_BRIEFING", review = "WREN_REVIEW", dismissCheckIn = "WREN_DISMISS_CHECKIN"
+        case viewResult = "WREN_VIEW_RESULT"
+        case openMail = "WREN_OPEN_MAIL", markRead = "WREN_MARK_READ", dismissMail = "WREN_DISMISS_MAIL", openDigest = "WREN_OPEN_DIGEST"
     }
+
+    /// What a click on a mail alert asked for. Mark as read is only offered when Google granted it.
+    enum MailResponse: Equatable { case open(String), markRead(String), dismiss(String), openDigest(String) }
 
     enum Response {
         case done(UUID), snoozeHour(UUID), later(UUID, String), tomorrow(UUID), open(UUID)
         case openBriefing, reviewCheckIn, dismissCheckIn
+        case openDelegation(UUID)
+        case mail(MailResponse)
     }
 
     /// Resolved lazily: UNUserNotificationCenter requires a real app bundle.
@@ -35,11 +45,20 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Wre
         let open = UNNotificationAction(identifier: Action.openBriefing.rawValue, title: "Open briefing", options: [.foreground])
         let review = UNNotificationAction(identifier: Action.review.rawValue, title: "Review", options: [.foreground])
         let dismiss = UNNotificationAction(identifier: Action.dismissCheckIn.rawValue, title: "Dismiss for today")
+        let openMail = UNNotificationAction(identifier: Action.openMail.rawValue, title: "Open in Wren", options: [.foreground])
+        let markRead = UNNotificationAction(identifier: Action.markRead.rawValue, title: "Mark as read in Gmail")
+        let dismissMail = UNNotificationAction(identifier: Action.dismissMail.rawValue, title: "Dismiss alert")
         center.setNotificationCategories([
             UNNotificationCategory(identifier: Category.reminder.rawValue, actions: [done, hour, later], intentIdentifiers: []),
             UNNotificationCategory(identifier: Category.briefing.rawValue, actions: [open], intentIdentifiers: []),
             UNNotificationCategory(identifier: Category.checkIn.rawValue, actions: [review, dismiss], intentIdentifiers: []),
             UNNotificationCategory(identifier: Category.checkInItem.rawValue, actions: [done, tomorrow, later, dismiss], intentIdentifiers: []),
+            UNNotificationCategory(identifier: Category.delegation.rawValue,
+                                   actions: [UNNotificationAction(identifier: Action.viewResult.rawValue, title: "View result", options: [.foreground])], intentIdentifiers: []),
+            UNNotificationCategory(identifier: Category.mail.rawValue, actions: [openMail, dismissMail], intentIdentifiers: []),
+            UNNotificationCategory(identifier: Category.mailWithRead.rawValue, actions: [openMail, markRead, dismissMail], intentIdentifiers: []),
+            UNNotificationCategory(identifier: Category.digest.rawValue,
+                                   actions: [UNNotificationAction(identifier: Action.openDigest.rawValue, title: "Open digest", options: [.foreground])], intentIdentifiers: []),
         ])
     }
 
@@ -118,6 +137,44 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Wre
         return await add("pause-summary-\(Int(Date().timeIntervalSince1970))", content)
     }
 
+    /// "GPT finished: [query]. View result." The query is the user's own words, truncated.
+    func deliverDelegation(_ r: DelegationRecord) async -> Bool {
+        let content = UNMutableNotificationContent()
+        let q = String(r.task.prefix(90)) + (r.task.count > 90 ? "…" : "")
+        switch r.status {
+        case .completed: content.title = "GPT finished: \(q)"; content.body = "View result."
+        case .partial: content.title = "GPT stopped early: \(q)"; content.body = "Part of the answer was kept. View result or retry."
+        case .cancelled: content.title = "GPT request cancelled: \(q)"; content.body = "View request."
+        default: content.title = "GPT request failed: \(q)"; content.body = (r.error.map { String($0.prefix(140)) } ?? "View details.") + (r.canRetry ? " You can retry it." : "")
+        }
+        content.sound = .default
+        content.categoryIdentifier = Category.delegation.rawValue
+        content.userInfo = ["kind": "delegation", "delegationID": r.id.uuidString]
+        content.threadIdentifier = "delegations"
+        return await add("delegation-\(r.id.uuidString)-\(r.attempts)", content)
+    }
+
+    /// One new-mail alert: sender, subject and Wren's reason (never the body).
+    func deliverMailAlert(id: String, title: String, body: String, canMarkRead: Bool) async -> Bool {
+        let content = UNMutableNotificationContent()
+        content.title = title; content.body = body; content.sound = .default
+        content.categoryIdentifier = (canMarkRead ? Category.mailWithRead : Category.mail).rawValue
+        content.userInfo = ["kind": "mail", "messageID": id]
+        content.threadIdentifier = "mail"
+        return await add("mail-\(id)", content)
+    }
+
+    func deliverDigest(key: String, title: String, body: String) async -> Bool {
+        let content = UNMutableNotificationContent()
+        content.title = title; content.body = body; content.sound = .default
+        content.categoryIdentifier = Category.digest.rawValue
+        content.userInfo = ["kind": "digest", "digestKey": key]
+        content.threadIdentifier = "daily"
+        return await add("digest-\(key)", content)
+    }
+
+    func withdrawMailAlert(id: String) { center.removeDeliveredNotifications(withIdentifiers: ["mail-\(id)"]) }
+
     /// Removes shown reminder notifications for an item (the immediate kind and the scheduled kinds).
     func withdrawReminder(id: UUID) {
         let scheduledPrefix = ReminderScheduler.prefix + id.uuidString
@@ -189,11 +246,29 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Wre
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         let info = response.notification.request.content.userInfo
         let id = (info["commitmentID"] as? String).flatMap(UUID.init(uuidString:))
+        let delegationID = (info["delegationID"] as? String).flatMap(UUID.init(uuidString:))
+        let messageID = info["messageID"] as? String
+        let digestKey = info["digestKey"] as? String
         let kind = info["kind"] as? String
         let actionID = response.actionIdentifier
         let text = (response as? UNTextInputNotificationResponse)?.userText
         await MainActor.run {
             let r: Response?
+            if let delegationID, actionID == Action.viewResult.rawValue || actionID == UNNotificationDefaultActionIdentifier {
+                onResponse?(.openDelegation(delegationID)); return
+            }
+            if let messageID {
+                switch actionID {
+                case Action.markRead.rawValue: onResponse?(.mail(.markRead(messageID)))
+                case Action.dismissMail.rawValue: onResponse?(.mail(.dismiss(messageID)))
+                case Action.openMail.rawValue, UNNotificationDefaultActionIdentifier: onResponse?(.mail(.open(messageID)))
+                default: break
+                }
+                return
+            }
+            if let digestKey, actionID == Action.openDigest.rawValue || actionID == UNNotificationDefaultActionIdentifier {
+                onResponse?(.mail(.openDigest(digestKey))); return
+            }
             switch (actionID, id) {
             case (Action.done.rawValue, let id?): r = .done(id)
             case (Action.snoozeHour.rawValue, let id?): r = .snoozeHour(id)

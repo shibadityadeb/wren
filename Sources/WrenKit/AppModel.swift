@@ -14,7 +14,7 @@ enum ModelDownload: Equatable {
 }
 
 enum Route: Equatable { case overview, list, detail(UUID), settings, briefing, checkIn, activity, goals, goal(UUID), review, aiSetup,
-                         connectors, connector(ConnectorID), delegate }
+                         connectors, connector(ConnectorID), delegate, delegation(UUID), inbox, mailMessage(String) }
 
 /// A request waiting for the user to approve or cancel, shown as a native alert.
 struct PendingConfirmation: Identifiable {
@@ -108,6 +108,21 @@ final class AppModel {
     /// Bumped when connector state changes, so views re-read it.
     var connectorVersion = 0
     var delegationDraft: (task: String, depth: HandoffDepth)?
+    // Gmail inbox intelligence (AppModel+Mail).
+    var mailbox = MailboxState()
+    var mailPrefs: MailPreferences
+    var mailSyncing = false
+    var mailStatus: String?
+    var nextMailCheck: Date?
+    var mailVersion = 0
+    @ObservationIgnored var mailTimer: Timer?
+    @ObservationIgnored var mailBackoff: Double = 1
+    /// Design snapshots only (`wren-tools snapshot`): render the inbox as if Gmail were connected.
+    @ObservationIgnored var previewGmail: Bool?
+    /// Bumped when a delegation starts, finishes or is opened.
+    var delegationVersion = 0
+    /// True while the capture panel is showing this delegation's live result (set by the app delegate).
+    @ObservationIgnored var isShowingDelegation: (UUID) -> Bool = { _ in false }
 
     init(store injected: WrenStore? = nil, loginService: LoginItemService? = nil) {
         loginItems = LoginItemController(service: loginService ?? SystemLoginItemService())
@@ -149,8 +164,10 @@ final class AppModel {
         daily = settings.daily
         insightSettings = settings.insights
         pause = settings.pause
+        mailPrefs = settings.mail
         hub = ConnectorHub(settings: settings, policy: policyStore)
         if let s, let b = broker { asks = AskService(store: s, broker: b, chatgpt: hub.chatgpt, clock: clock) }
+        wireDelegations()
         engine?.externalBriefing = { [weak self] in await self?.externalBriefing() }
         reload()
         notifications.onResponse = { [weak self] r in self?.handle(r) }
@@ -179,13 +196,18 @@ final class AppModel {
             notificationStatus = await notifications.refreshStatus()
             await hub.registry.refreshAll()
             connectorVersion += 1
+            startMail()
             await refreshAI()
             processAwaiting()
             await tick()
         }
         let ws = NSWorkspace.shared.notificationCenter
         observers.append(ws.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.scheduleTick() }
+            MainActor.assumeIsolated {
+                self?.scheduleTick()
+                // After sleep: catch up on mail (and a digest that came due) shortly after the network is back.
+                self?.scheduleMailCheck(after: 20)
+            }
         })
         for name in [Notification.Name.NSSystemClockDidChange, .NSSystemTimeZoneDidChange, .NSCalendarDayChanged] {
             observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
@@ -296,7 +318,10 @@ final class AppModel {
             switch p.request.action {
             case BuiltInAction.delete: route = .list
             case BuiltInAction.restoreBackup: relaunch()
-            case BuiltInAction.eraseAllData: route = .overview; refreshBackups(); banner = "All Wren data was removed. Backups were kept."
+            case BuiltInAction.eraseAllData:
+                route = .overview; refreshBackups()
+                await removeConnectorData()
+                banner = "All Wren data was removed, including connector sign-ins and cached mail. Backups were kept."
             case BuiltInAction.resetPreferences: reloadPreferences(); banner = "Preferences were reset. Your items are unchanged."
             case BuiltInAction.deleteBackup: refreshBackups()
             default: break
@@ -482,6 +507,8 @@ final class AppModel {
             snooze(c, until: clock.now.addingTimeInterval(3600), via: .notificationAction)
             Task { await notifications.deliverInfo("Snoozed for 1 hour", "Wren couldn't read “\(text)” as a time. You can change it from the menu bar.") }
         case let .open(id): route = .detail(id); showPopover()
+        case let .openDelegation(id): openDelegation(id)
+        case let .mail(r): handleMail(r)
         case .openBriefing: route = .briefing; showPopover()
         case .reviewCheckIn: route = .checkIn; showPopover()
         case .dismissCheckIn: dismissCheckIn()
