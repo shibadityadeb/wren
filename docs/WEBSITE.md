@@ -1,7 +1,7 @@
 # Wren website
 
 A static site in `website/`: hand-written HTML, one stylesheet, one small script. There are no
-frameworks, packages or build dependencies (the build uses zsh, `sed` and Node for the link checker).
+frameworks, packages or build dependencies; the build is a plain Node script.
 It's independent of the Mac app and its DMG pipeline.
 
 ```
@@ -14,8 +14,9 @@ website/
   assets/fonts/         Fraunces and Figtree (woff2, self-hosted, SIL OFL licences included)
   assets/brand/         the app's own icon (from Brand/Wren.iconset) and bird mark (Brand/wren-mark*.svg)
   assets/og-image.png   social preview, rendered by tools/og-image.swift
-  robots.txt, sitemap.xml   templates; build.sh fills in the domain
-  build.sh              builds website/dist and runs tools/check.mjs
+  robots.txt, sitemap.xml   templates; build.mjs fills in the address
+  build.mjs             builds website/dist and runs tools/check.mjs
+../vercel.json          Vercel settings: build, output folder, security headers, caching
 ```
 
 ## Preview locally
@@ -29,23 +30,33 @@ Then open http://127.0.0.1:4173. Paths are root-relative, so serve the `website`
 ## Build
 
 ```bash
-SITE_URL=https://your-domain.example website/build.sh
+node website/build.mjs
+SITE_URL=https://example.org node website/build.mjs
 ```
 
-This writes `website/dist/` (git-ignored) and fails if any internal link, anchor or asset is broken, an
-image lacks `alt`, a page is missing basics, or anything would load from another server. `SITE_URL`
-fills in canonical links, Open Graph URLs, `robots.txt` and `sitemap.xml`. Without it, the build still
-works but leaves those tags out instead of pointing at a made-up domain. No production domain has been
-chosen.
+This writes `website/dist/` (git-ignored). The build fails if:
+- an internal link, anchor or asset is broken;
+- an image lacks `alt`, or a page is missing basics;
+- anything would load from another server;
+- the inline script no longer matches the Content-Security-Policy hash in `vercel.json`.
 
-## Deploy
+The site address fills in canonical links, Open Graph URLs, `robots.txt` and `sitemap.xml`. It's taken from `SITE_URL`, or, on Vercel, from the project's production address (`VERCEL_PROJECT_PRODUCTION_URL`, for example `wren-xyz.vercel.app`). Without either, the build leaves those tags out rather than using a made-up domain. Preview deployments on Vercel are marked `noindex`.
 
-Upload `website/dist/` to any static host, and configure the host to serve `404.html` for missing pages.
-For example:
-- **GitHub Pages:** publish `dist/` with the official Pages actions (`actions/upload-pages-artifact` and `actions/deploy-pages`). Pages serves `404.html` automatically. A custom domain needs a `CNAME` file in `dist/`.
-- **Netlify or Cloudflare Pages:** set the publish directory to `website/dist` and the build command to `SITE_URL=https://… website/build.sh`. Both serve `404.html` automatically.
+## Deploy on Vercel (no custom domain)
 
-Before publishing, complete the maintainer confirmations in `docs/PRIVACY_DATA_MAP.md`, especially naming the host and its request logging in Privacy Policy section 2.
+One-time setup at vercel.com:
+1. **Add New › Project › Import** the `shibadityadeb/wren` GitHub repository.
+2. Leave **Root Directory** as the repository root and **Framework Preset** as *Other*. `vercel.json` sets the build command (`node website/build.mjs`), output (`website/dist`), headers and caching, so there's nothing else to fill in.
+3. Deploy. The site is served at the project's `*.vercel.app` address, which the build uses automatically for canonical links and the sitemap.
+4. Keep **Web Analytics** and **Speed Insights** off: the Privacy Policy states they're not used.
+
+After that:
+- every push to `main` deploys production;
+- other branches and pull requests get preview URLs, marked `noindex`;
+- commits that don't touch `website/` or `vercel.json` skip the build (`ignoreCommand`);
+- `404.html` is served for missing pages.
+
+Adding a custom domain later: add it in Vercel › Domains, set it as the production domain (or set a `SITE_URL` environment variable), and redeploy.
 
 ## Regenerating assets
 
@@ -80,7 +91,7 @@ When a manual test passes live, update the label here, on the site, and in `docs
 
 ## Checks done for this version
 
-- `website/build.sh`: passes (3 pages, no broken links or anchors, nothing loaded from other servers). External links were checked with `curl`: all resolve; OpenAI's policy page answers 403 to scripted requests but is OpenAI's published URL.
+- `node website/build.mjs`: passes (3 pages, no broken links or anchors, nothing loaded from other servers, inline script matches the CSP). External links were checked with `curl`: all resolve; OpenAI's policy page answers 403 to scripted requests but is OpenAI's published URL.
 - Browser (Chrome engine) at 1440, 1280, 1024, 820, 768, 375 and 320 px:
   - no horizontal overflow, mobile menu (open, Escape, focus return), skip link, keyboard focus rings;
   - no console errors, and only same-origin requests.

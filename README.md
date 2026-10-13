@@ -367,7 +367,7 @@ Tests that need a person, a real account, macOS permission prompts or real time 
 
 ## Website
 
-The public website (home page, Privacy Policy, 404) is a static site in `website/`, with no dependencies. Preview it with `python3 -m http.server 4173 --directory website`, and build it with `SITE_URL=https://… website/build.sh`. See docs/WEBSITE.md; the privacy data flows behind the policy are in docs/PRIVACY_DATA_MAP.md.
+The public website (home page, Privacy Policy, 404) is a static site in `website/`, with no dependencies. Preview it with `python3 -m http.server 4173 --directory website`, and build it with `node website/build.mjs`. It deploys on Vercel from the repository (`vercel.json`). See docs/WEBSITE.md; the privacy data flows behind the policy are in docs/PRIVACY_DATA_MAP.md.
 
 ## Brand assets
 

@@ -46,7 +46,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build static site and check links, anchors and assets
-        run: website/build.sh
+        run: node website/build.mjs
 
   package:
     name: Universal DMG (unsigned preview)

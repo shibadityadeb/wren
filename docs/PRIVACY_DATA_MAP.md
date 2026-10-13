@@ -47,12 +47,12 @@ Wren includes no analytics, telemetry, crash-reporting or advertising SDK and co
 
 | Data | Where | Purpose | Notes |
 |---|---|---|---|
-| Standard HTTP request data (IP address, URL, time, user-agent, referrer) | The hosting provider's logs, if it keeps them | Serving pages | **Hosting not chosen yet.** Update the policy (section 2) with the provider and its log retention before publishing |
+| Standard HTTP request data (IP address, URL, time, user-agent, referrer) | Vercel (the host), under its own privacy notice | Serving and protecting the site | Vercel Web Analytics and Speed Insights must stay **off**; the policy says so. If either is ever enabled, update policy section 2 first |
 | Cookies, local storage, analytics, third-party scripts or fonts | None | n/a | Verified by `website/tools/check.mjs` (no off-site resources) and a browser network check |
 
 ## Maintainer confirmations before publishing
 
-1. Choose hosting; name it and its logging in policy section 2.
+1. Hosting: Vercel, on its `*.vercel.app` address (no custom domain yet). Keep Web Analytics and Speed Insights off.
 2. Confirm the contact email (`shibadityadeb.official@gmail.com`, from the public GitHub profile) is the one to publish.
 3. Before Google verification: Google requires an app privacy policy that discloses Google user data use (and, for restricted Gmail scopes, its Limited Use requirements). Review section 7 against Google's current requirements at that time.
 4. Re-check statuses on the website when Google sign-in, voice and notification delivery are verified live (docs/MANUAL_TESTS.md).
