@@ -118,18 +118,23 @@ If a connector says **Maintainer setup required**, the copy of Wren you have was
 
 **Two ways to run "ask GPT".** Connectors › ChatGPT › *When you ask GPT* chooses:
 
-1. **Open in ChatGPT (website)** (default).
-   - Wren opens ChatGPT in your browser with your request (also copied to the clipboard). You send it there.
+1. **Ask in ChatGPT (website)** (default).
+   - Wren opens ChatGPT in your normal browser, signed in to your own account, with your question already in the message box. Press **Enter** there to send it: ChatGPT doesn't let other apps send it (checked in Chrome, October 2026).
    - It becomes a normal ChatGPT conversation that you continue and find in ChatGPT's history.
-   - **OpenAI offers no supported way for an app to create that conversation, send it, read the answer or learn its address.** So Wren shows only what it knows: *Opened in ChatGPT* / *Awaiting your submission*, then *Submitted; completion not verified* once you click **I sent it**. It never shows *Completed*.
+   - **OpenAI offers no supported way for an app to create that conversation, send it, read the answer or learn its address.** So Wren shows only what it knows: *Prompt loaded, submission unverified*, then *Submitted to ChatGPT* once it has seen the conversation start (below). It never shows *Completed*.
+   - **Detect conversation automatically** (Connectors › ChatGPT, or the button on the card; Chrome, Brave, Edge, Chromium, Vivaldi):
+     - Wren watches only the address of the ChatGPT tab it opened. When you press Enter and ChatGPT creates the conversation (`chatgpt.com/c/…`), Wren marks it *Submitted to ChatGPT* and saves that exact link.
+     - It reads no page content, other tabs, cookies or passwords; macOS asks you once.
+     - If the tab lands on ChatGPT's sign-in page, the card says *Sign-in required*: sign in there, in the account you want. Wren never asks for your ChatGPT password.
    - To return to the conversation in one click, copy its address in ChatGPT (`https://chatgpt.com/c/…`) and choose **Link conversation**. Wren reads the clipboard only when you click, and accepts only a real ChatGPT conversation link.
    - After that, **Open in ChatGPT** and "open that in GPT" go to that exact conversation. "Continue that research" opens it and copies the follow-up for you to paste.
    - Without a link, a follow-up starts a new ChatGPT chat that quotes your earlier request, and Wren says so.
-   - *Experimental:* Connectors › ChatGPT › **Fill in my request automatically** uses a `chatgpt.com/?q=…` link. OpenAI doesn't document it and has changed it, so it's off until you press **Check it in my browser…** and report what you saw. Even then, Wren records it as *opened*, never *sent*.
-2. **Run with connected ChatGPT in Wren.**
+   - The question gets into the box through a `chatgpt.com/?q=…` link. OpenAI doesn't document it and may change it. Turning it off in Connectors › ChatGPT (or asking something over 1,500 characters) switches to copy-and-paste, labelled *Awaiting your submission*.
+   - A question that looks like it holds a password, key or code isn't put in a link; Wren asks you to check it in Delegate first.
+2. **Run with ChatGPT inside Wren.**
    - Sign in with ChatGPT (below). Wren sends the request through your plan and shows the real streamed answer and completion here, with a notification.
    - The request and answer live in Wren. They aren't a ChatGPT conversation and don't appear in ChatGPT's history, so the result's main action is **Open result in Wren**, and **Open ChatGPT website** opens only the site.
-   - You can switch a single website request to this mode with **Run in Wren instead**. Wren never switches on its own.
+   - You can switch a single website request to this mode with **Run with ChatGPT inside Wren**. Wren never switches on its own.
 
 **Signing in (for mode 2).** **Continue with ChatGPT** opens OpenAI's sign-in page ("Sign in with ChatGPT"). Sign in and approve Wren, including use of your ChatGPT plan. Wren then lists the models your plan offers and shows:
 

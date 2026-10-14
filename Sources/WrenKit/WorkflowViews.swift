@@ -99,19 +99,22 @@ struct DelegationDetailView: View {
     @ViewBuilder func webHandoff(_ r: DelegationRecord) -> some View {
         let state = r.webState ?? .awaitingSubmission
         VStack(alignment: .leading, spacing: 8) {
-            Label(state.label, systemImage: state == .conversationLinked ? "link" : (state == .failedToOpen ? "exclamationmark.triangle" : "safari"))
+            Label(state.label, systemImage: state.hasConversation ? "checkmark.bubble" : (state == .failedToOpen || state == .signInRequired ? "exclamationmark.triangle" : "text.bubble"))
                 .font(.callout.weight(.semibold))
             Text(state.detail).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if let url = r.conversationURL {
                 HStack { Text(url.absoluteString).font(.caption.monospaced()).textSelection(.enabled); Spacer() }
             }
             HStack {
-                Button(r.conversationURL == nil ? "Open ChatGPT" : "Open in ChatGPT") {
+                Button(r.conversationURL == nil ? "Open ChatGPT again" : "Open conversation in ChatGPT") {
                     Task { if let e = await model.reopenInChatGPT(r.id) { note = e } }
                 }.buttonStyle(.borderedProminent).tint(WrenTheme.accent)
-                    .help(r.conversationURL == nil ? "No conversation is linked yet, so this opens ChatGPT with the request copied again." : "Opens this exact conversation.")
-                if state == .awaitingSubmission || state == .openedInChatGPT { Button("I sent it") { model.markWebSubmitted(r.id) } }
-                Button("Run in Wren instead") {
+                    .help(r.conversationURL == nil ? "No conversation is known yet, so this opens ChatGPT with the question again." : "Opens this exact conversation.")
+                if state.awaitsSending, BrowserTabs.defaultBrowser != nil, !model.settings.chatgptDetectConversation {
+                    Button("Detect conversation automatically…") { Task { note = await model.detectConversation(for: r.id) ?? "Watching for the conversation. Press Enter in ChatGPT to send your question." } }
+                }
+                if state.awaitsSending { Button("I sent it") { model.markWebSubmitted(r.id) } }
+                Button("Run with ChatGPT inside Wren") {
                     let req = AIRequest(prompt: r.prompt ?? r.task, original: r.original ?? r.task, depth: r.depth, kind: r.kind, target: .chatgpt, mode: .inWren)
                     switch model.startDelegation(req, channel: .popover) {
                     case let .started(id), let .duplicate(id): model.openDelegation(id)
@@ -126,7 +129,7 @@ struct DelegationDetailView: View {
                 Button("Paste from clipboard") { note = model.linkConversationFromClipboard(r.id) ?? "Linked." }
                     .help("Reads the clipboard only now, when you click.")
             }.controlSize(.small)
-            Text("OpenAI offers no supported way for an app to create a ChatGPT conversation or learn its address, so Wren opens ChatGPT and you send the request there. Link the conversation to come back to it in one click. Wren can't see ChatGPT's answer or tell when it's done.")
+            Text("Wren opens ChatGPT in your browser with your question in the message box, and you press Enter there: ChatGPT doesn't let other apps send it, and OpenAI offers no supported way for an app to create the conversation or read its answer. With detection on, Wren sees when the conversation starts and saves its link; otherwise link it yourself. Wren can't tell when ChatGPT's answer is finished.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .padding(10).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))

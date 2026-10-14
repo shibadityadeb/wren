@@ -119,11 +119,18 @@ final class WrenSettings {
         get { d.string(forKey: "chatgptMode").flatMap(ChatGPTMode.init(rawValue:)) ?? .web }
         set { d.set(newValue.rawValue, forKey: "chatgptMode") }
     }
-    /// Fill the prompt in with an undocumented `chatgpt.com/?q=` link. Off until the user has checked
-    /// in their own browser that the link fills it in (`chatgptPrefillCheck`).
+    /// Open ChatGPT with the question in its message box (`chatgpt.com/?q=`, undocumented by OpenAI;
+    /// checked live on 2026-10-14: the question is taken in, not sent). On by default; off means
+    /// copy-and-paste.
     var chatgptPrefill: Bool {
-        get { d.bool(forKey: "chatgptPrefill") && chatgptPrefillCheck?.filledIn == true }
-        set { d.set(newValue, forKey: "chatgptPrefill") }
+        get { d.object(forKey: "chatgptPrefillLink") as? Bool ?? true }
+        set { d.set(newValue, forKey: "chatgptPrefillLink") }
+    }
+    /// Watch only the ChatGPT tab Wren opened (its address, via the browser's AppleScript) to know
+    /// when the question was really sent and save the real conversation link. Opt-in.
+    var chatgptDetectConversation: Bool {
+        get { d.bool(forKey: "chatgptDetectConversation") }
+        set { d.set(newValue, forKey: "chatgptDetectConversation") }
     }
     /// What the user saw when Wren opened a test link: nil until checked.
     var chatgptPrefillCheck: PrefillCheck? {
@@ -161,7 +168,7 @@ final class WrenSettings {
     /// Every preference key Wren writes. "Reset preferences" removes exactly these.
     static let allKeys = ["hotKeyEnabled", "hotKey", "ollamaModel", "useModel", "dateOnlyReminderHour", "captureDraft",
                           "dailySettings", "launchAtLogin", "insightSettings", "notificationPause", "lastAutomaticBackup",
-                          "voiceEnabled", "voiceHotKey", "pushToTalkEnabled", "pushToTalkHotKey", "voiceCheckBeforeRunning", "wakeWordEnabled", "macCalendarEnabled", "chatgptEnabled", "chatgptDestination", "chatgptModel", "openaiModel", "gmailCacheEnabled", "importantSenders", "mailPreferences", "voiceReviewFirst", "notificationSounds", "chatgptWebEnabled", "chatgptMode", "chatgptPrefill", "chatgptPrefillCheck"]
+                          "voiceEnabled", "voiceHotKey", "pushToTalkEnabled", "pushToTalkHotKey", "voiceCheckBeforeRunning", "wakeWordEnabled", "macCalendarEnabled", "chatgptEnabled", "chatgptDestination", "chatgptModel", "openaiModel", "gmailCacheEnabled", "importantSenders", "mailPreferences", "voiceReviewFirst", "notificationSounds", "chatgptWebEnabled", "chatgptMode", "chatgptPrefill", "chatgptPrefillCheck", "chatgptPrefillLink", "chatgptDetectConversation"]
 
     func resetAll() { Self.allKeys.forEach(d.removeObject(forKey:)) }
 

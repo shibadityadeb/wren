@@ -291,9 +291,9 @@ extension AppModel {
     /// exactly this prompt. Wren copies and opens; it does not send.
     func handOff(_ draft: HandoffDraft, record: DelegationRecord) async -> String? {
         record.includesPrivate = draft.containsPrivate
-        record.webState = .prepared
+        record.webState = .preparing
         let launch = ChatGPTWeb.launch(draft.prompt, prefill: settings.chatgptPrefill && settings.chatgptDestination != "app")
-        if let e = await openInChatGPT(prompt: draft.prompt, url: launch.url, record: record, channel: .popover) { return e }
+        if let e = await openInChatGPT(prompt: draft.prompt, url: launch.url, record: record, channel: .popover, copy: launch.method == .clipboard) { return e }
         record.webMethod = launch.method
         record.webState = launch.method == .prefillLink ? .openedInChatGPT : .awaitingSubmission
         saveDelegation(record)

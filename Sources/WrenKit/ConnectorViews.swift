@@ -94,7 +94,7 @@ struct ConnectorDetailView: View {
     let id: ConnectorID
     @State private var working = false
     @State private var recordingVoiceKey = false
-    @State private var prefillTesting = false
+    @State private var detectionNote: String?
     @State private var voiceKeyMonitor: Any?
 
     var descriptor: ConnectorDescriptor { ConnectorCatalog.descriptor(id) }
@@ -347,36 +347,25 @@ struct ConnectorDetailView: View {
         }
     }
 
-    /// The undocumented `chatgpt.com/?q=` link: off until the user has seen what it does in their browser.
+    /// How "Ask in ChatGPT" reaches the website: the question in the message box (`?q=`), and
+    /// optional detection of the conversation it starts.
     @ViewBuilder var prefillSetup: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Toggle("Fill in my request automatically (experimental)", isOn: Binding(get: { model.settings.chatgptPrefill }, set: { model.settings.chatgptPrefill = $0; model.connectorsChanged() }))
-                .disabled(model.settings.chatgptPrefillCheck?.filledIn != true || model.settings.chatgptDestination == "app")
-            Text("Uses a chatgpt.com/?q=… link. OpenAI doesn't document it and has changed how it behaves (it may fill the request in, send it, or do nothing), so Wren turns it on only after you've checked it in your browser. The request is always copied too. Requests over \(ChatGPTWeb.maxPrefillCharacters) characters go by clipboard only.")
+            Toggle("Put my question in ChatGPT's message box", isOn: Binding(get: { model.settings.chatgptPrefill }, set: { model.settings.chatgptPrefill = $0; model.connectorsChanged() }))
+                .disabled(model.settings.chatgptDestination == "app")
+            Text("Uses a chatgpt.com/?q=… link. OpenAI doesn't document it and may change it. Checked in Chrome on 14 October 2026: ChatGPT takes the question in but doesn't send it, so you press Enter there. Off, or for questions over \(ChatGPTWeb.maxPrefillCharacters) characters, Wren copies the question for you to paste.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            if let check = model.settings.chatgptPrefillCheck { Text("Last check: \(check.label).").font(.caption) }
-            if prefillTesting {
-                Text("ChatGPT opened with a test request (“Reply with the single word: ok”). What did you see?").font(.caption.weight(.semibold))
-                HStack {
-                    Button("Filled in and sent") { finishPrefillTest(.filledAndSent) }
-                    Button("Filled in, not sent") { finishPrefillTest(.filledNotSent) }
-                    Button("An empty chat") { finishPrefillTest(.notFilled) }
-                }.controlSize(.small)
-            } else {
-                Button("Check it in my browser…") {
-                    let (url, _) = ChatGPTWeb.launch("Reply with the single word: ok", prefill: true)
-                    NSWorkspace.shared.open(url); prefillTesting = true
-                }.controlSize(.small).help("Opens ChatGPT with a harmless test request so you can see what the link does in your browser and account.")
-            }
+            Toggle("Detect when I send it, and save the conversation link", isOn: Binding(get: { model.settings.chatgptDetectConversation }, set: { on in
+                if on { Task { detectionNote = await model.detectConversationPermission(); model.connectorsChanged() } }
+                else { model.settings.chatgptDetectConversation = false; model.connectorsChanged() }
+            }))
+            .disabled(BrowserTabs.defaultBrowser == nil || !model.settings.chatgptPrefill)
+            Text(BrowserTabs.defaultBrowser.map { "Wren reads only the address of the ChatGPT tab it opened, through \($0.name)'s standard scripting. When it turns into a chatgpt.com/c/… conversation, your question was really sent, and Wren saves that link. No page content, other tabs, cookies or passwords. macOS asks you once." }
+                 ?? "Available when your default browser is Chrome, Brave, Edge, Chromium or Vivaldi (yours is \(BrowserTabs.defaultBrowserName)). Link conversations yourself instead.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if let detectionNote { Text(detectionNote).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
         }
         .padding(.leading, 18)
-    }
-
-    func finishPrefillTest(_ result: PrefillCheck) {
-        model.settings.chatgptPrefillCheck = result
-        model.settings.chatgptPrefill = result.filledIn
-        prefillTesting = false
-        model.connectorsChanged()
     }
 
     @ViewBuilder func voiceSetup(_ state: ConnectorState) -> some View {

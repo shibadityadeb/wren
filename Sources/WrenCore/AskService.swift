@@ -50,6 +50,8 @@ public struct AskCard: Equatable, Sendable {
     public var recordID: UUID?
     /// Shown above the actions, e.g. "Connected. Press Return to ask."
     public var note: String?
+    /// The browser's ChatGPT tab can be followed, and the user hasn't turned that on yet.
+    public var canOfferDetection = false
 
     public init(request: AIRequest, destination: Destination) { self.request = request; self.destination = destination }
 
@@ -85,6 +87,8 @@ public enum AskAction: Equatable, Sendable {
     case linkConversation
     /// The user explicitly chooses to run this request in Wren with connected ChatGPT instead.
     case runInWren
+    /// Let Wren watch the ChatGPT tab it opened (address only) to see when the question is sent.
+    case detectConversation
     public func title(_ card: AskCard) -> String {
         switch self {
         case .run(.chatgpt): if case .ready = card.phase { return "Ask ChatGPT" } else { return "Try again" }
@@ -98,11 +102,12 @@ public enum AskAction: Equatable, Sendable {
         case .copyAnswer: return "Copy answer"
         case .saveAsNote: return "Save as a note instead"
         case .runStandard: return "Run with standard settings"
-        case .run(.chatgptWeb): return "Open in ChatGPT"
+        case .run(.chatgptWeb): return "Ask in ChatGPT"
         case .openInChatGPT: return "Open in ChatGPT"
+        case .detectConversation: return "Detect conversation automatically"
         case .markSent: return "I sent it"
         case .linkConversation: return "Link conversation"
-        case .runInWren: return "Run in Wren instead"
+        case .runInWren: return "Run with ChatGPT inside Wren"
         }
     }
 }

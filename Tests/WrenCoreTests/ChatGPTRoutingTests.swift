@@ -98,10 +98,10 @@ extension ChatGPTRoutingTests {
     func testAWebsiteHandoffIsNeverReportedCompleted() {
         let r = DelegationRecord(task: "Research quantum physics.", destination: .chatgptHandoff, depth: .normal, now: Date())
         r.status = .handedOff
-        for s in [WebHandoffState.prepared, .openedInChatGPT, .awaitingSubmission, .submittedUnverified, .conversationLinked, .failedToOpen] {
+        for s in [WebHandoffState.preparing, .opening, .promptLoaded, .openedInChatGPT, .awaitingSubmission, .submittedUnverified, .submittedVerified, .conversationLinked, .signInRequired, .failedToOpen] {
             r.webState = s
             XCTAssertNotEqual(r.displayStatus, "Completed")
-            XCTAssertFalse(r.displayStatus.lowercased().contains("complete") && s != .submittedUnverified, s.rawValue)
+            XCTAssertFalse(r.displayStatus.lowercased().contains("complete"), s.rawValue)
         }
         r.webState = .awaitingSubmission
         XCTAssertFalse(r.status.isFinal, "a handoff isn't a finished request, so it's never announced as one")
@@ -115,3 +115,60 @@ extension ChatGPTRoutingTests {
         XCTAssertTrue(api.modeLabel.hasPrefix("Run with connected ChatGPT in Wren"))
     }
 }
+
+/// "Ask in ChatGPT": following the one tab Wren opened, by its address only.
+final class ChatGPTTabWatcherTests: XCTestCase {
+    let mine = "https://chatgpt.com/c/6ac7c20c-7f40-83ec-a60b-8114f1c1da37"
+
+    /// The sequence seen live in Chrome on 2026-10-14: the `?q=` link is consumed into chatgpt.com/,
+    /// nothing is sent by itself; after the user presses Enter the tab becomes a /c/ conversation.
+    func testDetectsTheConversationTheQuestionCreated() {
+        var w = ChatGPTTabWatcher(before: [BrowserTab(id: "1", url: mine)])
+        XCTAssertEqual(w.observe([BrowserTab(id: "1", url: mine), BrowserTab(id: "7", url: "https://chatgpt.com/?q=What%20is%20gradient%20descent%3F")]), .opened)
+        XCTAssertEqual(w.observe([BrowserTab(id: "1", url: mine), BrowserTab(id: "7", url: "https://chatgpt.com/")]), .opened, "consumed, not sent")
+        XCTAssertEqual(w.observe([BrowserTab(id: "1", url: mine), BrowserTab(id: "7", url: "https://chatgpt.com/c/8b11aa00-1111-2222-3333-444455556666")]),
+                       .conversation(URL(string: "https://chatgpt.com/c/8b11aa00-1111-2222-3333-444455556666")!))
+        XCTAssertEqual(w.tabID, "7")
+    }
+
+    func testAnExistingConversationIsNeverTakenForTheNewOne() {
+        var w = ChatGPTTabWatcher(before: [BrowserTab(id: "1", url: mine)])
+        // Only the old tab exists (Wren's hasn't appeared yet): waiting, not "your conversation".
+        XCTAssertEqual(w.observe([BrowserTab(id: "1", url: mine)]), .waiting)
+    }
+
+    func testTwoNewChatGPTTabsAreNotGuessedBetween() {
+        var w = ChatGPTTabWatcher(before: [])
+        XCTAssertEqual(w.observe([BrowserTab(id: "7", url: "https://chatgpt.com/"), BrowserTab(id: "8", url: "https://chatgpt.com/")]), .waiting)
+        XCTAssertNil(w.tabID)
+    }
+
+    func testSignInAndClosedTabs() {
+        var w = ChatGPTTabWatcher(before: [])
+        XCTAssertEqual(w.observe([BrowserTab(id: "7", url: "https://chatgpt.com/?q=hi")]), .opened)
+        XCTAssertEqual(w.observe([BrowserTab(id: "7", url: "https://auth.openai.com/log-in")]), .signInRequired)
+        XCTAssertEqual(w.observe([BrowserTab(id: "7", url: "https://chatgpt.com/auth/login")]), .signInRequired)
+        XCTAssertEqual(w.observe([]), .closed)
+    }
+
+    func testOnlyARealConversationAddressCountsAsSubmitted() {
+        var w = ChatGPTTabWatcher(before: [])
+        XCTAssertEqual(w.observe([BrowserTab(id: "7", url: "https://chatgpt.com/gpts")]), .opened)
+        XCTAssertEqual(w.observe([BrowserTab(id: "7", url: "https://chatgpt.com/c/x")]), .opened, "not a conversation id")
+    }
+
+    func testAskInChatGPTPutsTheQuestionInTheLinkWithoutCopying() {
+        let l = ChatGPTWeb.launch("What is gradient in machine learning?", prefill: true)
+        XCTAssertEqual(l.method, .prefillLink)
+        XCTAssertEqual(l.url.absoluteString, "https://chatgpt.com/?q=What%20is%20gradient%20in%20machine%20learning?")
+        XCTAssertEqual(WebHandoffState.promptLoaded.label, "Prompt loaded, submission unverified")
+        XCTAssertTrue(WebHandoffState.promptLoaded.awaitsSending)
+        XCTAssertTrue(WebHandoffState.submittedVerified.hasConversation)
+    }
+
+    func testTheWrapperIsntSentOnlyTheQuestion() {
+        guard case let .delegateToChatGPT(r) = ExecutionRouter.operation(for: "Can you ask in GPT what is gradient in machine learning?", now: Date()) else { return XCTFail() }
+        XCTAssertEqual(r.prompt, "What is gradient in machine learning?")
+    }
+}
+
