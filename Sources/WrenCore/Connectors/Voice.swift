@@ -12,6 +12,8 @@ public struct Transcript: Equatable, Sendable {
 
 public enum VoiceError: Error, Equatable, LocalizedError {
     case microphoneDenied, speechDenied, noMicrophone, onDeviceUnavailable(String), tooShort, nothingHeard, recordingFailed(String), transcriptionFailed(String)
+    /// The transcript was fine but the command didn't succeed (the message says why).
+    case commandFailed(String)
     public var errorDescription: String? {
         switch self {
         case .microphoneDenied: "Wren isn't allowed to use the microphone. Allow it in System Settings › Privacy & Security › Microphone."
@@ -22,6 +24,7 @@ public enum VoiceError: Error, Equatable, LocalizedError {
         case .nothingHeard: "Wren didn't catch any words. Try again a little closer to the microphone."
         case let .recordingFailed(m): "Recording failed: \(m)"
         case let .transcriptionFailed(m): "Transcription failed: \(m)"
+        case let .commandFailed(m): m
         }
     }
 }
@@ -35,9 +38,10 @@ public protocol VoicePermissions: AnyObject {
     func requestSpeech() async -> Bool
 }
 
-// MARK: - Voice commands: explicitly started, one at a time
+// MARK: - Voice commands: push-to-talk, one utterance at a time
 
-/// Decides when a spoken command has ended: a pause after speech, no speech at all, or a time cap.
+/// Decides when a command started with the Voice *button* has ended: a pause after speech, no
+/// speech at all, or a time cap. Push-to-talk ends on release instead (with only the time cap).
 public struct CommandEndpointer: Sendable, Equatable {
     public enum End: Equatable, Sendable { case pause, nothingSaid, timeLimit }
     public var pauseAfterSpeech: TimeInterval = 1.6
@@ -63,52 +67,118 @@ public struct CommandEndpointer: Sendable, Equatable {
     }
 }
 
+/// The recogniser's final text for one utterance. `confidence` is 0…1 when the engine reported it.
+public struct FinalTranscript: Equatable, Sendable {
+    public var text: String
+    public var confidence: Double?
+    public init(text: String, confidence: Double?) { self.text = text; self.confidence = confidence }
+}
+
+/// Whether a transcript is clear enough to run without asking. Wren never runs an empty or
+/// clearly misheard utterance; a low-confidence one is shown for the user to confirm or fix.
+public enum TranscriptAssessment: Equatable, Sendable {
+    case run
+    case confirm(String)
+    case empty
+
+    public static let lowConfidence = 0.35
+
+    public static func assess(_ t: FinalTranscript) -> TranscriptAssessment {
+        let text = t.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let words = text.split { !$0.isLetter && !$0.isNumber }
+        guard !words.isEmpty else { return .empty }
+        if let c = t.confidence, c < lowConfidence { return .confirm("I'm not sure I heard that right. Check it, then press Return.") }
+        // One short word ("um", "Wren") isn't a command.
+        if words.count == 1, words[0].count <= 4 { return .confirm("That was very short. Is this what you meant?") }
+        return .run
+    }
+}
+
 /// Live, on-device speech from the microphone (AVAudioEngine + Apple Speech in the app; a fake in
-/// tests). Each `start()` opens the microphone and begins a fresh transcript; `stop()` closes it.
+/// tests). `start()` opens the microphone; `finish` closes it *at once* and then waits for the
+/// recogniser's final text; `stop()` closes it and discards everything.
 @MainActor
 public protocol SpeechStreaming: AnyObject {
+    /// Interim text while recording, exactly as the recogniser reports it.
     var onTranscript: ((String) -> Void)? { get set }
-    /// The recogniser stopped on its own (time limit, silence or error). nil error: just ended.
+    /// The microphone stopped on its own while recording (device change, recogniser error).
     var onEnded: ((VoiceError?) -> Void)? { get set }
+    /// The microphone is open.
     var isRunning: Bool { get }
     func start() throws
+    func finish(_ completion: @escaping (Result<FinalTranscript, VoiceError>) -> Void)
     func stop()
 }
 
-/// Voice is a tool the user picks up, never an always-on listener. The microphone opens only when
-/// the user presses the voice shortcut or clicks a Voice button, records one command, and closes
-/// when the speaker pauses, presses Stop, cancels, or a time cap is reached. Nothing restarts it
-/// afterwards: not a finished command, an error, a screen unlock, a relaunch or a permission change.
+/// One voice command, from key-down to result. Voice never runs in the background: the microphone
+/// opens only on an explicit press (holding the push-to-talk shortcut, or the Voice button) and is
+/// closed before transcription, processing and every end state.
+///
+///     idle → requestingPermission? → listening → transcribing → transcriptReady → processing
+///          → completed | needsClarification | failed        (and cancelled from any step before processing)
 @MainActor
 public final class VoiceSession {
     /// How the user started this capture. Both are explicit, deliberate actions.
-    public enum Trigger: String, Equatable, Sendable { case shortcut, button }
-    public enum Phase: Equatable, Sendable {
-        /// Microphone closed.
-        case off
-        case capturing(Trigger)
-        /// The command was handed off; waiting for the app to finish with it. Microphone closed.
-        case handling
-        case failed(VoiceError)
-        public var isCapturingPhase: Bool { if case .capturing = self { true } else { false } }
+    public enum Trigger: String, Equatable, Sendable {
+        /// Holding the push-to-talk shortcut: releasing it ends the recording.
+        case hold
+        /// The Voice button: click Stop, or pause, to end it.
+        case button
     }
+    public enum CancelReason: Equatable, Sendable {
+        case byUser, nothingHeard, releasedBeforeRecording, screenLocked
+        public var message: String {
+            switch self {
+            case .byUser: "Cancelled. Nothing was done."
+            case .nothingHeard: "Didn't hear anything, so nothing was done."
+            case .releasedBeforeRecording: "Microphone access is set. Hold the shortcut again and speak."
+            case .screenLocked: "Recording stopped because the screen locked or the Mac went to sleep."
+            }
+        }
+    }
+    public enum Phase: Equatable, Sendable {
+        case idle
+        case requestingPermission
+        case listening(Trigger)
+        /// The microphone is closed; the recogniser is producing the final text.
+        case transcribing
+        case transcriptReady(String)
+        case processing(String)
+        case completed(String)
+        case needsClarification(String)
+        case failed(VoiceError)
+        case cancelled(CancelReason)
+
+        public var isCapturingPhase: Bool { if case .listening = self { true } else { false } }
+        /// A command is between key-down and its result: a new press is ignored.
+        public var isBusy: Bool {
+            switch self {
+            case .requestingPermission, .listening, .transcribing, .transcriptReady, .processing: true
+            default: false
+            }
+        }
+    }
+    /// How the app's command pipeline ended, reported back with `finishProcessing`.
+    public enum Outcome: Equatable, Sendable { case completed(String), needsClarification(String), failed(String) }
 
     let stream: SpeechStreaming
     let permissions: VoicePermissions
     let now: () -> Date
-    public private(set) var phase: Phase = .off { didSet { if phase != oldValue { onPhase?(phase) } } }
-    public private(set) var liveCommand = ""
+    public private(set) var phase: Phase = .idle { didSet { if phase != oldValue { onPhase?(phase) } } }
+    public private(set) var liveText = ""
+    /// Push-to-talk longest recording.
+    public var maxHold: TimeInterval = 60
     var endpointer: CommandEndpointer?
-    /// Bumped by every start, cancel and shutdown: a permission prompt answered after the user
-    /// cancelled (or quit) must not open the microphone.
-    var activation = 0
+    var startedAt: Date?
+    /// Bumped by every start, cancel and shutdown so a late permission answer or a late final
+    /// transcript from an abandoned utterance can't change anything.
+    var generation = 0
+    var releasedDuringPermission = false
 
     public var onPhase: ((Phase) -> Void)?
-    /// Live text of the command being spoken.
-    public var onLiveCommand: ((String) -> Void)?
-    /// The finished command, exactly once per capture. Call `finishedHandling()` afterwards.
-    public var onCommand: ((String, Trigger) -> Void)?
-    public var onEndedWithoutCommand: ((CommandEndpointer.End) -> Void)?
+    public var onLiveText: ((String) -> Void)?
+    /// Exactly once per utterance that produced words.
+    public var onTranscript: ((String, TranscriptAssessment) -> Void)?
 
     public init(stream: SpeechStreaming, permissions: VoicePermissions, now: @escaping () -> Date = { Date() }) {
         self.stream = stream; self.permissions = permissions; self.now = now
@@ -116,107 +186,140 @@ public final class VoiceSession {
         stream.onEnded = { [weak self] e in self?.streamEnded(e) }
     }
 
-    public var isCapturing: Bool { if case .capturing = phase { true } else { false } }
+    public var isCapturing: Bool { phase.isCapturingPhase }
+    public var isMicrophoneOpen: Bool { stream.isRunning }
 
-    /// Asks for Microphone and Speech Recognition if needed. A reason when refused.
-    func ensurePermissions() async -> VoiceError? {
-        if permissions.microphone == .notDetermined { _ = await permissions.requestMicrophone() }
-        guard permissions.microphone == .granted else { return .microphoneDenied }
-        if permissions.speech == .notDetermined { _ = await permissions.requestSpeech() }
-        guard permissions.speech == .granted else { return .speechDenied }
-        return nil
-    }
-
-    /// The voice shortcut or a Voice button. Starts capturing one command; pressed again while
-    /// capturing, it ends the command (like Stop). While a command is being handled, or while a
-    /// permission prompt is open, repeated presses do nothing: one recording at a time.
+    /// Key-down of the push-to-talk shortcut, or a click on Voice. A repeated key-down while
+    /// holding, or any press while a command is still being transcribed or run, does nothing.
+    /// A click on Voice while the button recording runs stops it.
     @discardableResult
-    public func activate(_ trigger: Trigger) async -> VoiceError? {
-        switch phase {
-        case .capturing: finish(.pause); return nil
-        case .handling: return nil
-        default: break
+    public func press(_ trigger: Trigger) async -> VoiceError? {
+        if case let .listening(t) = phase {
+            if t == .button && trigger == .button { release() }
+            return nil
         }
-        guard !requesting else { return nil }
-        activation += 1
-        let ticket = activation
-        requesting = true
-        let denied = await ensurePermissions()
-        requesting = false
-        // Cancelled, shut down or started again while macOS was asking: don't open the microphone.
-        guard ticket == activation else { return nil }
-        if let denied { phase = .failed(denied); return denied }
+        guard !phase.isBusy else { return nil }
+        generation += 1
+        let ticket = generation
+        releasedDuringPermission = false
+        if permissions.microphone == .notDetermined || permissions.speech == .notDetermined {
+            phase = .requestingPermission
+            if permissions.microphone == .notDetermined { _ = await permissions.requestMicrophone() }
+            if permissions.microphone == .granted, permissions.speech == .notDetermined { _ = await permissions.requestSpeech() }
+            guard ticket == generation else { return nil }   // cancelled or shut down meanwhile
+        }
+        if permissions.microphone != .granted { phase = .failed(.microphoneDenied); return .microphoneDenied }
+        if permissions.speech != .granted { phase = .failed(.speechDenied); return .speechDenied }
+        // Held, then released while macOS asked: don't start recording without the keys held.
+        if trigger == .hold, releasedDuringPermission { phase = .cancelled(.releasedBeforeRecording); return nil }
         do { try stream.start() } catch {
             let e = (error as? VoiceError) ?? .recordingFailed(error.localizedDescription)
             stream.stop()
             phase = .failed(e); return e
         }
-        liveCommand = ""
-        endpointer = CommandEndpointer(start: now())
-        phase = .capturing(trigger)
-        onLiveCommand?("")
+        liveText = ""
+        startedAt = now()
+        endpointer = trigger == .button ? CommandEndpointer(start: now()) : nil
+        phase = .listening(trigger)
+        onLiveText?("")
         return nil
     }
-    var requesting = false
+
+    /// Key-up of the shortcut (either key), or Stop: closes the microphone immediately, then
+    /// produces the final transcript locally.
+    public func release() {
+        switch phase {
+        case .requestingPermission: releasedDuringPermission = true
+        case .listening: transcribe()
+        default: break
+        }
+    }
+
+    func transcribe() {
+        endpointer = nil
+        let ticket = generation
+        phase = .transcribing
+        stream.finish { [weak self] result in
+            guard let self, ticket == self.generation, self.phase == .transcribing else { return }
+            switch result {
+            case let .failure(e): self.phase = .failed(e)
+            case let .success(t): self.transcribed(t)
+            }
+        }
+    }
+
+    func transcribed(_ t: FinalTranscript) {
+        let assessment = TranscriptAssessment.assess(t)
+        let text = t.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        liveText = ""
+        guard assessment != .empty else { phase = .cancelled(.nothingHeard); return }
+        phase = .transcriptReady(text)
+        onTranscript?(text, assessment)
+    }
 
     func heard(_ transcript: String) {
-        guard case .capturing = phase else { return }
-        let cmd = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-        liveCommand = cmd
-        endpointer?.transcript(cmd, at: now())
-        onLiveCommand?(cmd)
+        guard isCapturing else { return }
+        liveText = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        endpointer?.transcript(liveText, at: now())
+        onLiveText?(liveText)
     }
 
-    /// Call about ten times a second while capturing.
+    /// Call about ten times a second while listening: ends a button recording on a pause, and any
+    /// recording at its time cap.
     public func tick() {
-        guard case .capturing = phase, let end = endpointer?.check(now()) else { return }
-        finish(end)
-    }
-
-    func finish(_ end: CommandEndpointer.End) {
-        guard case let .capturing(trigger) = phase else { return }
-        stream.stop()   // nothing more is recorded once the command has ended
-        endpointer = nil
-        let text = liveCommand.trimmingCharacters(in: .whitespacesAndNewlines)
-        liveCommand = ""
-        if text.isEmpty {
-            phase = .off
-            onEndedWithoutCommand?(end == .timeLimit ? .timeLimit : .nothingSaid)
-            return
+        guard case let .listening(trigger) = phase else { return }
+        if trigger == .hold, let s = startedAt, now().timeIntervalSince(s) >= maxHold { release(); return }
+        if let end = endpointer?.check(now()) {
+            if end == .nothingSaid && liveText.isEmpty { cancel(.nothingHeard) } else { release() }
         }
-        phase = .handling
-        onCommand?(text, trigger)
     }
 
-    /// The app has shown the result. The microphone stays off.
-    public func finishedHandling() {
-        guard phase == .handling else { return }
-        phase = .off
-    }
-
-    /// Stop: ends the command being captured now, as if the speaker had paused.
-    public func stopCapturing() { finish(.pause) }
-
-    /// Escape or Cancel: drops the command being captured (or a pending permission prompt's start).
-    public func cancel() {
-        activation += 1
+    /// The app started running the transcript (automatically, or after the user confirmed it).
+    public func beginProcessing(_ text: String) {
         switch phase {
-        case .capturing, .handling, .failed:
-            stream.stop(); endpointer = nil; liveCommand = ""
-            phase = .off
-        case .off: break
+        case .transcriptReady, .idle, .completed, .needsClarification, .failed, .cancelled: phase = .processing(text)
+        default: break
         }
+    }
+
+    /// The command pipeline's real result.
+    public func finishProcessing(_ outcome: Outcome) {
+        guard case .processing = phase else { return }
+        switch outcome {
+        case let .completed(m): phase = .completed(m)
+        case let .needsClarification(q): phase = .needsClarification(q)
+        case let .failed(m): phase = .failed(.commandFailed(m))
+        }
+    }
+
+    /// Escape or Cancel: closes the microphone and drops the utterance. A command already being
+    /// run isn't interrupted (it may have side effects); its result still arrives.
+    public func cancel(_ reason: CancelReason = .byUser) {
+        switch phase {
+        case .requestingPermission, .listening, .transcribing, .transcriptReady:
+            generation += 1
+            stream.stop(); endpointer = nil; liveText = ""
+            phase = .cancelled(reason)
+        default: break
+        }
+    }
+
+    /// The panel closed: back to idle (only between commands).
+    public func reset() {
+        guard !phase.isBusy else { return }
+        phase = .idle
     }
 
     func streamEnded(_ error: VoiceError?) {
-        guard case .capturing = phase else { return }
-        if let error { stream.stop(); endpointer = nil; liveCommand = ""; phase = .failed(error) } else { finish(.pause) }
+        guard isCapturing else { return }
+        if let error { generation += 1; stream.stop(); endpointer = nil; phase = .failed(error) }
+        else { transcribe() }
     }
 
-    /// Screen locked, Mac asleep, window closed with the panel, quit: microphone off, nothing pending.
+    /// Quit: microphone off, nothing pending.
     public func shutdown() {
-        activation += 1
-        stream.stop(); endpointer = nil; liveCommand = ""
-        phase = .off
+        generation += 1
+        stream.stop(); endpointer = nil; liveText = ""
+        phase = .idle
     }
 }

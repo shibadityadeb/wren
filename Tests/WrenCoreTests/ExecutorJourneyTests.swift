@@ -55,3 +55,20 @@ extension ReminderSchedulerTests {
         XCTAssertEqual(ist.component(.weekday, from: try XCTUnwrap(i.deadline)), 6, "Friday")
     }
 }
+
+extension ReminderSchedulerTests {
+    func testAnsweringWhatToRemindAboutKeepsTheScheduleButANewDatedRequestIsntSwallowed() {
+        let now = at(ist, 2026, 10, 13, 14)
+        let merged = ReminderFollowUp.subjectAnswer("to stretch", pending: "Remind me every weekday at 3 PM.", now: now, calendar: ist)
+        XCTAssertEqual(merged.map { $0.trimmingCharacters(in: CharacterSet(charactersIn: ". ")) }, "remind me to stretch every weekday at 3 PM")
+        guard case let .create(title, .repeating(rule), _)? = ReminderCommand.parse(merged ?? "", now: now, calendar: ist) else {
+            return XCTFail("merged answer must be a repeating reminder")
+        }
+        XCTAssertEqual(title, "Stretch")
+        XCTAssertEqual(rule.weekdays.count, 5)
+        XCTAssertEqual(ReminderFollowUp.subjectAnswer("water the plants", pending: "remind me tomorrow at 9 AM", now: now, calendar: ist), "remind me to water the plants tomorrow at 9 AM")
+        // Seen live: a new sentence with its own date isn't the answer.
+        XCTAssertNil(ReminderFollowUp.subjectAnswer("I need to send the invoice by Monday.", pending: "Remind me every weekday at 3 PM.", now: now, calendar: ist))
+        XCTAssertNil(ReminderFollowUp.subjectAnswer("ask GPT what to stretch", pending: "Remind me every weekday at 3 PM.", now: now, calendar: ist))
+    }
+}

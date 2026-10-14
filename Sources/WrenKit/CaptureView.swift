@@ -28,7 +28,7 @@ struct CaptureView: View {
                 Text("Wren").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 Spacer()
                 Text(state.status).font(.caption).foregroundStyle(.tertiary)
-                if state.voiceEnabled {
+                if state.voiceEnabled, !(state.voicePhase.isBusy && !state.recording) {
                     if state.recording {
                         Button("Cancel", role: .cancel) { cancel() }.buttonStyle(.borderless).font(.caption)
                             .help("Stop recording without doing anything (Escape)")
@@ -36,7 +36,7 @@ struct CaptureView: View {
                         Button { toggleVoice() } label: { Label("Voice", systemImage: "mic.fill") }
                             .buttonStyle(.bordered).controlSize(.small).tint(WrenTheme.accent)
                             .disabled(state.busy)
-                            .help("Record one spoken command. The microphone turns off when you stop speaking. You can also press the voice shortcut.")
+                            .help(state.voiceShortcut.map { "Record one spoken command. Or hold \($0) anywhere, speak, and let go." } ?? "Record one spoken command. The microphone turns off when you stop speaking.")
                             .accessibilityLabel("Start a voice command")
                     }
                 }
@@ -53,6 +53,9 @@ struct CaptureView: View {
                 .focused($focused)
                 .onSubmit {
                     // Return does what the card on screen says, once. While a request is running it does nothing.
+                    // A spoken command already ran or is running: Return doesn't run the same words again.
+                    if state.voicePhase.isBusy && !state.reviewingVoice { return }
+                    if state.showsVoiceResult, state.text == state.lastVoiceText, state.ask?.primary == nil, !isProposal { cancel(); return }
                     if let card = state.ask {
                         if let a = card.primary { askAction(a) }
                     } else if case let .proposal(p)? = state.reply { confirm(p) } else { submit(state.text) }
@@ -64,42 +67,23 @@ struct CaptureView: View {
                     // Editing the text after a card was shown starts a new request.
                     if let card = state.ask, !card.phase.isSending, state.text != card.request.original { state.ask = nil }
                 }
-            if state.recording {
-                HStack(spacing: 12) {
-                    ListeningOrb(level: state.voiceLevel)
-                        .frame(width: 44, height: 44)
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 5) {
-                            Circle().fill(.red).frame(width: 7, height: 7)
-                            Text("Recording…").font(.headline)
-                        }
-                        Text(state.voiceStatus ?? "Say what you need, then pause.").font(.caption).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Button("Stop") { toggleVoice() }.controlSize(.small).help("Stop recording and use what Wren heard")
-                }
-                .transition(.opacity)
-            } else if state.reviewingVoice {
-                HStack(spacing: 8) {
-                    Image(systemName: "waveform.badge.checkmark").foregroundStyle(WrenTheme.accent)
-                    Text("Transcribed on this Mac. Fix any wrong words, then press Return. Esc cancels.").font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Record again") { retryVoice() }.controlSize(.small).help("Discard this transcript and say the command again")
-                }
-            } else if let v = state.voiceStatus {
-                Text(v).font(.caption).foregroundStyle(.secondary)
-            }
+            voiceStatus
             if let card = state.ask { AskCardView(card: card, aiAvailable: state.aiAvailable, act: askAction) }
             else if let reply = state.reply { replyView(reply) }
             HStack(spacing: 14) {
                 if state.recording {
+                    if case .listening(.hold) = state.voicePhase, let k = state.voiceShortcut { hint(k, "Release to finish") }
                     hint("esc", "Cancel")
+                } else if state.voicePhase.isBusy && !state.reviewingVoice {
+                    hint("esc", "Cancel")
+                } else if state.showsVoiceResult, state.text == state.lastVoiceText, state.ask?.primary == nil, !isProposal {
+                    hint("return", "Done")
                 } else if let card = state.ask {
                     if let p = card.primary { hint("return", p.title(card)) }
                 } else if case .proposal? = state.reply { hint("return", "Confirm") }
                 else if state.reviewingVoice { hint("return", "Run") }
                 else { hint("return", "Save") }
-                if !state.recording { hint("esc", "Close") }
+                if !state.recording && !(state.voicePhase.isBusy && !state.reviewingVoice) { hint("esc", "Close") }
                 Spacer()
                 if state.busy { ProgressView().controlSize(.small) }
             }
@@ -112,6 +96,114 @@ struct CaptureView: View {
         .onAppear { focused = true }
         .onChange(of: state.presentations) { focused = true }
         .onExitCommand(perform: cancel)
+    }
+
+    /// One line per real step of a voice command: never shown before that step actually happens.
+    @ViewBuilder private var voiceStatus: some View {
+        switch state.voicePhase {
+        case .requestingPermission:
+            voiceRow(icon: "mic.badge.plus", title: "Allow microphone access", detail: "macOS is asking. Wren records only while you hold the shortcut or after you click Voice.")
+        case let .listening(trigger):
+            HStack(spacing: 12) {
+                ListeningOrb(level: state.voiceLevel).frame(width: 44, height: 44)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 5) {
+                        Circle().fill(.red).frame(width: 7, height: 7).accessibilityHidden(true)
+                        Text("I'm listening…").font(.headline)
+                    }
+                    Text(trigger == .hold ? "Release \(state.voiceShortcut ?? "the shortcut") to finish. Esc cancels."
+                                          : "Speak, then pause or click Stop. Esc cancels.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if trigger == .button { Button("Stop") { toggleVoice() }.controlSize(.small).help("Stop recording and use what Wren heard") }
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Recording. Microphone on.")
+        case .transcribing:
+            voiceRow(progress: true, title: "Transcribing your voice…", detail: "Microphone off. Recognising on this Mac.")
+        case .transcriptReady:
+            if state.reviewingVoice {
+                HStack(spacing: 8) {
+                    Image(systemName: "waveform.badge.checkmark").foregroundStyle(WrenTheme.accent)
+                    Text(state.voiceStatus ?? "Fix any wrong words, then press Return.").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Record again") { retryVoice() }.controlSize(.small).help("Discard this transcript and say the command again")
+                }
+            } else {
+                voiceRow(icon: "waveform.badge.checkmark", title: "Heard you", detail: "Running it now. Esc cancels.")
+            }
+        case .processing:
+            voiceRow(progress: true, title: "Working on it…", detail: "Microphone off.")
+        case let .completed(title):
+            // An answer card already carries the headline; otherwise say what happened.
+            if case .answer? = state.reply {} else {
+                voiceRow(icon: "checkmark.circle.fill", title: completedTitle(title), detail: nil, tint: WrenTheme.accent)
+            }
+        case let .needsClarification(q):
+            voiceRow(icon: "questionmark.circle.fill", title: "One quick question", detail: q + (state.voiceShortcut.map { " Answer by typing, or hold \($0)." } ?? ""), tint: .blue)
+        case let .failed(e):
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(failureTitle(e)).font(.callout.weight(.semibold))
+                    Text(e.localizedDescription).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                if e == .microphoneDenied || e == .speechDenied {
+                    Button("Open Privacy Settings") { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_\(e == .microphoneDenied ? "Microphone" : "SpeechRecognition")")!) }.controlSize(.small)
+                } else if case .commandFailed = e {} else {
+                    Button("Try again") { retryVoice() }.controlSize(.small)
+                }
+            }
+        case .cancelled, .idle:
+            if state.reviewingVoice {
+                HStack(spacing: 8) {
+                    Image(systemName: "keyboard").foregroundStyle(.secondary)
+                    Text(state.voiceStatus ?? "Edit the text, then press Return.").font(.caption).foregroundStyle(.secondary)
+                }
+            } else if let v = state.voiceStatus {
+                Text(v).font(.caption).foregroundStyle(.secondary)
+            } else if let k = state.voiceShortcut, state.text.isEmpty, state.reply == nil, state.ask == nil {
+                Text("Type, or hold \(k) and speak.").font(.caption).foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    var isProposal: Bool { if case .proposal? = state.reply { true } else { false } }
+
+    /// While a GPT request runs the headline follows its real state, not the moment it was sent.
+    func completedTitle(_ base: String) -> String {
+        guard let card = state.ask else { return base }
+        switch card.phase {
+        case .answered: return "GPT finished"
+        case .partial: return "GPT stopped early"
+        case .sending: return "GPT request submitted"
+        default: return base
+        }
+    }
+
+    func failureTitle(_ e: VoiceError) -> String {
+        switch e {
+        case .microphoneDenied: "Microphone access is off"
+        case .speechDenied: "Speech Recognition is off"
+        case .onDeviceUnavailable: "The on-device speech model isn't installed"
+        case .noMicrophone: "No microphone"
+        case .commandFailed: "That didn't work"
+        default: "Voice didn't work"
+        }
+    }
+
+    func voiceRow(icon: String? = nil, progress: Bool = false, title: String, detail: String?, tint: Color = .secondary) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            if progress { ProgressView().controlSize(.small) } else if let icon { Image(systemName: icon).foregroundStyle(tint) }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.callout.weight(.semibold))
+                if let detail { Text(detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+            }
+            Spacer()
+        }
+        .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder private func replyView(_ r: ContextResolution) -> some View {
@@ -175,7 +267,18 @@ final class CaptureState {
     var reply: ContextResolution?
     var aiAvailable = true
     var voiceEnabled = true
+    /// The push-to-talk shortcut as shown everywhere ("⌥ Space"), nil when it's turned off.
+    var voiceShortcut: String? = "⌥ Space"
+    /// The voice session's real state (drives the voice status line).
+    var voicePhase: VoiceSession.Phase = .idle
     var recording = false
+    /// A spoken command's result is on screen.
+    var showsVoiceResult: Bool {
+        switch voicePhase {
+        case .completed, .failed(.commandFailed): true
+        default: false
+        }
+    }
     var voiceStatus: String?
     /// Input loudness 0…1 while recording (drives the animation).
     var voiceLevel: Float = 0

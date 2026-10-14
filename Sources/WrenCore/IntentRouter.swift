@@ -76,6 +76,21 @@ public enum ReminderFollowUp {
         let t = ReminderCommand.stripAddress(text)
         return IntentRouter.aiRequest(t) == nil && IntentRouter.explicitCapture(t) == nil
     }
+
+    /// Wren asked "What should I remind you about?" for `pending` (which has the time, e.g.
+    /// "Remind me every weekday at 3 PM"). The answer becomes the subject and the schedule is kept:
+    /// "to stretch" → "remind me to stretch every weekday at 3 PM". An answer that brings its own
+    /// date or schedule ("I need to send the invoice by Monday") is a new request, not this answer: nil.
+    public static func subjectAnswer(_ answer: String, pending: String, now: Date, calendar: Calendar) -> String? {
+        let a = ReminderCommand.stripAddress(answer).trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ".!")))
+        guard !a.isEmpty, mayAnswer(a) else { return nil }
+        guard DateParser(calendar: calendar).parse(a, now: now) == nil, RecurrenceRule.find(in: a, calendar: calendar) == nil else { return nil }
+        let subject = a.replacingOccurrences(of: #"^(?:remind me\s+)?(?:to|about|that)\s+"#, with: "", options: [.regularExpression, .caseInsensitive])
+        let lower = pending.lowercased()
+        guard let trigger = ReminderCommand.triggers.first(where: { lower.hasPrefix($0) }) else { return nil }
+        let schedule = String(pending.dropFirst(trigger.count)).trimmingCharacters(in: .whitespaces)
+        return "remind me to \(subject) \(schedule)"
+    }
 }
 
 /// Deterministic routing. The local model is only consulted afterwards, for `.capture` inputs that

@@ -154,21 +154,32 @@ public enum SnapshotRenderer {
         try render(CaptureView(state: sending, submit: { _ in }, cancel: {}).padding(20).background(Color(white: 0.85)),
                    size: CGSize(width: 600, height: 240), appearance: .aqua, to: dir.appendingPathComponent("capture-gpt-sending-light.png"))
 
-        // Voice: listening, then the editable transcript.
-        let listening = CaptureState()
-        listening.voiceEnabled = true; listening.recording = true; listening.voiceLevel = 0.55
-        listening.text = "search in GPT explain quantum physics and give me"
-        listening.lastVoiceText = listening.text
-        listening.voiceStatus = "Say what you need, then pause, or press the shortcut again to stop."
-        try render(CaptureView(state: listening, submit: { _ in }, cancel: {}).padding(20).background(Color(white: 0.85)),
-                   size: CGSize(width: 600, height: 200), appearance: .aqua, to: dir.appendingPathComponent("capture-voice-listening-light.png"))
-        try render(CaptureView(state: listening, submit: { _ in }, cancel: {}).padding(20).background(Color(white: 0.15)),
+        // Voice: each push-to-talk state, with sample text.
+        func voiceState(_ phase: VoiceSession.Phase, _ text: String, _ name: String, height: CGFloat = 200, setup: (CaptureState) -> Void = { _ in }) throws {
+            let st = CaptureState()
+            st.voicePhase = phase; st.recording = phase.isCapturingPhase; st.voiceLevel = 0.55
+            st.text = text; st.lastVoiceText = text
+            setup(st)
+            try render(CaptureView(state: st, submit: { _ in }, cancel: {}).padding(20).background(Color(white: 0.85)),
+                       size: CGSize(width: 600, height: height), appearance: .aqua, to: dir.appendingPathComponent("capture-voice-\(name)-light.png"))
+        }
+        let said = "Remind me to call Sam tomorrow at 10 AM."
+        try voiceState(.listening(.hold), "remind me to call Sam tomorrow at", "listening")
+        try render(CaptureView(state: { let st = CaptureState(); st.voicePhase = .listening(.hold); st.recording = true; st.voiceLevel = 0.4; st.text = "ask GPT to research"; st.lastVoiceText = st.text; return st }(),
+                               submit: { _ in }, cancel: {}).padding(20).background(Color(white: 0.15)),
                    size: CGSize(width: 600, height: 200), appearance: .darkAqua, to: dir.appendingPathComponent("capture-voice-listening-dark.png"))
-        let review = CaptureState()
-        review.voiceEnabled = true; review.reviewingVoice = true
-        review.text = "search in GPT: explain quantum physics and give me a few useful beginner resources"
-        try render(CaptureView(state: review, submit: { _ in }, cancel: {}).padding(20).background(Color(white: 0.85)),
-                   size: CGSize(width: 600, height: 210), appearance: .aqua, to: dir.appendingPathComponent("capture-voice-review-light.png"))
+        try voiceState(.transcribing, said, "transcribing")
+        try voiceState(.processing(said), said, "processing")
+        try voiceState(.completed("Reminder created: Call Sam"), said, "completed", height: 280) {
+            $0.reply = .answer(Answer(title: "Reminder created: Call Sam", lines: [AnswerLine("Tomorrow at 10:00 AM", recordID: nil), AnswerLine("Scheduled with macOS: it will appear even if Wren is closed.", recordID: nil)], basis: "From your words: “\(said)”"))
+        }
+        try voiceState(.needsClarification("What should I remind you about?"), "Remind me every weekday at 3 PM.", "question", height: 230) {
+            $0.reply = .needsDate("What should I remind you about?")
+        }
+        try voiceState(.transcriptReady("remind me to coal some tomorrow"), "remind me to coal some tomorrow", "review", height: 210) {
+            $0.reviewingVoice = true; $0.voiceStatus = "I'm not sure I heard that right. Check it, then press Return."
+        }
+        try voiceState(.failed(.microphoneDenied), "", "denied", height: 210)
 
         // Empty state.
         let empty = AppModel(store: try WrenStore(url: nil))

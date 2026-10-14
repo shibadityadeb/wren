@@ -43,6 +43,8 @@ final class AppModel {
     var reminderSync = ReconcileReport()
     /// After Wren asked "When should I remind you…?", the start of the request the answer completes.
     var reminderFollowUp: String?
+    /// The pending question is "What should I remind you about?" (the time is already known).
+    var reminderFollowUpNeedsSubject = false
     /// What the last command did (operation, success, entity, error). Never holds the user's words.
     var lastExecution: ExecutionResult?
     @ObservationIgnored var submissions = SubmissionGuard()
@@ -99,7 +101,7 @@ final class AppModel {
     /// Starts (or stops) one voice command, exactly like the voice shortcut (set by the app delegate).
     @ObservationIgnored var startVoice: () -> Void = {}
     /// The voice service's phase, for Settings and the menu.
-    var voicePhase: VoiceSession.Phase = .off
+    var voicePhase: VoiceSession.Phase = .idle
     var voiceHotKeyError: String?
     /// Why the last "Connect Google" didn't finish (cancelled, denied, timed out…).
     var googleError: String?

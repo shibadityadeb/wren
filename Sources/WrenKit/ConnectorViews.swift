@@ -342,7 +342,7 @@ struct ConnectorDetailView: View {
     @ViewBuilder func voiceSetup(_ state: ConnectorState) -> some View {
         let speech = LocalSpeechModel.status()
         VStack(alignment: .leading, spacing: 10) {
-            Text("Voice starts only when you ask: press the voice shortcut or click a Voice button. Wren records one command, turns the microphone off when you stop speaking, and never listens in the background.")
+            Text("Push-to-talk: hold \(model.settings.voiceHotKey.display) anywhere, say what you need, and let go. Wren turns the microphone off the moment you release, transcribes on this Mac, shows what it heard and runs it. It never listens in the background.")
                 .font(.callout).fixedSize(horizontal: false, vertical: true)
             HStack {
                 Button { model.startVoice() } label: { Label(model.voicePhase.isCapturingPhase ? "Stop recording" : "Start a voice command", systemImage: "mic.fill") }
@@ -353,7 +353,7 @@ struct ConnectorDetailView: View {
                 }
             }
             Divider()
-            Toggle("Voice shortcut", isOn: Binding(get: { model.settings.voiceEnabled }, set: { model.setVoiceEnabled($0) }))
+            Toggle("Push-to-talk shortcut (hold to speak)", isOn: Binding(get: { model.settings.voiceEnabled }, set: { model.setVoiceEnabled($0) }))
             HStack {
                 Text(recordingVoiceKey ? "Press the new shortcut…" : model.settings.voiceHotKey.display)
                     .font(.body.monospaced()).padding(.horizontal, 8).padding(.vertical, 3)
@@ -363,10 +363,10 @@ struct ConnectorDetailView: View {
                 Button("Reset") { model.setVoiceHotKey(.optionShiftSpace) }.disabled(!model.settings.voiceEnabled)
             }
             if let e = model.voiceHotKeyError { Text(e).font(.caption).foregroundStyle(.orange) }
-            Text("Press the shortcut, speak, and pause; or press it again to stop. Escape cancels. Pressing it while a command is being handled does nothing, so one press never records twice. The Voice button in the capture panel, the menu-bar popover and the menu-bar item's menu works even with the shortcut off.")
+            Text("Hold it while you speak; letting go of either key ends the recording. Escape cancels. Pressing it again while a command is being transcribed or run does nothing, so one utterance never runs twice. Works with Wren's window closed. Typed capture uses \(model.hotKeyDisplay). The Voice button in the capture panel, the menu-bar popover and the menu-bar item's menu records too (click, speak, pause), even with the shortcut off.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Toggle("Let me check and edit what I said before Wren acts", isOn: Binding(get: { model.settings.voiceReviewFirst }, set: { model.settings.voiceReviewFirst = $0; model.connectorsChanged() }))
-            Text("On: after you pause, the words appear in the panel; fix them or choose Record again, then press Return. Off: Wren acts as soon as you stop speaking.")
+            Toggle("Check what I said before Wren acts", isOn: Binding(get: { model.settings.voiceReviewFirst }, set: { model.settings.voiceReviewFirst = $0; model.connectorsChanged() }))
+            Text("Off (default): a clearly heard command runs right after it's transcribed. On: the words wait in the panel until you press Return. Either way, Wren asks first when it isn't sure it heard you, and never runs an empty recording.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Divider()
             Text("Local transcription model").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
@@ -391,7 +391,7 @@ struct ConnectorDetailView: View {
 
     var voiceDotColor: Color {
         switch model.voicePhase {
-        case .capturing: .red
+        case .listening: .red
         case .failed: .orange
         default: .secondary
         }
@@ -399,9 +399,11 @@ struct ConnectorDetailView: View {
 
     var voiceStatusText: String {
         switch model.voicePhase {
-        case .off: "Microphone off"
-        case .capturing: "Recording a command"
-        case .handling: "Working on your command (microphone off)"
+        case .idle, .cancelled, .completed, .needsClarification: "Microphone off"
+        case .requestingPermission: "Waiting for macOS permission (microphone off)"
+        case .listening: "Recording a command (microphone on)"
+        case .transcribing: "Transcribing on this Mac (microphone off)"
+        case .transcriptReady, .processing: "Working on your command (microphone off)"
         case let .failed(e): e.localizedDescription
         }
     }
