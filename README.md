@@ -52,7 +52,7 @@ Wren is a **preview** (0.12). Every feature below is built and covered by automa
 
 ## Install
 
-1. Download `Wren-macOS-universal-unsigned.dmg` from [Releases](https://github.com/shibadityadeb/wren/releases).
+1. Download `Wren-macOS-universal-unsigned.dmg` from the website's download page (sign in with Google), or from [Releases](https://github.com/shibadityadeb/wren/releases).
 2. Optional: check the file with `shasum -a 256 -c Wren-macOS-universal-unsigned.dmg.sha256`.
 3. Open the DMG, drag **Wren** into **Applications**, and open it.
 4. The preview isn't notarized yet, so macOS blocks it the first time. Go to **System Settings › Privacy & Security** and click **Open Anyway**.

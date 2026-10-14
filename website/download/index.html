@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Download Wren — Wren</title>
+  <meta name="description" content="Download the Wren preview for macOS: sign in with Google, then get the universal DMG for Apple Silicon and Intel Macs.">
+  <meta name="theme-color" content="#f7f3ea">
+  <link rel="canonical" href="{{SITE_URL}}/download/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Wren">
+  <meta property="og:title" content="Download Wren">
+  <meta property="og:description" content="The Wren preview for macOS. Free.">
+  <meta property="og:url" content="{{SITE_URL}}/download/">
+  <meta property="og:image" content="{{SITE_URL}}/assets/og-image.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/brand/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/brand/favicon-16.png">
+  <link rel="apple-touch-icon" href="/assets/brand/apple-touch-icon.png">
+  <link rel="preload" href="/assets/fonts/fraunces-variable.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/assets/css/site.css">
+  <script>document.documentElement.classList.add("js");setTimeout(function(){if(!window.wrenReady)document.documentElement.classList.remove("js")},3000)</script>
+  <script src="/assets/js/site.js" defer></script>
+  <script src="/assets/js/download.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="header">
+  <div class="wrap header__bar">
+    <a class="brand" href="/" aria-label="Wren home"><img src="/assets/brand/wren-icon-128@2x.png" alt="" width="40" height="40"><span>Wren</span></a>
+    <button class="menu-btn" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="Open menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 8h16M4 16h16"/></svg>
+    </button>
+    <nav class="nav" id="site-nav" aria-label="Main">
+      <ul class="nav__links">
+        <li><a href="/#what-it-does">What it does</a></li>
+        <li><a href="/#connectors">Connectors</a></li>
+        <li><a href="/#why-wren">Why Wren</a></li>
+        <li><a href="/#privacy">Privacy</a></li>
+        <li><a href="/#about">About</a></li>
+        <li><a href="/download/">Download</a></li>
+        <li><a href="https://github.com/shibadityadeb/wren" rel="noopener" target="_blank">GitHub <span aria-hidden="true">↗</span><span class="sr-only">(opens in a new tab)</span></a></li>
+      </ul>
+      <a class="btn btn--dark" href="https://github.com/shibadityadeb/wren" rel="noopener" target="_blank">Follow the journey <span class="arrow arrow--out" aria-hidden="true">↗</span><span class="sr-only">(opens GitHub in a new tab)</span></a>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="doc download">
+  <p class="eyebrow">Download</p>
+  <h1>Get the Wren preview</h1>
+  <p class="lede">Wren is free during the preview. Sign in with Google to download it, so the developer knows who is trying it and can reach early users about important fixes.</p>
+
+  <section id="get" class="download__box" aria-live="polite">
+    <div data-state="start">
+      <p><a class="btn btn--dark" id="signin" href="/api/signin/">Sign in with Google to download</a></p>
+      <p class="small">You'll go to Google's own sign-in page and come straight back here. Wren's download list keeps your name, email address and the version you downloaded, and nothing else. See the <a href="/privacy/#website">Privacy Policy</a>.</p>
+    </div>
+    <div data-state="checking" hidden>
+      <p><strong>Checking your sign-in…</strong></p>
+    </div>
+    <div data-state="ready" hidden>
+      <p class="small">Signed in as <strong id="who"></strong>.</p>
+      <p><a class="btn btn--dark" id="dmg" href="/download/#get" rel="noopener">Download Wren <span id="version"></span> for macOS</a></p>
+      <p class="small">Universal DMG for Apple Silicon and Intel. <a id="sha" href="/download/#get" rel="noopener">SHA-256 checksum</a> · <a id="notes" href="/download/#get" rel="noopener">Release notes</a></p>
+    </div>
+    <div data-state="error" hidden>
+      <p><strong id="error">Something went wrong.</strong></p>
+      <p><a class="btn btn--ghost" href="/api/signin/">Sign in with Google again</a></p>
+    </div>
+    <noscript><p><strong>Downloading needs JavaScript</strong>, to finish the Google sign-in on this page.</p></noscript>
+  </section>
+
+  <h2 id="requirements">Requirements</h2>
+  <ul>
+    <li>macOS 14 Sonoma or later, on Apple Silicon or Intel.</li>
+    <li>ChatGPT features need a ChatGPT Plus or Pro plan. Local AI is optional and uses <a href="https://ollama.com/download" rel="noopener">Ollama</a>.</li>
+  </ul>
+
+  <h2 id="install">Install</h2>
+  <ol>
+    <li>Open the DMG and drag <strong>Wren</strong> into <strong>Applications</strong>.</li>
+    <li>Open Wren. This preview isn't notarized by Apple yet, so macOS blocks it the first time.</li>
+    <li>Go to <strong>System Settings › Privacy &amp; Security</strong>, find the message about Wren and click <strong>Open Anyway</strong>.</li>
+    <li>Optional: check the download with <code>shasum -a 256 -c Wren-macOS-universal-unsigned.dmg.sha256</code> in the folder that holds both files.</li>
+  </ol>
+  <p class="small">Wren is a preview built by one developer. Your data stays on your Mac; the <a href="/privacy/">Privacy Policy</a> explains exactly what leaves it and when.</p>
+</main>
+
+<footer class="footer">
+  <div class="wrap">
+    <div class="footer__bottom" style="margin-top:0;border-top:0;padding-top:0">
+      <a class="brand" href="/" aria-label="Wren home"><img src="/assets/brand/wren-icon-128@2x.png" alt="" width="32" height="32"><span>Wren</span></a>
+      <span><a href="/">Home</a> · <a href="/download/">Download</a> · <a href="/privacy/">Privacy Policy</a> · <a href="https://github.com/shibadityadeb/wren" rel="noopener" target="_blank">GitHub ↗</a></span>
+      <span>© 2026 Shibaditya Deb</span>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

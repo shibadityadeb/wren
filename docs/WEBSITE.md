@@ -97,3 +97,34 @@ When a manual test passes live, update the label here, on the site, and in `docs
   - no console errors, and only same-origin requests.
 - Reduced motion: when `prefers-reduced-motion` is set, every demo is shown in its final state, as written in the HTML, and the script doesn't animate. Reveal and hero animations are disabled in CSS. The browser pane can't emulate the setting, so this was checked in the code rather than in a browser. If JavaScript fails to load, content is shown after 3 s.
 - Not done: Safari and Firefox passes, a screen-reader pass, and a Lighthouse audit.
+
+## Downloads (Google sign-in, Supabase)
+
+`/download/` hands out the DMG after the visitor signs in with Google. Two small Vercel functions do the
+work, so no key is ever in the page or the repository:
+
+- `api/signin.js` (`/api/signin/`) sends the visitor to Google sign-in through Supabase Auth, and back to `/download/`.
+- `api/download.js` (`/api/download/`, POST) checks the sign-in with Supabase, then records the download
+  (name, email, version, date) **as that person**: Row Level Security lets them add their own row and
+  nothing else. Only then does it return the link to the GitHub release asset.
+- `api/_lib.js` holds the release handed out (`DEFAULT_TAG`). Update it with each release, or set `WREN_RELEASE_TAG` in Vercel.
+- `website/tools/check-api.mjs` tests both functions with Supabase faked. It runs as part of `node website/build.mjs`.
+
+The DMG itself is a public GitHub release asset: the page records who downloads through the website, but
+it can't stop someone who goes to GitHub directly. A hard gate would serve the DMG from a private
+Supabase Storage bucket with short-lived signed links.
+
+### One-time setup
+
+1. **Supabase project** (free tier). In **SQL Editor**, run [`website/supabase/download_requests.sql`](../website/supabase/download_requests.sql).
+2. **Google sign-in.** Use a separate Google Cloud project, not the one for the app's Gmail access, because that one is in testing mode with restricted scopes:
+   - Configure the **OAuth consent screen** as **External** with only `openid`, `email` and `profile`, then **Publish app**. These basic scopes need no Google review.
+   - Under **Credentials › Create OAuth client ID › Web application**, add the authorized redirect URI `https://<project-ref>.supabase.co/auth/v1/callback`.
+3. In **Supabase › Authentication › Sign In / Providers › Google**: turn it on and paste that client ID and secret.
+4. In **Supabase › Authentication › URL Configuration**:
+   - **Site URL:** `https://<your-site>/download/`.
+   - **Redirect URLs:** add `https://<your-site>/download/`, plus `https://*-<your-vercel-team>.vercel.app/download/` if preview deployments should work too.
+5. In **Vercel › Project › Settings › Environment Variables**, for Production (and Preview if wanted), add `SUPABASE_URL` (`https://<project-ref>.supabase.co`) and `SUPABASE_ANON_KEY` (the anon/public key). Never add the `service_role` key. Then redeploy.
+6. The download list is in **Supabase › Table Editor › download_requests**. Only the project owner can read it.
+
+Until steps 1–5 are done, the page says "Downloads aren't set up on this site yet" and hands out nothing.
