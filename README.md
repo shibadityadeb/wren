@@ -11,15 +11,15 @@ Wren is free and runs on your Mac:
 - It connects to your own ChatGPT and Google accounts by signing in on their pages.
 
 ```
-⌥ Space   "remind me to call Sam tomorrow at 10 AM"        → a reminder macOS delivers, even after you quit
-⌥⇧ Space  🎙 "ask GPT to research quantum physics carefully" → GPT runs on your plan; you're told when it's done
-          "do I have an important email from the recruiter?" → an answer from your inbox, with reasons
+hold ⌥ Space 🎙 "remind me to call Sam tomorrow at 10 AM"           → a reminder macOS delivers, even after you quit
+hold ⌥ Space 🎙 "ask GPT to research quantum physics carefully"    → GPT runs on your plan; you're told when it's done
+⌥⇧ Space  ⌨  "do I have an important email from the recruiter?"   → an answer from your inbox, with reasons
 ```
 
 ## What it does
 
 - **Captures and reminds.** Natural-language tasks and reminders ("by Friday", "every weekday at 3 PM") are saved locally and scheduled with macOS. Repeating reminders follow daylight saving. Changing or completing one updates its notification, and a restart never duplicates it.
-- **Voice when you ask for it.** Press ⌥⇧ Space or click **Voice**. Wren records one command, transcribes it on this Mac and lets you fix the words before it acts. It never listens in the background.
+- **Push-to-talk.** Hold ⌥ Space, speak, let go. Wren shows "I'm listening…", turns the microphone off the moment you release, transcribes on this Mac, shows what it heard and runs it, with no Return press needed. It asks first when it isn't sure it heard you, and it never listens in the background.
 - **Delegates to ChatGPT.** "Ask GPT to …" runs on your ChatGPT plan through Sign in with ChatGPT, not an API key.
   - Wren tracks the request and notifies you when it finishes. Clicking the notification opens the saved answer.
   - "Think deeply" asks for high reasoning effort. "Research" lets ChatGPT search the web.
@@ -58,10 +58,10 @@ Upgrading keeps your data in `~/Library/Application Support/Wren` and backs it u
 
 ## First five minutes
 
-1. Press **⌥ Space**, type `remind me to stretch in 2 minutes`, then press Return. Allow notifications when macOS asks.
+1. Press **⌥⇧ Space**, type `remind me to stretch in 2 minutes`, then press Return. Allow notifications when macOS asks.
 2. **Connectors › ChatGPT › Continue with ChatGPT**: sign in and approve plan usage.
 3. **Connectors › Gmail › Connect Google**: approve read-only Gmail.
-4. Click **Voice** in the capture panel and say "ask GPT to explain black holes in two sentences". You'll get a notification when it's done.
+4. **Hold ⌥ Space**, say "ask GPT to explain black holes in two sentences", and let go. Allow the microphone and speech recognition the first time. You'll get a notification when GPT is done.
 5. **Settings › Voice, GPT and Gmail** shows how each tool is set up, along with alert frequency, quiet hours, digest time and sounds.
 
 ## Try it for real

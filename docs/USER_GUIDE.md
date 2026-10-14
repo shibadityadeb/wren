@@ -13,7 +13,7 @@ Everything Wren does, in detail. For a quick start see the [README](../README.md
 
 | Do this | How |
 |---|---|
-| Capture | Press **⌥ Space** anywhere, type, press **Return**. **Esc** cancels. Clicking away keeps your draft. |
+| Capture | Press **⌥⇧ Space** anywhere, type, press **Return**. **Esc** cancels. Clicking away keeps your draft. |
 | Capture without the shortcut | Click the bird in the menu bar and type in "Add something…", or click the pencil button. You can also run `open wren://capture`. |
 | See your items | Click the bird in the menu bar. |
 | Complete | Click the circle, or choose **Done** in the notification. |
@@ -36,7 +36,7 @@ Everything Wren does, in detail. For a quick start see the [README](../README.md
 | Set a reminder | Type or say "remind me to call Sam tomorrow at 10 AM", "remind me to submit the report Friday evening" or "remind me to take a break every weekday at 3 PM". Or use **New reminder** in the window. |
 | Change or snooze a reminder | "Move my API reminder to Sunday at noon" or "snooze the current reminder for 30 minutes". Wren shows the change; Return confirms. |
 | Ask ChatGPT | Type "ask ChatGPT to explain quantum physics" or "can you check on GPT what is quantum physics". The panel shows the question and the real answer from your ChatGPT plan, or Connect ChatGPT if you aren't signed in. A question that names no assistant lets you choose local AI, ChatGPT or saving it. Start with "Note:" to just save text. |
-| Talk to Wren | Press **⌥⇧ Space** or click **Voice**, then say what you need. Wren never listens in the background. |
+| Talk to Wren | **Hold ⌥ Space**, say what you need, let go. Wren transcribes it on this Mac and runs it. It never listens in the background. |
 | Quit | ⌘Q, Wren › Quit Wren, right-click the bird › Quit Wren, or **Quit** at the bottom of the menu. |
 
 ### Reminders
@@ -137,19 +137,34 @@ Wren uses your plan only for requests you start and confirm; background tasks ne
 
 **Fallback: copy and open.** Under Connectors › ChatGPT you can also allow copying a prompt and opening ChatGPT in your browser or the ChatGPT app. You paste and send it yourself, then paste the answer back into Delegate. This works without signing in.
 
-### Voice: the voice shortcut and the Voice button
+### Voice: push-to-talk
 
 Voice is a tool you pick up. Wren never listens in the background and has no setting to make it do so.
 
-- **The voice shortcut** (default **⌥⇧ Space**, changeable in Connectors › Voice; Wren tells you if it clashes with another shortcut). Press it, speak, and pause, or press it again when you're done.
-- **The Voice button** in the capture panel, the menu-bar popover (microphone icon) and the menu-bar item's right-click menu does the same, even with the shortcut turned off.
+**Hold ⌥ Space, speak, let go.** That's the whole interaction, anywhere on your Mac, even with Wren's window closed:
 
-The panel shows a red **Recording…** indicator while the microphone is open, and your words appear as you speak. Recording stops when you pause, press **Stop**, or after 30 seconds. The panel then shows the words **transcribed on this Mac**, editable: fix anything and press **Return** to run it, choose **Record again** if it misheard, or press **Esc** to cancel. (Connectors › Voice can switch to running straight away.) Typing while Wren records stops recording and keeps the text.
+1. Press and hold **⌥ Space**. The Wren panel opens and says **I'm listening…**, with a red dot and a ring that moves with your voice. Your words appear as Apple's recogniser hears them.
+2. Let go (of either key). The microphone turns off at that moment. The panel says **Transcribing your voice…** while the on-device recogniser finishes.
+3. The recognised sentence stays in the field, and Wren runs it straight away: **Working on it…**, then the real result. Examples: **Reminder created: Call Sam** with the time, the task saved, the answer to "what am I waiting for?", or **GPT request submitted** (later **GPT finished**).
+4. If Wren needs to know something, it says **One quick question** (for example "What should I remind you about?"). Your next answer, spoken or typed, completes the same request.
 
-What you said goes through exactly the same steps as typing: "remind me to call Sam tomorrow at 10 AM" sets a reminder, "ask GPT to research the fundamentals of quantum physics" sends a GPT request, "do I have an important email from the recruiter?" checks Gmail. Wren shows what it did. Changing an existing item shows a preview to confirm, and anything unclear gets a short question.
+**Safety:**
+- Releasing before you say anything does nothing.
+- If Wren isn't sure it heard you, or you said a single short word, the words wait in the field. Fix them and press **Return**, or choose **Record again**.
+- **Esc** cancels at any point before the command runs.
+- Pressing ⌥ Space again while a command is being transcribed or run does nothing, so one utterance never runs twice.
+- Changes to existing items still show a preview to confirm.
+
+**Other ways in:**
+- **Voice** in the capture panel, the menu-bar popover (microphone icon) and the bird's right-click menu: click, speak, then pause or click **Stop**.
+- **Typed capture** has its own shortcut, **⌥⇧ Space**, because ⌥ Space is now push-to-talk. A typed-capture shortcut you had set to ⌥ Space moves to ⌥⇧ Space automatically.
+- Both shortcuts can be changed or turned off: push-to-talk in Connectors › Voice, typed capture in Settings.
+- Connectors › Voice › **Check what I said before Wren acts** makes every spoken command wait for Return.
+
+What you said goes through exactly the same router as typing: "remind me to call Sam tomorrow at 10 AM" sets a reminder, "I need to finish the report by Friday" saves a task, "ask GPT to research quantum physics" sends a GPT request, "do I have an important email from the recruiter?" checks Gmail.
 
 **Privacy:**
-- The microphone opens only after you press the shortcut or a Voice button, and closes when that one command ends. It never restarts by itself: not after a command, an error, a relaunch, unlocking the screen or a permission change. Locking the screen or sleeping cancels a recording. Pressing the shortcut again while Wren is working on a command does nothing.
+- The microphone is on only while you hold ⌥ Space (or after you click Voice, until you stop). It's off while Wren transcribes and runs the command, and it never turns on by itself: not at launch, not after a command, an error, a relaunch, unlocking the screen or a permission change. Locking the screen or sleeping cancels a recording. macOS asks for Microphone and Speech Recognition the first time; if you refuse, nothing is recorded and Wren shows a link to the privacy settings.
 - Speech is recognised with Apple's on-device speech model. macOS installs and updates it (System Settings › Keyboard › Dictation); Connectors › Voice shows whether it's installed for your language. Wren refuses server recognition, needs no account, and no audio is stored or sent anywhere.
 - Quitting Wren stops any recording.
 

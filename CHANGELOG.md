@@ -2,6 +2,18 @@
 
 Versions follow [semantic versioning](https://semver.org). The `VERSION` file is the source of truth; release tags are `v<VERSION>` (stable) or `v<VERSION>-preview.N` (prerelease).
 
+## [0.10.1] (unreleased)
+
+Push-to-talk that actually runs what you say.
+
+- **Hold ⌥ Space, speak, let go.** A real press-and-hold shortcut (Carbon hotkey with key-up, plus a modifier check so letting go of either key ends it; no extra macOS permission). It works with Wren's window closed. The panel says **I'm listening…** with a ring driven by your voice and the recogniser's real interim text. On release the microphone turns off at once, then **Transcribing your voice…**, the recognised sentence, **Working on it…** and the actual result ("Reminder created: Call Sam", the task saved, the answer, "GPT request submitted" → "GPT finished", "One quick question", or the real error with a fix). No Return press.
+- One explicit state machine (idle, requesting permission, listening, transcribing, transcript ready, processing, completed, needs clarification, failed, cancelled). Repeated key-downs and presses while busy are ignored, so one utterance runs once; late results from a cancelled utterance are dropped. Releasing before speaking, Esc, very short or low-confidence transcripts never run anything by themselves.
+- Fixed: on release the recogniser was cancelled and only the last partial text was used. Now the microphone closes first and Wren waits for the final on-device result.
+- Fixed: "Remind me every weekday at 3 PM" followed by "to stretch" lost the schedule, and a new dated sentence after that question was swallowed as its answer.
+- Fixed: after a spoken command's result, pressing Return saved the same words again as a new item.
+- **Shortcut change:** ⌥ Space is now push-to-talk (on by default). Typed capture moved to **⌥⇧ Space**; both can be changed in Settings and Connectors › Voice. "Check what I said before Wren acts" is off by default.
+- Reminder confirmations say "Reminder created".
+
 ## [0.10.0] (unreleased)
 
 Wren as a personal executor: explicitly started voice, honest GPT thinking and research, useful email alerts, and one router for every command.

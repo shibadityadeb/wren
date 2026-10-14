@@ -33,7 +33,7 @@ The log records what Wren did (operation names, states, counts), never your word
 
 ## 2. Setup (5 minutes)
 
-- [ ] **Notifications.** Type `remind me to test Wren in 2 minutes` in the capture panel (⌥ Space) and press Return. macOS asks to allow notifications: allow them.
+- [ ] **Notifications.** Type `remind me to test Wren in 2 minutes` in the capture panel (⌥⇧ Space) and press Return. macOS asks to allow notifications: allow them.
   - Expected: "Reminder set: Test Wren … Scheduled with macOS".
   - If you once said no, go to System Settings › Notifications › Wren (or Wren Dev) › Allow Notifications.
 - [ ] **ChatGPT.** Connectors › ChatGPT › **Continue with ChatGPT**. Sign in and approve plan usage.
@@ -44,17 +44,30 @@ The log records what Wren did (operation names, states, counts), never your word
   - While Wren's Google app is in testing, only accounts on its test-user list can connect, and Google asks you to reconnect every 7 days.
 - [ ] **Voice.** Connectors › Voice should show "Installed: Apple on-device speech (your language)". If it says "Not installed", open Dictation Settings…, turn Dictation on once and choose your language, then **Check again**.
 
-## 3. Voice
+## 3. Voice (push-to-talk)
 
 - [ ] **Nothing listens by itself.** Use the Mac normally for a minute with Wren open. Expected: the orange microphone dot never appears.
-- [ ] **Start from the capture panel.** Press ⌥ Space and click **Voice**. macOS asks for Microphone and Speech Recognition the first time: allow both.
-  - Expected: a red **Recording…** indicator and the orange microphone dot.
-- [ ] **A spoken reminder.** Say "remind me to call Sam tomorrow at 10 AM" and pause.
-  - Expected: recording stops and the dot goes off. The words appear marked "Transcribed on this Mac".
-  - Change 10 to 11 and press Return. Expected: "Reminder set: Call Sam, tomorrow at 11:00 AM".
-- [ ] **The shortcut.** Turn on the voice shortcut in Connectors › Voice. Press ⌥⇧ Space anywhere, say something, then press ⌥⇧ Space again. Expected: recording stops at once.
-- [ ] **Redo and cancel.** Say something, then choose **Record again**: a new recording starts. Press Esc while recording: nothing happens and the dot goes off.
-- [ ] **Screen lock.** Start a recording and lock the screen (⌃⌘Q). Unlock. Expected: the recording was cancelled and nothing restarted.
+- [ ] **First use.** Close Wren's window. In any app, press and hold **⌥ Space**. The first time, macOS asks for Microphone and Speech Recognition: allow both. Then let go and hold ⌥ Space again.
+  - Expected: Wren's panel says "Microphone access is set. Hold the shortcut again and speak."
+  - The space you pressed is never typed into the other app.
+- [ ] **A spoken reminder.** Hold ⌥ Space and say "remind me to call Sam tomorrow at 10 AM", then let go.
+  - While holding: "I'm listening…", a red dot, the moving ring, your words appearing, and the orange microphone dot.
+  - On release: the orange dot goes off immediately, then "Transcribing your voice…".
+  - Then: the sentence stays in the field, "Working on it…", and finally "Reminder created: Call Sam" with tomorrow 10:00 AM. You don't press Return.
+- [ ] **A spoken task.** Hold ⌥ Space: "I need to finish the report by Friday". Expected: saved as a task due Friday.
+- [ ] **A spoken GPT request.** Hold ⌥ Space: "ask GPT to research quantum physics".
+  - Expected: "GPT request submitted", and later a "GPT has finished" notification.
+  - If ChatGPT isn't connected: "ChatGPT isn't connected" with **Connect ChatGPT**, and your request is still shown.
+- [ ] **A spoken question.** Hold ⌥ Space: "what am I waiting for?". Expected: the answer from your items.
+- [ ] **A follow-up question.** Hold ⌥ Space: "remind me every weekday at 3 PM".
+  - Expected: "One quick question: What should I remind you about?".
+  - Hold again: "to stretch". Expected: "Reminder created: Stretch", repeating on weekdays at 3 PM.
+- [ ] **Letting go of Option first.** While holding ⌥ Space, let go of ⌥ but keep Space down. Expected: recording ends exactly as if you'd let go of both.
+- [ ] **Nothing said.** Tap ⌥ Space and let go at once. Expected: "Didn't hear anything, so nothing was done." No item is created.
+- [ ] **Cancel and repeat presses.** Press Esc while holding: nothing is done. Mash ⌥ Space while "Working on it…" shows: nothing new starts and nothing runs twice.
+- [ ] **Mumble.** Speak very unclearly. Expected: the words wait in the field ("I'm not sure I heard that right"). Return runs them, and **Record again** discards them.
+- [ ] **Screen lock.** Hold ⌥ Space and lock the screen (⌃⌘Q) with your other hand. Expected: the recording is cancelled and nothing restarts after unlocking.
+- [ ] **Voice button.** In the capture panel (⌥⇧ Space), click **Voice**, speak, and pause. Expected: the same flow, ending on the pause.
 
 ## 4. Tasks and reminders
 
