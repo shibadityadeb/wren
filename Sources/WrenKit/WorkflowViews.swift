@@ -13,6 +13,7 @@ struct DelegationDetailView: View {
     @State private var live = ""
     @State private var note: String?
     @State private var find = ""
+    @State private var link = ""
 
     var body: some View {
         let _ = model.delegationVersion
@@ -29,6 +30,7 @@ struct DelegationDetailView: View {
                         StatusBadge(status: r.status, label: r.displayStatus)
                     }
                     facts(r)
+                    if r.destination == .chatgptHandoff { webHandoff(r) }
                     if r.status == .running {
                         HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Running in ChatGPT. You can leave this page; Wren will notify you when it finishes.").font(.callout) }
                         if !live.isEmpty { answer(live) }
@@ -54,8 +56,10 @@ struct DelegationDetailView: View {
                     }
                     actions(r)
                     if let note { Text(note).font(.caption).foregroundStyle(.secondary) }
-                    Text("Sent through your ChatGPT plan with storage off, so this request has no ChatGPT conversation link and won't appear in your ChatGPT history. The saved request and answer live here, on this Mac.")
-                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    if r.destination == .chatgptPlan {
+                        Text("Run with connected ChatGPT in Wren: sent through your ChatGPT plan with storage off, so it isn't a ChatGPT conversation and won't appear in your ChatGPT history. The request and answer live here, on this Mac.")
+                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 .padding(18)
             } else {
@@ -73,7 +77,10 @@ struct DelegationDetailView: View {
         Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 4) {
             if let o = r.original, o != r.task { row("You said", o) }
             row("Sent", r.prompt ?? r.task)
-            row("Provider", r.destination.label)
+            row("Destination", r.destination.label)
+            row("Mode", r.modeLabel)
+            row("Status", r.displayStatus)
+            if let pid = r.parentID, let p = model.asks?.record(pid) { row("Follows up", p.task) }
             if r.destination == .chatgptPlan {
                 row("Kind", r.kind.label)
                 row("Reasoning", Self.effortText(r))
@@ -86,6 +93,43 @@ struct DelegationDetailView: View {
             if let ch = r.channel { row("From", ch == .voice ? "Voice" : (ch == .hotkey ? "Capture panel" : "Wren window")) }
         }
         .font(.callout)
+    }
+
+    /// A ChatGPT website handoff: what Wren knows, the conversation link, and the next steps.
+    @ViewBuilder func webHandoff(_ r: DelegationRecord) -> some View {
+        let state = r.webState ?? .awaitingSubmission
+        VStack(alignment: .leading, spacing: 8) {
+            Label(state.label, systemImage: state == .conversationLinked ? "link" : (state == .failedToOpen ? "exclamationmark.triangle" : "safari"))
+                .font(.callout.weight(.semibold))
+            Text(state.detail).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if let url = r.conversationURL {
+                HStack { Text(url.absoluteString).font(.caption.monospaced()).textSelection(.enabled); Spacer() }
+            }
+            HStack {
+                Button(r.conversationURL == nil ? "Open ChatGPT" : "Open in ChatGPT") {
+                    Task { if let e = await model.reopenInChatGPT(r.id) { note = e } }
+                }.buttonStyle(.borderedProminent).tint(WrenTheme.accent)
+                    .help(r.conversationURL == nil ? "No conversation is linked yet, so this opens ChatGPT with the request copied again." : "Opens this exact conversation.")
+                if state == .awaitingSubmission || state == .openedInChatGPT { Button("I sent it") { model.markWebSubmitted(r.id) } }
+                Button("Run in Wren instead") {
+                    let req = AIRequest(prompt: r.prompt ?? r.task, original: r.original ?? r.task, depth: r.depth, kind: r.kind, target: .chatgpt, mode: .inWren)
+                    switch model.startDelegation(req, channel: .popover) {
+                    case let .started(id), let .duplicate(id): model.openDelegation(id)
+                    case let .notRun(o): note = DelegateView.describe(o)
+                    }
+                }.help("Runs the same request with connected ChatGPT in Wren. The answer is stored in Wren, not in ChatGPT's history.")
+            }.controlSize(.small)
+            HStack {
+                TextField("Conversation link, e.g. https://chatgpt.com/c/…", text: $link).textFieldStyle(.roundedBorder).frame(maxWidth: 380)
+                Button("Save link") { note = model.linkConversation(r.id, link) ?? "Linked."; if model.asks?.record(r.id)?.conversationURL != nil { link = "" } }
+                    .disabled(link.trimmingCharacters(in: .whitespaces).isEmpty)
+                Button("Paste from clipboard") { note = model.linkConversationFromClipboard(r.id) ?? "Linked." }
+                    .help("Reads the clipboard only now, when you click.")
+            }.controlSize(.small)
+            Text("OpenAI offers no supported way for an app to create a ChatGPT conversation or learn its address, so Wren opens ChatGPT and you send the request there. Link the conversation to come back to it in one click. Wren can't see ChatGPT's answer or tell when it's done.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(10).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
     }
 
     func row(_ k: String, _ v: String) -> some View {
@@ -158,10 +202,11 @@ struct DelegationDetailView: View {
             if let resp = r.response {
                 Button("Copy answer") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(resp, forType: .string); note = "Copied." }
             }
-            if let u = r.providerURL.flatMap(URL.init(string:)) { Link("Open conversation", destination: u) }
-            // Honest: opens ChatGPT itself, not this request (the plan API returns no conversation link).
-            Button("Open ChatGPT") { NSWorkspace.shared.open(URL(string: "https://chatgpt.com/")!) }
-                .help("Opens ChatGPT. This request isn't in your ChatGPT history.")
+            if r.destination != .chatgptHandoff {
+                // Honest: opens the ChatGPT website, not this request (an in-Wren request has no conversation).
+                Button("Open ChatGPT website") { NSWorkspace.shared.open(ChatGPTWeb.home) }
+                    .help("Opens ChatGPT. This request ran in Wren, so it isn't in your ChatGPT history.")
+            }
         }
         .controlSize(.small)
     }
@@ -178,7 +223,7 @@ struct StatusBadge: View {
         case .partial: ("Incomplete", .orange)
         case .failed: ("Failed", .red)
         case .cancelled: ("Cancelled", .secondary)
-        case .handedOff: ("Awaiting submission", .orange)
+        case .handedOff: ("In ChatGPT", .orange)
         case .responseImported: ("Answer pasted", WrenTheme.accent)
         case .prepared: ("Not sent", .secondary)
         }

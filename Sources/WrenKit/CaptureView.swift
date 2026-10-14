@@ -299,54 +299,75 @@ struct AskCardView: View {
 
     var heading: String {
         switch card.destination {
-        case .chatgpt: "Ask ChatGPT"
-        case .local: "Ask local AI"
+        case .chatgptWeb: "ChatGPT (website)"
+        case .chatgpt: "Connected ChatGPT, run in Wren"
+        case .local: "Local AI"
         case .choose: "Question for an assistant"
         }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label(heading, systemImage: card.destination == .local ? "cpu" : "bubble.left.and.text.bubble.right").font(.callout.weight(.semibold))
+            Label(heading, systemImage: card.destination == .local ? "cpu" : (card.destination == .chatgptWeb ? "safari" : "bubble.left.and.text.bubble.right")).font(.callout.weight(.semibold))
             Text("\(card.request.prompt.hasSuffix("?") ? "Question" : "Request"): \(card.request.prompt)").font(.callout).textSelection(.enabled)
             if let note = card.note { Text(note).font(.caption).foregroundStyle(.secondary) }
             switch card.phase {
             case .ready:
                 if card.destination == .choose {
-                    Text("You didn't name an assistant. Choose who answers, or keep it as a note.").font(.caption).foregroundStyle(.secondary)
                     HStack {
-                        Button("Ask ChatGPT") { act(.run(.chatgpt)) }
                         if aiAvailable { Button("Ask local AI (on this Mac)") { act(.run(.local)) } }
+                        Button("Open in ChatGPT") { act(.run(.chatgptWeb)) }
                         Button("Save as a note") { act(.saveAsNote) }
                     }.controlSize(.small)
                 } else {
                     Text(Self.planNote(card.request)).font(.caption).foregroundStyle(.secondary)
                     HStack { Button("Ask ChatGPT") { act(.run(.chatgpt)) }; Button("Save as a note instead") { act(.saveAsNote) } }.controlSize(.small)
                 }
+            case let .handedOff(state, _):
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: state == .failedToOpen ? "exclamationmark.triangle.fill" : (state == .conversationLinked ? "link" : "arrow.up.forward.app"))
+                        .foregroundStyle(state == .failedToOpen ? .orange : WrenTheme.accent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(state.label).font(.caption.weight(.semibold))
+                        Text(state.detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                HStack {
+                    Button("Open in ChatGPT") { act(.openInChatGPT) }
+                    if state == .awaitingSubmission || state == .openedInChatGPT { Button("I sent it") { act(.markSent) } }
+                    if state != .conversationLinked {
+                        Button("Link conversation") { act(.linkConversation) }
+                            .help("In ChatGPT, copy the conversation's address (https://chatgpt.com/c/…), then click this. Wren reads the clipboard only when you click.")
+                    }
+                    Button("Run in Wren instead") { act(.runInWren) }.help("Run this request with connected ChatGPT in Wren. The answer is stored in Wren, not in ChatGPT's history.")
+                }.controlSize(.small)
+                if Self.asksForSpecialMode(card.request.prompt) {
+                    Text("Wren can't switch ChatGPT into Thinking or Deep Research. If you want those, choose them in ChatGPT's composer before sending.").font(.caption2).foregroundStyle(.secondary)
+                }
             case .sending:
-                HStack(spacing: 6) { ProgressView().controlSize(.small); Text(card.destination == .local ? "Asking the local model…" : "Running in ChatGPT…").font(.caption) }
+                HStack(spacing: 6) { ProgressView().controlSize(.small); Text(card.destination == .local ? "Asking the local model…" : (card.destination == .chatgptWeb ? "Opening ChatGPT…" : "Running with connected ChatGPT in Wren…")).font(.caption) }
                 if !card.streamed.isEmpty { answerText(card.streamed) }
                 if card.recordID != nil { Button("Open in Wren") { act(.openAnswer) }.controlSize(.small) }
             case let .answered(text, source, _):
                 answerText(text)
                 Text(source).font(.caption2).foregroundStyle(.tertiary)
-                HStack { Button("Copy answer") { act(.copyAnswer) }; Button("Open result") { act(.openAnswer) } }.controlSize(.small)
+                HStack { Button("Open result in Wren") { act(.openAnswer) }; Button("Copy answer") { act(.copyAnswer) } }.controlSize(.small)
             case let .partial(text, source, _, message):
                 answerText(text)
                 Text(message).font(.caption).foregroundStyle(.orange)
                 Text(source).font(.caption2).foregroundStyle(.tertiary)
                 HStack { Button("Try again") { act(.run(card.destination == .choose ? .chatgpt : card.destination)) }; Button("Copy answer") { act(.copyAnswer) }; Button("Open result") { act(.openAnswer) } }.controlSize(.small)
             case .notConnected:
-                Text("ChatGPT isn't connected. Connect your account, then ask; your question stays here.").font(.caption).foregroundStyle(.orange)
-                HStack { Button("Connect ChatGPT") { act(.connect) }; Button("Save as a note instead") { act(.saveAsNote) } }.controlSize(.small)
+                Text("“Run in Wren” needs Sign in with ChatGPT. Connect your account, or open the request on the ChatGPT website; it stays here either way. Wren won't answer it with the local model.").font(.caption).foregroundStyle(.orange)
+                HStack { Button("Connect ChatGPT") { act(.connect) }; Button("Open in ChatGPT website instead") { act(.run(.chatgptWeb)) }; Button("Save as a note instead") { act(.saveAsNote) } }.controlSize(.small)
             case .connecting:
                 HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Finish signing in to ChatGPT in your browser…").font(.caption) }
             case let .reconnect(m):
                 Text(m).font(.caption).foregroundStyle(.orange)
-                Button("Reconnect ChatGPT") { act(.connect) }.controlSize(.small)
+                HStack { Button("Reconnect ChatGPT") { act(.connect) }; Button("Open in ChatGPT website instead") { act(.run(.chatgptWeb)) } }.controlSize(.small)
             case let .needsPermission(m):
                 Text(m).font(.caption).foregroundStyle(.orange)
-                Button("Allow plan usage…") { act(.allowPlan) }.controlSize(.small)
+                HStack { Button("Allow plan usage…") { act(.allowPlan) }; Button("Open in ChatGPT website instead") { act(.run(.chatgptWeb)) } }.controlSize(.small)
             case let .usageLimit(m):
                 Text(m).font(.caption).foregroundStyle(.orange)
                 HStack { Button("Manage usage") { act(.manageUsage) }; Button("Try again") { act(.run(.chatgpt)) } }.controlSize(.small)
@@ -367,6 +388,10 @@ struct AskCardView: View {
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    static func asksForSpecialMode(_ prompt: String) -> Bool {
+        prompt.lowercased().range(of: #"\bdeep research\b|\bthinking mode\b|\buse (?:o\d|thinking)\b"#, options: .regularExpression) != nil
     }
 
     /// What will be asked of ChatGPT, in plain words, before anything is sent.

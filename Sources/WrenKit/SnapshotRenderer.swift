@@ -154,6 +154,15 @@ public enum SnapshotRenderer {
         try render(CaptureView(state: sending, submit: { _ in }, cancel: {}).padding(20).background(Color(white: 0.85)),
                    size: CGSize(width: 600, height: 240), appearance: .aqua, to: dir.appendingPathComponent("capture-gpt-sending-light.png"))
 
+        // ChatGPT website handoff card.
+        let web = CaptureState()
+        web.text = "Ask ChatGPT what gradient descent is"
+        var webCard = AskCard(request: AIRequest(prompt: "What is gradient descent?", original: web.text, target: .chatgpt), destination: .chatgptWeb)
+        webCard.phase = .handedOff(.awaitingSubmission, recordID: UUID())
+        web.ask = webCard
+        try render(CaptureView(state: web, submit: { _ in }, cancel: {}).padding(20).background(Color(white: 0.85)),
+                   size: CGSize(width: 600, height: 280), appearance: .aqua, to: dir.appendingPathComponent("capture-chatgpt-web-light.png"))
+
         // Voice: each push-to-talk state, with sample text.
         func voiceState(_ phase: VoiceSession.Phase, _ text: String, _ name: String, height: CGFloat = 200, setup: (CaptureState) -> Void = { _ in }) throws {
             let st = CaptureState()

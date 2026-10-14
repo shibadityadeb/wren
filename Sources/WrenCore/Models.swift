@@ -342,8 +342,8 @@ public enum DelegationDestination: String, Codable, Sendable, CaseIterable {
     case chatgptPlan, chatgptHandoff, openaiAPI, localModel, notionSearch, gmailSearch, calendarLookup
     public var label: String {
         switch self {
-        case .chatgptPlan: "ChatGPT (your plan)"
-        case .chatgptHandoff: "ChatGPT (copy and open)"
+        case .chatgptPlan: "Connected ChatGPT, run in Wren"
+        case .chatgptHandoff: "ChatGPT website"
         case .openaiAPI: "OpenAI API (no longer available)"
         case .localModel: "Local model"
         case .notionSearch: "Notion search"
@@ -470,6 +470,11 @@ public final class DelegationRecord {
     public var webSearchCalls: Int = 0
     /// Cited sources from the response, as JSON `[{"title":…,"url":…}]`.
     var sourcesJSON: String?
+    // Schema v8: ChatGPT website handoffs and follow-ups. Optional so v7 records load unchanged.
+    var webStateRaw: String?
+    var webMethodRaw: String?
+    /// The earlier request this one follows up ("continue that research").
+    public var parentID: UUID?
 
     public init(task: String, destination: DelegationDestination, depth: HandoffDepth, now: Date) {
         id = UUID(); createdAt = now; updatedAt = now; self.task = task
@@ -494,8 +499,30 @@ public final class DelegationRecord {
         get { sourcesJSON.flatMap { $0.data(using: .utf8) }.flatMap { try? JSONDecoder().decode([CitedSource].self, from: $0) } ?? [] }
         set { sourcesJSON = newValue.isEmpty ? nil : (try? JSONEncoder().encode(newValue)).flatMap { String(data: $0, encoding: .utf8) } }
     }
-    /// The state shown to the user, including Queued and Needs reconnection.
+    public var webState: WebHandoffState? {
+        get { webStateRaw.flatMap(WebHandoffState.init(rawValue:)) }
+        set { webStateRaw = newValue?.rawValue }
+    }
+    public var webMethod: WebLaunchMethod? {
+        get { webMethodRaw.flatMap(WebLaunchMethod.init(rawValue:)) }
+        set { webMethodRaw = newValue?.rawValue }
+    }
+    /// The real ChatGPT conversation this request lives in, only when the user linked one.
+    public var conversationURL: URL? { providerURL.flatMap(ChatGPTWeb.conversationURL) }
+    /// How the request ran, in words.
+    public var modeLabel: String {
+        switch destination {
+        case .chatgptHandoff: webMethod == .prefillLink ? "ChatGPT website (opened with the prompt filled in; experimental)" : "ChatGPT website (handoff: you send it there)"
+        case .chatgptPlan: "Run with connected ChatGPT in Wren (your plan, result stored in Wren)"
+        case .localModel: "Local AI on this Mac"
+        default: destination.label
+        }
+    }
+
+    /// The state shown to the user, including Queued and Needs reconnection. A ChatGPT website
+    /// handoff shows what Wren knows (opened, awaiting your submission, linked), never "Completed".
     public var displayStatus: String {
+        if destination == .chatgptHandoff, let w = webState { return w.label }
         switch status {
         case .running where startedAt == nil: return "Queued"
         case .failed where failure == .reauthorizationRequired || failure == .notConnected: return "Needs reconnection"

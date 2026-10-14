@@ -351,8 +351,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
     private func askOutcome() -> VoiceSession.Outcome {
         guard let card = captureState.ask else { return .failed("The request couldn't be started.") }
         switch card.phase {
-        case .sending, .answered, .partial: return .completed("GPT request submitted")
-        case .ready: return card.destination == .choose ? .needsClarification("Who should answer this?") : .completed("GPT request ready")
+        case .sending: return card.destination == .chatgptWeb ? .completed("Opening ChatGPT…") : (card.destination == .local ? .completed("Asking local AI…") : .completed("GPT request submitted"))
+        case .answered, .partial: return card.destination == .local ? .completed("Local AI answered") : .completed("GPT request submitted")
+        case let .handedOff(state, _): return state == .failedToOpen ? .failed(WebHandoffState.failedToOpen.detail) : .completed("Opened in ChatGPT: \(state.label.lowercased())")
+        case .ready: return card.destination == .choose ? .needsClarification("Local AI isn't set up. Who should answer this?") : .completed("Request ready")
         case .notConnected: return .failed("ChatGPT isn't connected. Connect it below; your request is kept.")
         case let .reconnect(m), let .needsPermission(m), let .usageLimit(m), let .needsReview(m), let .unsupported(m): return .failed(m)
         case let .failed(m, _): return .failed(m)
@@ -447,22 +449,74 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
 
     private var askChannel: UserChannel = .hotkey
 
-    /// Shows the Ask card. A request explicitly addressed to ChatGPT runs at once: the user named the
-    /// assistant and pressed Return on exactly this text. A question that names no assistant waits
-    /// for the user to choose.
+    /// Shows the Ask card and runs it. Naming GPT/ChatGPT goes to ChatGPT, in the mode the user chose
+    /// (the website by default, or connected ChatGPT in Wren); it never asks "local or ChatGPT?" and
+    /// never falls back to the local model. A question naming no assistant goes to the local AI; only
+    /// when none is set up does the card offer the choices.
     private func showAsk(_ r: AIRequest, channel: UserChannel) {
         askChannel = channel
         captureState.reply = nil
-        var card = AskCard(request: r, destination: r.target == .chatgpt ? .chatgpt : .choose)
-        card.localAvailable = model.ai.usableModel != nil
+        let local = model.ai.usableModel != nil
+        let destination: AskCard.Destination
+        if r.target == .chatgpt { destination = (r.mode ?? model.settings.chatgptMode) == .web ? .chatgptWeb : .chatgpt }
+        else { destination = local ? .local : .choose }
+        var card = AskCard(request: r, destination: destination)
+        card.localAvailable = local
         card.chatgptReady = model.hub.chatgpt.account.canSend
+        if destination == .choose { card.note = "Local AI isn't set up, so nothing answered yet. Set it up, ask ChatGPT, or keep it as a note." }
         captureState.ask = card
-        if card.destination == .chatgpt { askAction(.run(.chatgpt)) }
+        if destination != .choose { askAction(.run(destination)) }
+    }
+
+    /// The ChatGPT website: opens it with the request and shows what Wren really knows about it.
+    private func runWeb(_ card: AskCard) {
+        var card = card
+        card.destination = .chatgptWeb
+        card.phase = .sending(recordID: nil)
+        card.note = nil
+        captureState.ask = card
+        let request = card.request, channel = askChannel
+        Task {
+            let (rec, error) = await model.startWebHandoff(request, channel: channel)
+            guard captureState.ask?.request == request else { return }
+            captureState.ask?.recordID = rec?.id
+            if let error {
+                captureState.ask?.phase = .failed(error, retryable: rec != nil)
+            } else if let rec {
+                captureState.ask?.phase = .handedOff(rec.webState ?? .awaitingSubmission, recordID: rec.id)
+            }
+        }
     }
 
     private func askAction(_ a: AskAction) {
         guard var card = captureState.ask else { return }
         switch a {
+        case .run(.chatgptWeb):
+            guard !card.phase.isSending else { return }
+            runWeb(card)
+        case .openInChatGPT:
+            guard let id = card.recordID else { runWeb(card); return }
+            Task {
+                if let e = await model.reopenInChatGPT(id) { captureState.ask?.note = e }
+                else if let r = model.asks?.record(id) { captureState.ask?.phase = .handedOff(r.webState ?? .awaitingSubmission, recordID: id) }
+            }
+        case .markSent:
+            guard let id = card.recordID else { return }
+            model.markWebSubmitted(id)
+            card.phase = .handedOff(.submittedUnverified, recordID: id)
+            card.note = "Noted. The answer is in your ChatGPT conversation; link it so Open in ChatGPT goes straight there."
+            captureState.ask = card
+        case .linkConversation:
+            guard let id = card.recordID else { return }
+            if let e = model.linkConversationFromClipboard(id) { card.note = e }
+            else { card.phase = .handedOff(.conversationLinked, recordID: id); card.note = "Linked. Open in ChatGPT now goes to that conversation." }
+            captureState.ask = card
+        case .runInWren:
+            // The user explicitly chose the in-Wren mode for this request.
+            card.destination = .chatgpt; card.phase = .ready; card.recordID = nil
+            card.request.mode = .inWren
+            captureState.ask = card
+            askAction(.run(.chatgpt))
         case let .run(dest):
             // One request at a time: a second Return, click or voice event while sending does nothing.
             guard !card.phase.isSending else { return }

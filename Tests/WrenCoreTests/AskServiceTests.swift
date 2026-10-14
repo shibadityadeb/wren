@@ -121,11 +121,11 @@ extension ChatGPTConnectorTests {
     func testCardChoicesForAGeneralQuestion() {
         guard case let .generalQuestion(q) = IntentRouter.route("what is quantum physics", now: Date()) else { return XCTFail() }
         var card = AskCard(request: q, destination: .choose)
-        XCTAssertEqual(card.primary, .run(.chatgpt), "no local model: ChatGPT")
+        XCTAssertNil(card.primary, "no local model: the user chooses; nothing is sent by Return")
         card.localAvailable = true
-        XCTAssertEqual(card.primary, .run(.local), "ChatGPT not connected: the local model")
+        XCTAssertEqual(card.primary, .run(.local), "the local model answers questions that name no assistant")
         card.chatgptReady = true
-        XCTAssertEqual(card.primary, .run(.chatgpt), "connected: ChatGPT answers, not the local model")
+        XCTAssertEqual(card.primary, .run(.local), "a connected ChatGPT doesn't take over questions that don't name it")
         // Merely showing or changing a card never runs anything.
         XCTAssertTrue(RouteStub.requests.isEmpty)
     }
