@@ -72,6 +72,7 @@ struct BriefingView: View {
                         section("Overdue", b.overdue)
                         section("Due today", b.dueToday)
                         section("Coming up", b.upcoming)
+                        section("Marked important", b.important)
                         section("Waiting on others", b.waiting)
                         section("Reminders today", b.remindersToday)
                         if !b.decisions.isEmpty {

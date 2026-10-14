@@ -51,6 +51,10 @@ final class AppModel {
     var reminderFollowUpNeedsSubject = false
     /// What the last command did (operation, success, entity, error). Never holds the user's words.
     var lastExecution: ExecutionResult?
+    /// The routing decision for the last command (operation, destination, rule, confidence).
+    var lastIntent: CommandIntent?
+    /// Set when Wren quits: background loops (mail checks, conversation watching) stop at once.
+    @ObservationIgnored var stopping = false
     @ObservationIgnored var submissions = SubmissionGuard()
     @ObservationIgnored let loginItems: LoginItemController
 
@@ -98,6 +102,9 @@ final class AppModel {
     var backupPreview: BackupPreview?
 
     @ObservationIgnored var openCapturePanel: () -> Void = {}
+    /// Runs words typed elsewhere (the menu-bar field, the main window) through the capture panel's
+    /// pipeline, so they're routed like any command and the real result is shown.
+    @ObservationIgnored var runInCapturePanel: ((String) -> Void)?
     @ObservationIgnored var showPopover: () -> Void = {}
     @ObservationIgnored var applyHotKey: () -> Void = {}
     @ObservationIgnored var openMainWindow: () -> Void = {}
@@ -178,6 +185,7 @@ final class AppModel {
         if let s, let b = broker { asks = AskService(store: s, broker: b, chatgpt: hub.chatgpt, clock: clock) }
         wireDelegations()
         engine?.externalBriefing = { [weak self] in await self?.externalBriefing() }
+        reminders?.advance = { [weak self] in self?.deadlineAdvance }
         reload()
         notifications.onResponse = { [weak self] r in self?.handle(r) }
         // Any change to stored items (from any path) re-syncs scheduled notifications shortly after.
@@ -195,6 +203,17 @@ final class AppModel {
     }
 
     var reminderHour: Int { settings.dateOnlyReminderHour }
+
+    /// The day-before heads-up for deadlines, when the setting and the deadline-reminder rule allow it.
+    var deadlineAdvance: DeadlineAdvance? {
+        guard settings.deadlineDayBefore, policy.rules.contains(.autoRemindDeadlines) else { return nil }
+        return DeadlineAdvance(days: 1, hour: reminderHour)
+    }
+
+    func setDeadlineDayBefore(_ on: Bool) {
+        settings.deadlineDayBefore = on
+        scheduleReconcile()
+    }
 
     // MARK: Lifecycle
 
@@ -276,7 +295,17 @@ final class AppModel {
 
     // MARK: Scheduler
 
-    func scheduleTick() { Task { await tick() } }
+    func scheduleTick() { guard !stopping else { return }; Task { await tick() } }
+
+    /// Quit: every timer and loop Wren runs in the background stops. Reminders already handed to
+    /// macOS stay scheduled (macOS delivers them without Wren); Gmail isn't checked until Wren runs again.
+    func stopBackgroundWork() {
+        stopping = true
+        schedulerTimer?.invalidate(); schedulerTimer = nil
+        reconcileTask?.cancel()
+        mailTimer?.invalidate(); mailTimer = nil; nextMailCheck = nil
+        log.notice("quit: mail checks, scheduler and conversation watching stopped; scheduled reminders stay with macOS")
+    }
 
     func tick() async {
         schedulerTimer?.invalidate()

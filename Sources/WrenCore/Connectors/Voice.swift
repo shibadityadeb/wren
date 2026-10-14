@@ -170,6 +170,8 @@ public final class VoiceSession {
     public var maxHold: TimeInterval = 60
     var endpointer: CommandEndpointer?
     var startedAt: Date?
+    /// When the microphone actually started recording this command (nil when it isn't recording).
+    public var listeningSince: Date? { phase.isCapturingPhase ? startedAt : nil }
     /// Bumped by every start, cancel and shutdown so a late permission answer or a late final
     /// transcript from an abandoned utterance can't change anything.
     var generation = 0

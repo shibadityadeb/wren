@@ -84,13 +84,18 @@ final class OllamaTests: XCTestCase {
 final class NoShellTests: XCTestCase {
     func testCoreHasNoProcessExecution() throws {
         let dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../Sources/WrenCore").standardized
-        let files = try FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil).filter { $0.pathExtension == "swift" }
-        XCTAssertFalse(files.isEmpty)
+        // Every source file, subfolders included.
+        let files = (FileManager.default.enumerator(at: dir, includingPropertiesForKeys: nil)?.allObjects as? [URL] ?? []).filter { $0.pathExtension == "swift" }
+        XCTAssertGreaterThan(files.count, 20)
         for f in files {
             let s = try String(contentsOf: f, encoding: .utf8)
-            for banned in ["Process(", "NSTask", "system(", "posix_spawn", "NSAppleScript"] {
+            for banned in ["NSTask", "posix_spawn", "NSAppleScript", "popen("] {
                 XCTAssertFalse(s.contains(banned), "\(f.lastPathComponent) contains \(banned)")
             }
+            // Whole words only: `Process(` but not `heldByAnotherProcess(`; the C call `system(…)`, not
+            // the audit origin `.system("…")` or its `case system(String)`.
+            XCTAssertNil(s.range(of: #"(?<!\w)Process\("#, options: .regularExpression), "\(f.lastPathComponent) creates a Process")
+            XCTAssertNil(s.range(of: #"(?<![\w.])(?<!case )system\("#, options: .regularExpression), "\(f.lastPathComponent) calls system(")
         }
     }
 }

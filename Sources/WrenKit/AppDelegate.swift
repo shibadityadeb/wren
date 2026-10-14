@@ -134,6 +134,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
         model.applyVoiceHotKey = { [weak self] in self?.applyVoiceHotKey() }
         model.startVoice = { [weak self] in self?.popover.performClose(nil); self?.startOrStopVoice(.button) }
         model.prefillCapture = { [weak self] t in self?.captureState.text = t }
+        model.runInCapturePanel = { [weak self] t in
+            guard let self else { return }
+            self.popover.performClose(nil)
+            self.showCapture()
+            self.captureState.text = t
+            self.execute(t, channel: .popover)
+        }
         // The browser tab became a real conversation (or asked to sign in): refresh the card.
         model.webHandoffChanged = { [weak self] id in
             guard let self, self.captureState.ask?.recordID == id, let r = self.model.asks?.record(id), let state = r.webState else { return }
@@ -234,8 +241,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
             return
         }
         let held = Date().timeIntervalSince(pttPressedAt ?? .distantPast)
-        if held < Self.tapThreshold {
-            appLog.notice("push-to-talk: short press (\(Int(held * 1000), privacy: .public) ms, \(why, privacy: .public)); listening hands-free until a pause")
+        // Measured from when recording really began: after a permission prompt (or a slow microphone)
+        // the key-up can arrive just after recording starts, with nothing said yet. Seen live: held
+        // 2064 ms, recording for 49 ms, "Didn't hear anything". That isn't a finished hold.
+        let recording = voice.listeningSince.map { Date().timeIntervalSince($0) } ?? held
+        if min(held, recording) < Self.tapThreshold {
+            appLog.notice("push-to-talk: short press (\(Int(held * 1000), privacy: .public) ms, recording \(Int(recording * 1000), privacy: .public) ms, \(why, privacy: .public)); listening hands-free until a pause")
             voice.continueHandsFree()
             return
         }
@@ -811,6 +822,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
     func applicationWillTerminate(_ notification: Notification) {
         // Quit means quit: microphone off, mail checks and running work stop. Scheduled reminders stay with macOS.
         voice?.shutdown()
+        model?.stopBackgroundWork()
         voiceTimer?.invalidate()
         hotKeys?.unregister()
         voiceKeys?.unregister()

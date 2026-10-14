@@ -15,7 +15,43 @@ touched. Debug URLs exist only in debug builds. Read results with:
 /usr/bin/log stream --style compact --predicate 'subsystem == "com.shibadityadeb.wren" AND processImagePath CONTAINS "Wren Dev.app"'
 ```
 
-## Last pass: 2026-10-14, branch `feat/ask-in-chatgpt` (0.11.1), Chrome (default browser), signed in to ChatGPT
+## Last pass: 2026-10-14 evening, branch `fix/end-to-end-execution` (0.12.0)
+
+Automated: `swift test`, 388 tests, 0 failures, 4 skipped. The brief's ten acceptance scenarios have automated
+versions in `EndToEndAcceptanceTests` and `CommandRouterRulesTests`. Those use `FakeReminderCenter` for macOS,
+so they are **mock-based**, not live.
+
+Live runs in this pass:
+- **Wren Dev.** Built from this branch with `scripts/build-app.sh debug --dev-identity`, driven with
+  `wren-dev://debug/command?text=…` and read from its log. Wren Dev has notifications **denied**, so these runs
+  check routing, saving and the honest "notifications are off" report, not delivery. It isn't signed in to
+  Google or ChatGPT.
+- **The real Google account.** The account the installed Wren uses, read-only.
+
+The installed Wren and its data weren't touched.
+
+| ID | Test | Result |
+|---|---|---|
+| E2E-1 | "Can you make a reminder to call Sam tomorrow at 10 AM?" (brief test 1) | **Passed live**: `CreateReminder → wren (rule A reminderRequest, 0.95)`, "Reminder created: Call Sam". One notification planned, 0 accepted, reported as "notifications are off for Wren" (not "scheduled"). No GPT request |
+| E2E-2 | "I need to submit the assignment by Friday." (test 2) | **Passed live**: `CreateTask (rule A obligation)`, "Task created: Submit the assignment", deadline Friday, **2 notifications planned** (the day before and on the day), 0 accepted (denied, and reported so) |
+| E2E-3 | "Remind me to ask GPT about quantum physics tomorrow." (test 3) | **Passed live**: `CreateReminder`, "Reminder created: Ask GPT about quantum physics". Nothing sent to ChatGPT |
+| E2E-4 | "Ask GPT to research quantum physics." (test 4) | **Passed live**: `DelegateToChatGPT → chatgpt (rule B)`, prompt "Research quantum physics." (website mode, the default). Chrome opened a new `chatgpt.com` tab; the `?q=` parameter was consumed, and nothing was sent. The composer's contents weren't machine-checked; B-1 below covers that. The tab was closed afterwards |
+| E2E-5 | "What is gradient descent?" (test 5) | **Passed live**: `AskLocalAI → localAI (rule C)`, no ChatGPT |
+| E2E-6 | "What should I work on today?" | **Passed live**: `QueryStoredItems (today)`, an answer from stored items |
+| E2E-7 | "I need to send the proposal before the meeting." | **Passed live**: `CreateTask`, not the calendar. No deadline invented; reported as "No deadline was given" |
+| E2E-8 | "Anything important in my inbox?" with Gmail not connected (test 6, disconnected branch) | **Passed live**: `SearchGmail → gmail`. Replied "Gmail isn't connected. Open Connectors › Gmail to connect it." No answer from memory |
+| E2E-9 | "I need to finish the essay by Saturday.", then "Remind me one day before the deadline.", then confirm | **Passed live**: `UpdateTask (advanceReminder)`. Preview "Remind you about “Finish the essay” Friday at 10:00 AM". It ran only after the confirmation (`auth=your confirmation`) |
+| E2E-10 | "Remind me to call Sam today at 9 AM" at 21:20 (test 9, invalid time) | **Passed live**: refused, "Today at 9:00 AM has already passed…". Nothing saved |
+| E2E-11 | The same reminder sentence twice, 0.3 s apart | **Passed live**: one reminder; the second was refused with "That was just submitted, so Wren didn't do it twice." |
+| E2E-11b | "Mark the essay as done", then confirm | **Passed live**: `CompleteTask`, with a preview first |
+| E2E-12 | Quit Wren Dev (test 10, Wren's half) | **Passed live**: log "quit: mail checks, scheduler and conversation watching stopped; scheduled reminders stay with macOS", then "status item removed, shortcuts released". Process gone. macOS keeping scheduled reminders after quit is **not re-run** here because Wren Dev has notifications denied; see M-REM |
+| E2E-13 | `wren-tools live-check gmail` against the real account (read-only) | **Passed live**: full sync of 150 messages (Spam and Trash 0), history cursor saved. A second, incremental sync found 0 new. The alert dry run would alert 3 + 2 summarized, and **0 on a repeated check** |
+| M-GMAIL-LINK | Wren's Gmail link for an alert (`https://mail.google.com/mail/?authuser=<account>#all/<thread id>`), opened in Chrome for a read message in a multi-message thread | **Passed live**: Gmail opened that conversation in the authorized account. The tab title had the message's subject and the account, and Gmail rewrote the address to its own form. A message already read was used, so nothing was marked read. The tab was closed. The script printed only matches, not content |
+| E2E-14 | A new urgent email arrives and gets one alert, which opens in Gmail when clicked (test 7) | **Not run**: needs a new email sent to the account by a person. Link and dedupe are covered by M-GMAIL-LINK and E2E-13 |
+| E2E-15 | Morning briefing at its time, and no second one after a restart (test 8) | **Not run** live (it needs the scheduled time). Automated: `DailyTests` |
+| E2E-16 | Notification delivery and click-through with permission granted, including after quitting | **Not run** in this pass. Needs a build with notifications allowed and a person to watch (M-REM) |
+
+## Previous pass: 2026-10-14, branch `feat/ask-in-chatgpt` (0.11.1), Chrome (default browser), signed in to ChatGPT
 
 Automated: `swift test`, 363 tests, 0 failures, 4 skipped. Live checks used the maintainer's real Chrome, observed
 through Chrome's AppleScript (tab address and title only; screen capture isn't available to this terminal).

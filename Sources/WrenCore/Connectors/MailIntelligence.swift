@@ -566,6 +566,13 @@ public struct MailPreferences: Codable, Equatable, Sendable {
     public var alertsEnabled = true
     public var alertLevel: MailAlertLevel = .important
     public var quietHours = QuietHours()
+    /// Stored optional so preferences saved by older versions still decode (missing means on).
+    public var alertPreviewSetting: Bool?
+    /// Alerts include the opening sentence of Gmail's preview text. On unless turned off.
+    public var alertPreview: Bool {
+        get { alertPreviewSetting ?? true }
+        set { alertPreviewSetting = newValue }
+    }
     public init() {}
     public func normalized() -> MailPreferences {
         var p = self
@@ -599,9 +606,10 @@ public enum MailCorrections {
 
 // MARK: Alert text
 
-/// The words of a new-mail alert: who, the subject, and Wren's reason. Never the body.
+/// The words of a new-mail alert: who, the subject, a short factual excerpt (the opening of Gmail's own
+/// preview text, not a model's summary) and Wren's reason. Built on this Mac; nothing is sent anywhere.
 public enum MailAlertText {
-    public static func make(_ item: MailItem) -> (title: String, body: String) {
+    public static func make(_ item: MailItem, preview: Bool = true) -> (title: String, body: String) {
         let c = item.classification
         let who = item.message.senderName.isEmpty ? "a sender" : item.message.senderName
         let kind: String
@@ -614,6 +622,26 @@ public enum MailAlertText {
         }
         let subject = item.message.subject.trimmingCharacters(in: .whitespacesAndNewlines)
         let why = c.reasons.first.map { "Why: \($0)" } ?? c.category.label
-        return ("\(kind) from \(who)", (subject.isEmpty ? "(no subject)" : "“\(subject)”") + "\n" + why)
+        var lines = [subject.isEmpty ? "(no subject)" : "“\(subject)”"]
+        if preview, let e = excerpt(item.message.snippet, subject: subject) { lines.append(e) }
+        lines.append(why)
+        return ("\(kind) from \(who)", lines.joined(separator: "\n"))
+    }
+
+    /// The first sentence of the message's preview, at most about 120 characters. nil when there is
+    /// nothing beyond the subject.
+    public static func excerpt(_ snippet: String, subject: String = "", limit: Int = 120) -> String? {
+        var t = snippet.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression).trimmingCharacters(in: .whitespaces)
+        if !subject.isEmpty, t.lowercased().hasPrefix(subject.lowercased()) {
+            t = String(t.dropFirst(subject.count)).trimmingCharacters(in: CharacterSet.whitespaces.union(CharacterSet(charactersIn: "-–—:,.")))
+        }
+        guard t.count >= 8 else { return nil }
+        if let r = t.range(of: #"[.!?](?:\s|$)"#, options: .regularExpression), t.distance(from: t.startIndex, to: r.lowerBound) < limit {
+            return String(t[..<r.upperBound]).trimmingCharacters(in: .whitespaces)
+        }
+        guard t.count > limit else { return t }
+        let cut = t.prefix(limit)
+        let word = cut.lastIndex(of: " ").map { cut[..<$0] } ?? cut
+        return word.trimmingCharacters(in: CharacterSet.whitespaces.union(CharacterSet(charactersIn: ",;:"))) + "…"
     }
 }

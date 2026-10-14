@@ -12,7 +12,8 @@ final class ConnectorRegistryTests: XCTestCase {
         XCTAssertEqual(r.state(.localFiles), .planned)
         XCTAssertEqual(r.state(.gmail), .available, "unregistered implemented connector is available, never connected")
         let sum = r.summary
-        XCTAssertEqual(sum[.planned], 2)
+        XCTAssertEqual(sum[.planned], 3, "local files, Shortcuts and Slack: listed, not implemented")
+        XCTAssertEqual(r.state(.slack), .planned, "Slack is shown as coming soon, never as connectable")
         XCTAssertNil(sum[.connected], "nothing counts as connected without a real check")
         for d in ConnectorCatalog.all where d.isPlanned { XCTAssertTrue(d.capabilities.allSatisfy { !$0.implemented }) }
         for d in ConnectorCatalog.all where !d.isPlanned { XCTAssertFalse(d.privacy.isEmpty); XCTAssertFalse(d.cleanup.isEmpty) }

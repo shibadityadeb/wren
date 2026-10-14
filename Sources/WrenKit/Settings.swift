@@ -61,6 +61,11 @@ final class WrenSettings {
         get { d.object(forKey: "dateOnlyReminderHour") as? Int ?? 10 }
         set { d.set(min(max(newValue, 6), 21), forKey: "dateOnlyReminderHour") }
     }
+    /// A heads-up the day before a task's deadline, at the default reminder time. On unless turned off.
+    var deadlineDayBefore: Bool {
+        get { d.object(forKey: "deadlineDayBefore") as? Bool ?? true }
+        set { d.set(newValue, forKey: "deadlineDayBefore") }
+    }
     var daily: DailySettings {
         get { (d.data(forKey: "dailySettings")).flatMap { try? JSONDecoder().decode(DailySettings.self, from: $0) } ?? DailySettings() }
         set { d.set(try? JSONEncoder().encode(newValue.normalized()), forKey: "dailySettings") }
@@ -168,7 +173,7 @@ final class WrenSettings {
     /// Every preference key Wren writes. "Reset preferences" removes exactly these.
     static let allKeys = ["hotKeyEnabled", "hotKey", "ollamaModel", "useModel", "dateOnlyReminderHour", "captureDraft",
                           "dailySettings", "launchAtLogin", "insightSettings", "notificationPause", "lastAutomaticBackup",
-                          "voiceEnabled", "voiceHotKey", "pushToTalkEnabled", "pushToTalkHotKey", "voiceCheckBeforeRunning", "wakeWordEnabled", "macCalendarEnabled", "chatgptEnabled", "chatgptDestination", "chatgptModel", "openaiModel", "gmailCacheEnabled", "importantSenders", "mailPreferences", "voiceReviewFirst", "notificationSounds", "chatgptWebEnabled", "chatgptMode", "chatgptPrefill", "chatgptPrefillCheck", "chatgptPrefillLink", "chatgptDetectConversation"]
+                          "voiceEnabled", "voiceHotKey", "pushToTalkEnabled", "pushToTalkHotKey", "voiceCheckBeforeRunning", "wakeWordEnabled", "macCalendarEnabled", "chatgptEnabled", "chatgptDestination", "chatgptModel", "openaiModel", "gmailCacheEnabled", "importantSenders", "mailPreferences", "voiceReviewFirst", "notificationSounds", "chatgptWebEnabled", "chatgptMode", "chatgptPrefill", "chatgptPrefillCheck", "chatgptPrefillLink", "chatgptDetectConversation", "deadlineDayBefore"]
 
     func resetAll() { Self.allKeys.forEach(d.removeObject(forKey:)) }
 

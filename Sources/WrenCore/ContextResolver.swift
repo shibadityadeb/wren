@@ -50,6 +50,8 @@ public struct Answer: Sendable, Equatable {
 /// Questions Wren can answer from its own data.
 public enum QueryKind: String, Sendable, CaseIterable, Codable {
     case waiting, recentPromises, quietItems, postponed, goalsNoProgress, overdue, dueSoon, doneRecently
+    /// "What should I work on today?": overdue, due today, reminders today and important open items.
+    case today
 }
 
 public enum ContextResolution: Sendable {
@@ -138,10 +140,8 @@ public struct ContextResolver: Sendable {
         if let m = s.firstMatch(of: /^(?:please\s+)?snooze(?:\s+(.+))?$/) {
             return (PendingCommand(verb: .snooze, date: nil, text: t), m.1.map(String.init) ?? "it")
         }
-        if let m = s.firstMatch(of: /^remind me (?:about|of)\s+(.+?)\s+(?:the\s+)?(day|\d+\s+days?|two days|three days|a week)\s+before\s+(?:it'?s|it is|its)\s+due$/) {
-            let raw = String(m.2)
-            let n: Int = raw == "day" ? 1 : raw == "two days" ? 2 : raw == "three days" ? 3 : raw == "a week" ? 7 : Int(raw.prefix { $0.isNumber }) ?? 1
-            return (PendingCommand(verb: .remind, date: nil, text: t, daysBeforeDeadline: n), String(m.1))
+        if let a = CommandGrammar.advanceReminder(s) {
+            return (PendingCommand(verb: .remind, date: nil, text: t, daysBeforeDeadline: a.days), a.reference)
         }
         if let m = s.firstMatch(of: /^(?:please\s+)?remind me (?:about|of)\s+(.+)$/) {
             // Split "the dentist tomorrow at 9" into reference and date.
@@ -180,7 +180,8 @@ public struct ContextResolver: Sendable {
         if s.firstMatch(of: /\b(?:keep postponing|keep putting off|keep moving|postponed|put off|keep delaying)\b/) != nil { return .postponed }
         if s.firstMatch(of: /\b(?:promised|promises|committed to|my commitments)\b/) != nil { return .recentPromises }
         if s.firstMatch(of: /\boverdue\b|\bbehind on\b|\bmissed (?:deadlines|anything)\b/) != nil { return .overdue }
-        if s.firstMatch(of: /\b(?:due (?:soon|this week|next)|coming up|upcoming)\b/) != nil { return .dueSoon }
+        if s.firstMatch(of: /\b(?:work on|focus on|start with|do first|on my plate|on my list) today\b|\bwhat should i (?:do|work on|focus on|start with)(?: first| next| now)?$|\bwhat(?:'s| is) due today\b|\bwhat do i have (?:to do )?today\b|\btoday'?s (?:tasks|agenda|plan|list)\b/) != nil { return .today }
+        if s.firstMatch(of: /\b(?:due (?:soon|this week|next|tomorrow)|coming up|upcoming)\b|\bdeadlines?\b.*\b(?:approaching|coming|close|near|soon|this week)\b|\b(?:approaching|upcoming|next) deadlines?\b|\bwhat(?:'s| is) due\b/) != nil { return .dueSoon }
         if s.firstMatch(of: /\bwhat (?:did|have) i (?:finish|finished|complete|completed|done|get done)\b|\bdone (?:recently|this week|today)\b/) != nil { return .doneRecently }
         return nil
     }
@@ -253,6 +254,19 @@ public struct ContextResolver: Sendable {
             let d = pending.filter { v.isDueToday($0) || v.isUpcoming($0, days: 7) }.sorted { ($0.deadline ?? now) < ($1.deadline ?? now) }
             return Answer(title: d.isEmpty ? "Nothing due in the next 7 days." : "Due in the next 7 days (\(d.count))",
                           lines: d.map { AnswerLine("\($0.title)\(due($0))", recordID: $0.id) }, basis: stored)
+        case .today:
+            let v = DayView(now: now, calendar: calendar)
+            let overdue = pending.filter(v.isOverdue).sorted { ($0.deadline ?? now) < ($1.deadline ?? now) }
+            let dueToday = pending.filter(v.isDueToday).sorted { ($0.deadline ?? now) < ($1.deadline ?? now) }
+            let reminders = pending.filter { v.reminderToday($0) && !v.isOverdue($0) && !v.isDueToday($0) }
+            let shown = Set((overdue + dueToday + reminders).map(\.id))
+            let important = pending.filter { $0.priority == .high && !shown.contains($0.id) }
+            var lines = overdue.map { AnswerLine("Overdue: \($0.title)\(due($0))", recordID: $0.id) }
+            lines += dueToday.map { AnswerLine("Due today: \($0.title)\(due($0))", recordID: $0.id) }
+            lines += reminders.map { c in AnswerLine("Reminder today: \(c.title)\(c.nextReminderAt.map { " · \(DueText.describe($0, hasTime: true, now: now, calendar: calendar))" } ?? "")", recordID: c.id) }
+            lines += important.prefix(5).map { AnswerLine("Important: \($0.title)\(due($0))", recordID: $0.id) }
+            return Answer(title: lines.isEmpty ? "Nothing is due or scheduled today." : "Today (\(lines.count))", lines: lines,
+                          basis: "Overdue and due-today tasks, today's reminders and items you marked important. From your stored items.")
         case .doneRecently:
             let d = items.filter { $0.status == .completed && ($0.completedAt.map { days($0) <= 7 } ?? false) }
                 .sorted { ($0.completedAt ?? now) > ($1.completedAt ?? now) }

@@ -1,18 +1,18 @@
 import Foundation
 
 /// The operations Wren can execute from words. Typed text, the capture panel, a voice transcript
-/// and the debug command URL all go through `ExecutionRouter.operation`, so the same words always
+/// and the debug command URL all go through `CommandRouter.intent`, so the same words always
 /// lead to the same operation. Each operation runs behind its own connector or local subsystem and
 /// that subsystem's permission checks; nothing here grants a permission.
 public enum ExecutionOperation: Equatable, Sendable {
     /// Something to do, with a date or task framing ("I need to finish the report by Friday").
-    case createTask
+    case createTask(TaskDraft)
     /// "Remind me to … at …", "remind me every weekday at 3 PM to …".
     case createReminder
     /// A question about Wren's own items ("what am I waiting for?").
     case queryStoredItems(QueryKind?)
-    /// Change an existing item: complete, move, snooze, drop ("move the research task to Sunday").
-    case changeItem
+    /// Change an existing item: complete, move, snooze, drop, remind ("move the research task to Sunday").
+    case changeItem(PendingCommand.Verb)
     /// An explicit request to ChatGPT ("ask GPT to research …").
     case delegateToChatGPT(AIRequest)
     /// A question answered from Gmail ("do I have an important email from the recruiter?").
@@ -42,13 +42,13 @@ public enum ExecutionOperation: Equatable, Sendable {
         case .createTask: "CreateTask"
         case .createReminder: "CreateReminder"
         case .queryStoredItems: "QueryStoredItems"
-        case .changeItem: "ChangeItem"
+        case let .changeItem(verb): verb == .complete ? "CompleteTask" : "UpdateTask"
         case .delegateToChatGPT: "DelegateToChatGPT"
         case .searchGmail: "SearchGmail"
         case .openEmail: "OpenEmail"
         case .markEmailRead: "MarkEmailRead"
         case .queryCalendar: "QueryCalendar"
-        case .openDelegationResult: "OpenDelegationResult"
+        case .openDelegationResult: "OpenChatGPTRequest"
         case .saveNote: "SaveNote"
         case .generalQuestion: "AskLocalAI"
         case .followUpDelegation: "FollowUpDelegation"
@@ -76,35 +76,9 @@ public struct ExecutionResult: Equatable, Sendable {
 }
 
 public enum ExecutionRouter {
+    /// The operation for these words: `CommandRouter.intent(for:)` without the routing details.
     public static func operation(for raw: String, now: Date, calendar: Calendar = .current, resolver: ContextResolver? = nil) -> ExecutionOperation {
-        let text = ReminderCommand.stripAddress(raw).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return .clarifyIntent("What would you like Wren to do?") }
-        if let body = IntentRouter.explicitCapture(text) { return .saveNote(body) }
-        if ReminderCommand.parse(text, now: now, calendar: calendar) != nil { return .createReminder }
-        // Before new GPT requests: "continue that research in ChatGPT" refers to an earlier one.
-        if let f = DelegationFollowUp.detect(text) { return .followUpDelegation(f) }
-        if let ask = IntentRouter.aiRequest(text) { return .delegateToChatGPT(ask) }
-        // "Ask GPT." with nothing to ask: don't send an empty request or save it as a note.
-        if addressesAssistantWithoutRequest(text) { return .clarifyIntent("What should ChatGPT do? For example: “ask GPT to research the basics of quantum physics”.") }
-        if isDelegationResultRequest(text) { return .openDelegationResult }
-        if let sender = emailAction(text, verb: #"mark"#) { return .markEmailRead(sender: sender.isEmpty ? nil : sender) }
-        if let sender = emailAction(text, verb: #"open|show|read|view"#) { return .openEmail(sender: sender.isEmpty ? nil : sender) }
-        switch IntentRouter.route(text, now: now, calendar: calendar, resolver: resolver) {
-        case let .explicitCapture(body): return .saveNote(body)
-        case .reminder: return .createReminder
-        case let .askAI(r): return .delegateToChatGPT(r)
-        case .itemCommand: return .changeItem
-        case let .storedQuery(q): return .queryStoredItems(q)
-        case let .generalQuestion(r):
-            if EmailQuestion.isEmailQuestion(text) { return .searchGmail }
-            if CalendarQuestion.isCalendarQuestion(text) { return .queryCalendar }
-            return .generalQuestion(r)
-        case .capture:
-            if EmailQuestion.isEmailQuestion(text) { return .searchGmail }
-            if CalendarQuestion.isCalendarQuestion(text) { return .queryCalendar }
-            if IntentProcessor(client: nil, model: nil, calendar: calendar).rulesOnly(text, now: now).kind == .commitment || hasTaskFraming(text) { return .createTask }
-            return .capture
-        }
+        CommandRouter.intent(for: raw, now: now, calendar: calendar).operation
     }
 
     static func addressesAssistantWithoutRequest(_ text: String) -> Bool {

@@ -29,11 +29,12 @@ extension ReminderSchedulerTests {
         let (h, center, s) = try setup()
         let (_, id) = try await create(h, "Remind me to call Sam tomorrow at 10 AM")
         await s.reconcile()
-        XCTAssertEqual(ExecutionRouter.operation(for: "Move that reminder to Sunday.", now: h.clock.now, calendar: ist).name, "ChangeItem")
+        XCTAssertEqual(ExecutionRouter.operation(for: "Move that reminder to Sunday.", now: h.clock.now, calendar: ist).name, "UpdateTask")
+        XCTAssertNil(try h.store.item(id: id)?.deadline, "a reminder time is not a deadline")
         let resolver = ContextResolver(calendar: ist)
         let res = resolver.resolve("Move that reminder to Sunday.", items: try h.store.all(), goals: [], context: ConversationContext(selected: nil, recent: [id]), now: h.clock.now)
         guard case let .proposal(p) = res else { return XCTFail("\(res)") }
-        XCTAssertEqual(p.request.action, BuiltInAction.reschedule)
+        XCTAssertEqual(p.request.action, BuiltInAction.scheduleReminder, "a reminder without a deadline: its reminder time moves, no deadline is invented")
         // Unconfirmed: nothing changes.
         let refused = await h.broker.submit(p.request)
         XCTAssertNotEqual(refused.status, .succeeded)

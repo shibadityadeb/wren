@@ -19,29 +19,34 @@ hold ⌥ Space 🎙 "what is gradient descent?"                        → answe
 
 ## What it does
 
-- **Captures and reminds.** Natural-language tasks and reminders ("by Friday", "every weekday at 3 PM") are saved locally and scheduled with macOS. Repeating reminders follow daylight saving. Changing or completing one updates its notification, and a restart never duplicates it.
+- **Captures and reminds.** Natural-language tasks and reminders ("I need to submit the assignment by Friday", "can you make a reminder to call Sam tomorrow at 10 AM?", "every weekday at 3 PM") are saved locally and scheduled with macOS, and Wren tells you exactly what macOS accepted.
+  - A deadline gets a heads-up the day before and a reminder on the day. A reminder time is never turned into a deadline.
+  - Repeating reminders follow daylight saving. Changing or completing one updates its notification, and a restart never duplicates it.
 - **Push-to-talk.** Hold ⌥ Space, speak, let go. Wren shows "I'm listening…", turns the microphone off the moment you release, transcribes on this Mac, shows what it heard and runs it, with no Return press needed. It asks first when it isn't sure it heard you, and it never listens in the background.
-- **Knows which tool you mean.** Naming GPT or ChatGPT always means ChatGPT. A question that names no assistant goes to Wren's local AI. "Continue that research" or "open that in GPT" keeps the earlier request's tool.
+- **Knows which tool you mean.** Wren reads what you asked it to do before what it's about, with explicit rules rather than a guess.
+  - "Remind me to ask GPT about physics tomorrow" is a reminder. "Ask GPT to research physics" goes to ChatGPT.
+  - A question that names no assistant goes to Wren's local AI or your own items. Email and calendar questions go to those accounts.
+  - "Continue that research" or "open that in GPT" keeps the earlier request's tool.
 - **Asks in ChatGPT.** By default "ask GPT …" opens the ChatGPT website in your own browser and account with your question already in the box. You press Enter, and it's a real ChatGPT conversation you continue there.
   - ChatGPT doesn't let apps send for you, and OpenAI offers no supported way for an app to see the answer. Wren never says "done".
   - With **Detect conversation automatically**, Wren watches only that tab's address, so it knows when you've sent the question and saves the real conversation link.
   - Optionally, **run with connected ChatGPT in Wren**: your plan via Sign in with ChatGPT, not an API key, with the real answer, reasoning effort and web-search evidence stored in Wren. Wren notifies you when it finishes. These results aren't in ChatGPT's history, and Wren never says they are.
 - **Watches your inbox while it runs.** Gmail is read-only by default.
-  - Important new mail gets one alert, such as "Important email from Sam", with the reason. You can snooze it.
+  - Important new mail gets one alert, such as "Important email from Sam", with the subject, its first sentence and the reason. Clicking it opens that conversation in Gmail. You can snooze it.
   - Optional: a morning email digest and quiet hours.
   - Your email is never sent to an AI service.
 - **One router for everything.** Typing, the capture panel and voice all go through the same steps. Wren asks when something is unclear, and anything that changes existing data waits for your confirmation.
 
 ## Status
 
-Wren is a **preview** (0.11). Every feature below is built and covered by automated tests. "Verified live" means it was also checked against the real service or real macOS; the record is in [docs/MANUAL_TESTS.md](docs/MANUAL_TESTS.md).
+Wren is a **preview** (0.12). Every feature below is built and covered by automated tests. "Verified live" means it was also checked against the real service or real macOS; the record is in [docs/MANUAL_TESTS.md](docs/MANUAL_TESTS.md).
 
 | Feature | Verified live |
 |---|---|
 | Tasks and reminders from your words | Yes, in the running app |
 | Running GPT requests in Wren: high reasoning effort, web search with sources | Yes, on a real ChatGPT plan |
 | Opening GPT requests on the ChatGPT website, linking the conversation | **Not yet. [Help test it](docs/TESTING_GUIDE.md)** |
-| Gmail sync and triage (read-only) | Yes, on a real Google account |
+| Gmail sync and triage (read-only), and the alert's Gmail link | Yes, on a real Google account |
 | Voice with a real microphone, notification delivery and click-through, Gmail Mark as read | **Not yet. [Help test it](docs/TESTING_GUIDE.md)** |
 | Notion, Calendar | Built; needs a sign-in to verify |
 
@@ -101,7 +106,7 @@ The full policy is at [website/privacy](website/privacy/index.html), and every d
 | [Testing guide](docs/TESTING_GUIDE.md) | Trying Wren with your own accounts |
 | [Changelog](CHANGELOG.md) | What changed in each version |
 | [Architecture](ARCHITECTURE.md) | How it's built |
-| [Manual test record](docs/MANUAL_TESTS.md) and [audit report](docs/AUDIT_REPORT.md) | What has been verified, and how |
+| [Manual test record](docs/MANUAL_TESTS.md), [execution audit](docs/EXECUTION_AUDIT.md) and [audit report](docs/AUDIT_REPORT.md) | What has been verified and how, and how your words become actions |
 | [Maintainer setup](docs/MAINTAINER_SETUP.md) | Provider registration, releases, signing |
 
 ## For developers

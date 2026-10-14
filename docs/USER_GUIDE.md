@@ -33,11 +33,28 @@ Everything Wren does, in detail. For a one-page list of keys and phrases, see [S
 | Pause notifications | **Pause** at the bottom of the menu, or Settings › Notifications: for 1 hour, until the end of today, or until you resume |
 | Export, back up, restore | Settings › Your data |
 | Reset | Settings › Reset |
-| Set a reminder | Type or say "remind me to call Sam tomorrow at 10 AM", "remind me to submit the report Friday evening" or "remind me to take a break every weekday at 3 PM". Or use **New reminder** in the window. |
+| Set a reminder | Type or say "remind me to call Sam tomorrow at 10 AM", "can you make a reminder to call Sam tomorrow at 10 AM?", "don't let me forget to water the plants tomorrow" or "remind me to take a break every weekday at 3 PM". Or use **New reminder** in the window. |
+| Add a task | "I need to submit the assignment by Friday", "make a task to follow up with the recruiter", "the essay is due Monday". Wren shows **Task created** with the deadline (or "no deadline") and the reminders it scheduled. |
 | Change or snooze a reminder | "Move my API reminder to Sunday at noon" or "snooze the current reminder for 30 minutes". Wren shows the change; Return confirms. |
-| Ask ChatGPT | Type "ask ChatGPT to explain quantum physics" or "can you check on GPT what is quantum physics". The panel shows the question and the real answer from your ChatGPT plan, or Connect ChatGPT if you aren't signed in. A question that names no assistant lets you choose local AI, ChatGPT or saving it. Start with "Note:" to just save text. |
+| Ask ChatGPT | Type or say "ask ChatGPT to explain quantum physics" or "search in GPT for research on agentic AI". By default ChatGPT opens in your browser with the question in its box, and you press Enter there; in "run in Wren" mode the answer comes back to Wren. A question that names no assistant ("what is gradient descent?") goes to Wren's local AI. Start with "Note:" to just save text. |
 | Talk to Wren | **Hold ⌥ Space**, say what you need, let go. Wren transcribes it on this Mac and runs it. It never listens in the background. |
 | Quit | ⌘Q, Wren › Quit Wren, right-click the bird › Quit Wren, or **Quit** at the bottom of the menu. |
+
+### How Wren decides what to do
+
+Wren reads what you asked it to do first, then what that request is about. "Remind me to ask GPT about quantum physics tomorrow" is a reminder for tomorrow (nothing goes to ChatGPT now), while "ask ChatGPT to remind me about my taxes" goes to ChatGPT. Typing, the menu-bar field and voice all use the same rules:
+
+| You say | Wren does |
+|---|---|
+| "remind me…", "can you make a reminder to…", "don't let me forget to…" | Creates a reminder |
+| "I need to / have to / must …", "make a task to…", "the essay is due Friday" | Creates a task, with the deadline you said (or none) |
+| "move…", "snooze…", "mark … as done", "remind me a day before the deadline" | Changes that item, after showing you the change |
+| "ask GPT…", "tell ChatGPT to…", "search in GPT for…" | Sends it to ChatGPT, in the mode you chose. It never asks "local or ChatGPT?" |
+| A question that names no assistant | Answers from your items ("what should I work on today?") or with the local AI ("what is gradient descent?") |
+| "anything urgent in my inbox?", "what meetings do I have tomorrow?" | Asks your connected Gmail or calendar; if it isn't connected, says so instead of guessing |
+| Something unclear | Asks one short question |
+
+To see how Wren reads a sentence without running it, a developer can use `swift run wren-tools route "…"`.
 
 ### Reminders
 
@@ -49,6 +66,8 @@ A reminder is only reported as set after it's saved and handed to macOS:
 4. Each time Wren starts, it checks its reminders against macOS's pending notifications and fixes any difference without creating duplicates.
 
 **Repeating reminders** ("every day at 9", "every weekday at 3 PM", "every Monday and Thursday at 8am") use macOS's repeating schedule at your local clock time, so they stay at 3 PM through daylight-saving changes and when you travel. **Done** in the notification finishes that day's one; completing the item in Wren ends the series.
+
+**Deadlines and reminders are separate.** "Remind me to call Sam tomorrow at 10 AM" sets a reminder time; it doesn't give the item a deadline. "Remind me to submit the form by Friday at 5 PM" sets both. A task with a deadline ("I need to submit the assignment by Friday") gets a reminder on the day (at its time, or at your default reminder hour for a date like "Friday") and, if the deadline is at least a day away, **one heads-up the day before** at the same hour. Turn the heads-up off in Settings › Notifications. A reminder time you choose yourself replaces both. Completing or deleting the task withdraws them.
 
 **When something is unclear, Wren asks instead of guessing.** "Remind me to call Sam" gets "When should I remind you…?", and "tomorrow at 3" gets "Is that 3 AM or 3 PM?". Your next answer completes the request. A time that has already passed is refused. A date without a time ("on Friday") uses your default reminder hour, and Wren says so.
 
@@ -185,7 +204,7 @@ Voice is a tool you pick up. Wren never listens in the background and has no set
 - Both shortcuts can be changed or turned off: push-to-talk in Connectors › Voice, typed capture in Settings.
 - Connectors › Voice › **Check what I said before Wren acts** makes every spoken command wait for Return.
 
-What you said goes through exactly the same router as typing: "remind me to call Sam tomorrow at 10 AM" sets a reminder, "I need to finish the report by Friday" saves a task, "ask GPT to research quantum physics" sends a GPT request, "do I have an important email from the recruiter?" checks Gmail.
+What you said goes through exactly the same router as typing: "remind me to call Sam tomorrow at 10 AM" sets a reminder, "I need to finish the report by Friday" creates a task with its deadline and reminders, "ask GPT to research quantum physics" sends a GPT request, "do I have an important email from the recruiter?" checks Gmail.
 
 **Privacy:**
 - The microphone is on only while you hold ⌥ Space (or after you click Voice, until you stop). It's off while Wren transcribes and runs the command, and it never turns on by itself: not at launch, not after a command, an error, a relaunch, unlocking the screen or a permission change. Locking the screen or sleeping cancels a recording. macOS asks for Microphone and Speech Recognition the first time; if you refuse, nothing is recorded and Wren shows a link to the privacy settings.
@@ -213,7 +232,7 @@ Afterwards Wren shows the Google account, which permissions Google actually gran
 
 **Inbox.** While Wren runs (and "Check for new mail while Wren runs" is on), it checks the inbox every 5 minutes by default, reading only what changed since the last check. It never looks at Spam or Trash. Unread mail is ranked into Urgent, Time-sensitive, Needs a reply, Professional (work, recruiting), Financial, and Informational, each with the reason (for example "deadline within a day; asks you something"). Promotions and newsletters are low priority, not "spam", and an unfamiliar sender isn't treated as suspicious. **Correct** changes a message's category or always/never treats a sender as important.
 
-**Alerts.** Mail at or above your threshold (default: urgent and time-sensitive) gets one notification, such as "Important email from Sam", with the subject and Wren's reason (never the message body). The notification offers **Open email** and **Snooze alert for 1 hour** (the alert comes back once if the message is still unread), plus **Mark as read** when allowed. Each message alerts once; another message in the same conversation doesn't alert again unless it's more urgent; several at once become one summary; quiet hours (default 22:00–07:00) hold alerts until they end. Clicking an alert opens the message in Wren, with **Open in Gmail**, **Mark as read** (when allowed), **Add task…**, **Dismiss** and **Snooze**. Dismiss and Snooze change Wren's alert only, never Gmail. Opening an alert never marks the message read. Settings › Voice, GPT and Gmail has the check interval, alert threshold, quiet hours, digest time and **Play notification sounds**. Checking happens only while Wren is running; after you quit, nothing checks Gmail.
+**Alerts.** Mail at or above your threshold (default: urgent and time-sensitive) gets one notification, such as "Important email from Sam", with the subject, the first sentence of the email (from Gmail's own preview; turn it off in Inbox settings) and Wren's reason. **Clicking the alert opens that conversation in Gmail**, in the account you connected. The notification also offers **Show in Wren**, **Snooze alert for 1 hour** (the alert comes back once if the message is still unread) and **Dismiss alert**, plus **Mark as read** when allowed. Each message alerts once; another message in the same conversation doesn't alert again unless it's more urgent; several at once become one summary; quiet hours (default 22:00–07:00) hold alerts until they end. **Show in Wren** opens the message in Wren, with **Open in Gmail**, **Mark as read** (when allowed), **Add task…**, **Dismiss** and **Snooze**. Dismiss and Snooze change Wren's alert only, never Gmail. Opening an alert never marks the message read. Settings › Voice, GPT and Gmail has the check interval, alert threshold, quiet hours, digest time and **Play notification sounds**. Checking happens only while Wren is running; after you quit, nothing checks Gmail.
 
 **Email digest.** Once a day at the time and time zone you choose (default 08:00, this Mac's zone), Wren sums up unread inbox mail since the last digest plus older important unread mail (up to 14 days), one entry per conversation: sender, subject, Gmail's own preview (factual), Wren's inferred category and reason, and a suggested next step. If the Mac was asleep or Wren wasn't running, the digest comes once when Wren next runs, marked late. With the digest on, the morning briefing leaves email out so you're not told twice.
 

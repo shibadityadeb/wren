@@ -81,10 +81,14 @@ public struct Briefing: Sendable, Equatable {
     public var decisions: [Insight] = []
 
     public var external: ExternalBriefing?
+    /// Open items marked important (high priority) that aren't already listed by date.
+    public var important: [SummaryItem] = []
+    /// How many of `upcoming` are due tomorrow (named on their own in the notification).
+    public var dueTomorrowCount = 0
 
     public var isEmpty: Bool {
         overdue.isEmpty && dueToday.isEmpty && upcoming.isEmpty && waiting.isEmpty && remindersToday.isEmpty && decisions.isEmpty
-            && (external?.isEmpty ?? true)
+            && important.isEmpty && (external?.isEmpty ?? true)
     }
 
     /// Every insight this briefing shows, for marking as surfaced.
@@ -101,7 +105,9 @@ public struct Briefing: Sendable, Equatable {
         var counts: [String] = []
         if !overdue.isEmpty { counts.append("\(overdue.count) overdue") }
         if !dueToday.isEmpty { counts.append("\(dueToday.count) due today") }
-        if !upcoming.isEmpty { counts.append("\(upcoming.count) coming up") }
+        if dueTomorrowCount > 0 { counts.append("\(dueTomorrowCount) due tomorrow") }
+        if upcoming.count > dueTomorrowCount { counts.append("\(upcoming.count - dueTomorrowCount) more coming up") }
+        if !important.isEmpty { counts.append("\(important.count) marked important") }
         if !waiting.isEmpty { counts.append("\(waiting.count) follow-up\(waiting.count == 1 ? "" : "s") due") }
         if !decisions.isEmpty { counts.append("\(decisions.count) need\(decisions.count == 1 ? "s" : "") a decision") }
         if let e = external {
@@ -110,7 +116,7 @@ public struct Briefing: Sendable, Equatable {
         }
         if !remindersToday.isEmpty && counts.isEmpty { counts.append("\(remindersToday.count) reminder\(remindersToday.count == 1 ? "" : "s") today") }
         var s = counts.joined(separator: ", ") + "."
-        if let first = focus.first ?? upcoming.first { s += " Start with “\(first.title)”." }
+        if let first = focus.first ?? important.first ?? upcoming.first { s += " Start with “\(first.title)”." }
         return s
     }
 
@@ -135,6 +141,9 @@ public struct Briefing: Sendable, Equatable {
         var b = Briefing(day: calendar.dayKey(for: now), overdue: s(overdue), dueToday: s(today), upcoming: s(upcoming),
                          waiting: s(waiting), remindersToday: s(reminders), decisions: decisions)
         b.surfacedInsights = followUps.filter { f in b.waiting.contains { $0.id == f.subjectUUID } } + decisions
+        let listed = shown.union(reminders.map(\.id))
+        b.important = s(pick { $0.priority == .high && !listed.contains($0.id) })
+        b.dueTomorrowCount = b.upcoming.filter { $0.deadline.map { calendar.isDate($0, inSameDayAs: v.startOfTomorrow) } ?? false }.count
         return b
     }
 }

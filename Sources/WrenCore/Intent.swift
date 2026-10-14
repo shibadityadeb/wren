@@ -45,7 +45,8 @@ public struct IntentProcessor: Sendable {
         var title = Self.cleanTitle(text)
         // The deadline is stored separately: "Finish this report by Friday" → "Finish this report".
         if let p = parsed {
-            let pattern = "\\s*,?\\s*(?:by|on|before|due|at|until|for)?\\s*" + NSRegularExpression.escapedPattern(for: p.phrase) + "[.!]?$"
+            // "\\b" keeps "on" inside a word ("application next Monday") from being taken as a connector.
+            let pattern = "(?:[\\s,]+(?:by|on|before|due|at|until|for)\\b)?\\s*\\b" + NSRegularExpression.escapedPattern(for: p.phrase) + "[.!]?$"
             let stripped = title.replacingOccurrences(of: pattern, with: "", options: [.regularExpression, .caseInsensitive])
                 .trimmingCharacters(in: .whitespaces)
             if stripped.count >= 3 { title = stripped.prefix(1).uppercased() + stripped.dropFirst() }
@@ -185,7 +186,7 @@ public struct IntentProcessor: Sendable {
         // The date is stored separately, so drop it from the end of the title ("Submit review by Friday" → "Submit review").
         var cleanTitle = title
         if let p = parsed {
-            let pattern = "\\s*(?:by|on|before|due|at|until)?\\s*" + NSRegularExpression.escapedPattern(for: p.phrase) + "\\.?$"
+            let pattern = "(?:[\\s,]+(?:by|on|before|due|at|until)\\b)?\\s*\\b" + NSRegularExpression.escapedPattern(for: p.phrase) + "\\.?$"
             let stripped = cleanTitle.replacingOccurrences(of: pattern, with: "", options: [.regularExpression, .caseInsensitive])
             if stripped.count >= 3 { cleanTitle = stripped }
         }

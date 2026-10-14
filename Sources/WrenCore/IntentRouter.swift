@@ -103,21 +103,23 @@ public enum ReminderFollowUp {
     }
 }
 
-/// Deterministic routing. The local model is only consulted afterwards, for `.capture` inputs that
-/// look like commands, and its answer is checked against the user's own words.
+/// Phrase readers used by `CommandRouter` (explicit notes, requests to ChatGPT, questions).
 public enum IntentRouter {
+    /// The older, coarser view of `CommandRouter.intent`, kept for callers that only need the kind.
+    /// There is one router: this maps its decision and never decides differently.
     public static func route(_ raw: String, now: Date, calendar: Calendar = .current, resolver: ContextResolver? = nil) -> Intent {
-        let text = ReminderCommand.stripAddress(raw).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return .capture }
-        if let saved = explicitCapture(text) { return .explicitCapture(saved) }
-        if ReminderCommand.parse(text, now: now, calendar: calendar) != nil { return .reminder }
-        if let ask = aiRequest(text) { return .askAI(ask) }
-        let r = resolver ?? ContextResolver(calendar: calendar)
-        if isQuestion(text), let q = ContextResolver.queryKind(text) { return .storedQuery(q) }
-        if r.command(text, now: now) != nil { return .itemCommand }
-        if let q = ContextResolver.queryKind(text), text.lowercased().firstMatch(of: /^(?:show|list|tell me|give me)\b/) != nil { return .storedQuery(q) }
-        if isQuestion(text) { return .generalQuestion(AIRequest(prompt: questionPrompt(text), original: raw, target: nil)) }
-        return .capture
+        switch CommandRouter.intent(for: raw, now: now, calendar: calendar).operation {
+        case let .saveNote(body): return .explicitCapture(body)
+        case .createReminder: return .reminder
+        case let .delegateToChatGPT(r): return .askAI(r)
+        case .changeItem: return .itemCommand
+        case let .queryStoredItems(q?): return .storedQuery(q)
+        case let .generalQuestion(r): return .generalQuestion(r)
+        case .searchGmail, .queryCalendar:
+            let text = ReminderCommand.stripAddress(raw)
+            return .generalQuestion(AIRequest(prompt: questionPrompt(text), original: raw, target: nil))
+        default: return .capture
+        }
     }
 
     // MARK: Explicit capture
@@ -269,6 +271,7 @@ public enum IntentRouter {
         case .overdue: cues = try! Regex(#"\b(overdue|late|missed|behind)\b"#)
         case .dueSoon: cues = try! Regex(#"\b(due|deadline\w*|coming up|upcoming|this week|soon)\b"#)
         case .doneRecently: cues = try! Regex(#"\b(done|finish\w*|complet\w*|accomplish\w*)\b"#)
+        case .today: cues = try! Regex(#"\b(today|first|next|now|plate)\b"#)
         }
         return s.firstMatch(of: cues) != nil
     }

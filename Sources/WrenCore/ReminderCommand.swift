@@ -27,9 +27,49 @@ public enum ReminderCommand: Equatable, Sendable {
         return t
     }
 
+    /// The request in the form "remind me …" or "set a reminder for …"; nil when it isn't a request to
+    /// be reminded. Reads the outer request only: "Can you make a reminder to …", "Could you remind me
+    /// to …", "Don't let me forget to …", "I'd like a reminder about …", "Reminder: …", "Ping me at 5
+    /// to …", "Tomorrow at 9, remind me to …". `request` has address and politeness removed already
+    /// (`CommandGrammar.request`).
+    public static func canonical(_ request: String) -> String? {
+        let t = request.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = t.lowercased()
+        // "Remind me what the deadline is" asks Wren to tell, not to schedule.
+        if lower.firstMatch(of: /^remind me (?:what|who|where|when|why|how|which|whether|if)\b/) != nil { return nil }
+        if triggers.contains(where: { lower.hasPrefix($0) }) { return t }
+        let verbs = #"(?:make|create|add|schedule|set|set up|setup|put in|put|give me|new)"#
+        let noun = #"\s+(?:me\s+)?(?:a\s+|an\s+)?(?:new\s+)?reminder"#
+        let maps: [(String, String)] = [
+            ("^" + verbs + noun + #"\s+(?:for me\s+)?(?:to|that)\s+"#, "remind me to "),
+            ("^" + verbs + noun + #"\s+(?:for me\s+)?(?:about|of)\s+"#, "remind me about "),
+            ("^" + verbs + noun + #"\s+for\s+"#, "set a reminder for "),
+            ("^" + verbs + noun + #"\s*[:,\-–]\s*"#, "remind me to "),
+            (#"^reminder\s*[:\-–]\s*"#, "remind me to "),
+            (#"^(?:don'?t|do not) let me forget\s+to\s+"#, "remind me to "),
+            (#"^(?:don'?t|do not) let me forget\s+(?:about\s+)?"#, "remind me about "),
+            (#"^(?:i(?:'d| would)? like|i want|i need)\s+(?:a reminder|to be reminded)\s+(?:to|that)\s+"#, "remind me to "),
+            (#"^(?:i(?:'d| would)? like|i want|i need)\s+(?:a reminder|to be reminded)\s+(?:about|of)\s+"#, "remind me about "),
+            (#"^(?:i(?:'d| would)? like|i want|i need)\s+a reminder\s+for\s+"#, "set a reminder for "),
+            (#"^(?:ping|nudge) me\s+"#, "remind me "),
+            (#"^(?:notify|alert) me\s+to\s+"#, "remind me to "),
+        ]
+        for (pattern, replacement) in maps {
+            if let r = t.range(of: pattern, options: [.regularExpression, .caseInsensitive]), r.lowerBound == t.startIndex, r.upperBound < t.endIndex {
+                return replacement + t[r.upperBound...]
+            }
+        }
+        // "Tomorrow at 9, remind me to call Sam": the time first, then the request.
+        if let m = t.firstMatch(of: /^(?i)(.{2,40}?),?\s+remind me\s+(to|about|that)\s+(.+)$/),
+           let d = DateParser().parse(String(m.1), now: Date()), d.phrase.count >= m.1.count - 4 {
+            return "remind me \(m.2) \(m.3) \(m.1)"
+        }
+        return nil
+    }
+
     /// nil when the text isn't a reminder request.
     public static func parse(_ raw: String, now: Date, calendar: Calendar = .current, defaultHour: Int = 10) -> ReminderCommand? {
-        let text = stripAddress(raw)
+        guard let text = canonical(CommandGrammar.request(stripAddress(raw))) else { return nil }
         let lower = text.lowercased()
         guard let trigger = triggers.first(where: { lower.hasPrefix($0) }) else { return nil }
         let body = String(text.dropFirst(trigger.count))
@@ -73,6 +113,17 @@ public enum ReminderCommand: Equatable, Sendable {
         return .create(title: title, when: .once(when), explanation: explanation)
     }
 
+    /// The deadline the user stated in a reminder request ("remind me to submit the form by Friday",
+    /// "… before Monday", "… due Thursday"). nil when the time is only when to remind ("tomorrow at 10").
+    public static func statedDeadline(_ raw: String, now: Date, calendar: Calendar = .current) -> ParsedDate? {
+        guard let text = canonical(CommandGrammar.request(stripAddress(raw))),
+              let p = DateParser(calendar: calendar).parse(text, now: now) else { return nil }
+        let lower = text.lowercased(), phrase = p.phrase.lowercased()
+        if phrase.hasPrefix("by ") || phrase.hasPrefix("before ") { return p }
+        guard let r = lower.range(of: phrase) else { return nil }
+        return lower[..<r.lowerBound].range(of: #"\b(?:by|before|due|until|no later than)\s*$"#, options: .regularExpression) != nil ? p : nil
+    }
+
     /// The task in the user's words, without the trigger and the date or repeat phrase.
     static func cleanTitle(_ body: String, removing phrases: [String]) -> String {
         var t = body
@@ -82,7 +133,7 @@ public enum ReminderCommand: Equatable, Sendable {
         t = t.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
         t = t.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
         // "remind me in 30 minutes to stretch" leaves "to stretch".
-        if let r = t.range(of: #"^(to|about|that)\s+"#, options: [.regularExpression, .caseInsensitive]) { t.removeSubrange(r) }
+        if let r = t.range(of: #"^(?:for\s+)?(to|about|that)\s+"#, options: [.regularExpression, .caseInsensitive]) { t.removeSubrange(r) }
         // Connectors left dangling once the date is gone: "call Sam at", "report by", "on".
         while let r = t.range(of: #"\s+(at|on|by|for|in|from|starting|every)$"#, options: [.regularExpression, .caseInsensitive]) {
             t.removeSubrange(r)

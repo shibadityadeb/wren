@@ -45,6 +45,23 @@ final class VoiceTests: XCTestCase {
 
     // MARK: Lifecycle
 
+    /// The push-to-talk handler judges a tap by how long the microphone was really recording: after
+    /// a permission prompt the press can be long while recording has only just begun.
+    func testListeningSinceIsWhenRecordingReallyBegan() async {
+        let perms = Perms()
+        let (v, s, c) = make(perms: perms)
+        perms.onAsk = { c.t = c.t.addingTimeInterval(2) }   // the macOS prompt takes two seconds
+        let pressed = c.t
+        XCTAssertNil(v.listeningSince)
+        await v.press(.hold)
+        XCTAssertEqual(v.listeningSince, pressed.addingTimeInterval(2), "recording began after the prompt, not at key-down")
+        v.continueHandsFree()
+        XCTAssertNotNil(v.listeningSince, "still recording, hands-free")
+        v.release()
+        XCTAssertNil(v.listeningSince, "the microphone is closed")
+        s.deliver("remind me to stretch in 5 minutes")
+    }
+
     func testHoldListensReleaseTranscribesThenProcessesOnceWithTheMicrophoneOffThroughout() async {
         let (v, s, _) = make()
         var phases: [VoiceSession.Phase] = []

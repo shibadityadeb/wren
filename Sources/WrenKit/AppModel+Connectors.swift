@@ -54,7 +54,7 @@ final class ConnectorHub {
             let any = on || (calendar?.state.isUsable ?? false)
             calPerm.forEach { try? policy?.setGrant($0, granted: any) }
         }
-        [chatgpt, voice, gmail, macCalendar, calendar, notion, PlannedConnector(.localFiles), PlannedConnector(.shortcuts)].forEach(registry.register)
+        [chatgpt, voice, gmail, macCalendar, calendar, notion, PlannedConnector(.localFiles), PlannedConnector(.shortcuts), PlannedConnector(.slack)].forEach(registry.register)
     }
 
     /// Earlier builds kept an OpenAI model choice and status. Credentials earlier builds put in the
@@ -78,21 +78,6 @@ final class ConnectorHub {
 @MainActor
 extension AppModel {
     // MARK: Questions answered from connected services
-
-    /// Email, calendar and "what needs my attention" questions. nil = not such a question.
-    func connectorAnswer(_ text: String) async -> ContextResolution? {
-        let s = text.lowercased()
-        if s.range(of: #"\bneeds? my attention\b|\bwhat should i (focus|look) at\b"#, options: .regularExpression) != nil { return .answer(await attentionAnswer(text)) }
-        if EmailQuestion.isEmailQuestion(text) {
-            guard hub.gmail.state.isUsable else { return .notFound("Gmail isn't connected. Open Connectors › Gmail to set it up.") }
-            do { return .answer(try await emailAnswer(text)) } catch { return .notFound(errorText(error)) }
-        }
-        if CalendarQuestion.isCalendarQuestion(text) {
-            guard calendarUsable else { return .notFound("No calendar is connected. Open Connectors › Calendar and allow access to the calendars on this Mac.") }
-            do { return .answer(try await calendarAnswer(text)) } catch { return .notFound(errorText(error)) }
-        }
-        return nil
-    }
 
     func errorText(_ e: Error) -> String { (e as? LocalizedError)?.errorDescription ?? "\(e)" }
 

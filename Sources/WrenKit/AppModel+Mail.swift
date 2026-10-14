@@ -27,6 +27,7 @@ extension AppModel {
 
     func scheduleMailCheck(after seconds: TimeInterval? = nil) {
         mailTimer?.invalidate()
+        guard !stopping else { mailTimer = nil; nextMailCheck = nil; return }
         let interval = seconds ?? TimeInterval(mailPrefs.pollingMinutes * 60) * mailBackoff
         mailTimer = Timer.scheduledTimer(withTimeInterval: max(1, interval), repeats: false) { [weak self] _ in
             Task { @MainActor in await self?.checkMail(.system("mail monitor")) }
@@ -38,7 +39,7 @@ extension AppModel {
     /// One check: sync, alerts, then the digest if one is due. `origin` is the user for "Check now".
     func checkMail(_ origin: ActionOrigin) async {
         defer { if gmailUsable { scheduleMailCheck() } else { mailTimer?.invalidate(); nextMailCheck = nil } }
-        guard gmailUsable, let broker, !mailSyncing else { return }
+        guard gmailUsable, let broker, !mailSyncing, !stopping else { return }
         if case .system = origin, !backgroundMailAllowed { mailStatus = "Background checking is off."; return }
         mailSyncing = true
         defer { mailSyncing = false }
@@ -92,8 +93,7 @@ extension AppModel {
                                        now: clock.now, calendar: clock.calendar)
         for id in d.individual {
             guard let item = mailbox.items[id] else { continue }
-            let c = item.classification
-            let n = MailAlertText.make(item)
+            let n = MailAlertText.make(item, preview: mailPrefs.alertPreview)
             _ = await notifications.deliverMailAlert(id: id, title: n.title, body: n.body, canMarkRead: canMarkRead)
         }
         if !d.summarized.isEmpty {
@@ -130,6 +130,7 @@ extension AppModel {
     func handleMail(_ r: NotificationService.MailResponse) {
         switch r {
         case let .open(id): openMail(id)
+        case let .openInGmail(id): openInGmail(id)
         case let .markRead(id): Task { await markRead(id) }
         case let .dismiss(id): dismissMailAlert(id)
         case let .snooze(id): snoozeMail(id, hours: 1)
@@ -140,6 +141,15 @@ extension AppModel {
     func openMail(_ id: String) {
         route = mailbox.items[id] != nil ? .mailMessage(id) : .inbox
         openMainWindow()
+    }
+
+    /// That exact conversation in Gmail on the web, in the account Wren read it from. The link form
+    /// (`mail.google.com/mail/?authuser=<account>#all/<thread id>`) was checked against a real
+    /// account (docs/MANUAL_TESTS.md M-GMAIL-LINK). If the message is no longer in Wren's inbox,
+    /// Wren's Inbox opens instead of a blank Gmail page.
+    func openInGmail(_ id: String) {
+        guard let m = mailbox.items[id]?.message else { route = .inbox; openMainWindow(); return }
+        if !NSWorkspace.shared.open(m.webURL) { openMail(id) }
     }
 
     /// Wren's alert only; the Gmail message is unchanged.

@@ -9,6 +9,8 @@ import os
 final class NotificationService: NSObject, UNUserNotificationCenterDelegate, WrenNotifier, ReminderNotificationCenter {
     enum Category: String {
         case reminder = "WREN_REMINDER", briefing = "WREN_BRIEFING", checkIn = "WREN_CHECKIN", checkInItem = "WREN_CHECKIN_ITEM"
+        /// The heads-up the day before a deadline: Done only, so snoozing it can't move the real reminder.
+        case advance = "WREN_ADVANCE"
         case delegation = "WREN_DELEGATION", mail = "WREN_MAIL", mailWithRead = "WREN_MAIL_READ", digest = "WREN_DIGEST"
         /// "N more important emails": no Snooze or Mark as read (it isn't one message).
         case mailSummary = "WREN_MAIL_SUMMARY"
@@ -18,11 +20,12 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Wre
         case openBriefing = "WREN_OPEN_BRIEFING", review = "WREN_REVIEW", dismissCheckIn = "WREN_DISMISS_CHECKIN"
         case viewResult = "WREN_VIEW_RESULT"
         case openMail = "WREN_OPEN_MAIL", markRead = "WREN_MARK_READ", dismissMail = "WREN_DISMISS_MAIL", openDigest = "WREN_OPEN_DIGEST"
-        case snoozeMail = "WREN_SNOOZE_MAIL"
+        case snoozeMail = "WREN_SNOOZE_MAIL", openInGmail = "WREN_OPEN_IN_GMAIL"
     }
 
     /// What a click on a mail alert asked for. Mark as read is only offered when Google granted it.
-    enum MailResponse: Equatable { case open(String), markRead(String), dismiss(String), snooze(String), openDigest(String) }
+    /// `openInGmail` opens that exact conversation in Gmail (a click on the alert); `open` shows it in Wren.
+    enum MailResponse: Equatable { case open(String), openInGmail(String), markRead(String), dismiss(String), snooze(String), openDigest(String) }
 
     enum Response {
         case done(UUID), snoozeHour(UUID), later(UUID, String), tomorrow(UUID), open(UUID)
@@ -51,7 +54,8 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Wre
         let open = UNNotificationAction(identifier: Action.openBriefing.rawValue, title: "Open briefing", options: [.foreground])
         let review = UNNotificationAction(identifier: Action.review.rawValue, title: "Review", options: [.foreground])
         let dismiss = UNNotificationAction(identifier: Action.dismissCheckIn.rawValue, title: "Dismiss for today")
-        let openMail = UNNotificationAction(identifier: Action.openMail.rawValue, title: "Open email", options: [.foreground])
+        let openMail = UNNotificationAction(identifier: Action.openMail.rawValue, title: "Show in Wren", options: [.foreground])
+        let openInGmail = UNNotificationAction(identifier: Action.openInGmail.rawValue, title: "Open in Gmail", options: [.foreground])
         let snoozeMail = UNNotificationAction(identifier: Action.snoozeMail.rawValue, title: "Snooze alert for 1 hour")
         let markRead = UNNotificationAction(identifier: Action.markRead.rawValue, title: "Mark as read in Gmail")
         let dismissMail = UNNotificationAction(identifier: Action.dismissMail.rawValue, title: "Dismiss alert")
@@ -62,8 +66,9 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Wre
             UNNotificationCategory(identifier: Category.checkInItem.rawValue, actions: [done, tomorrow, later, dismiss], intentIdentifiers: []),
             UNNotificationCategory(identifier: Category.delegation.rawValue,
                                    actions: [UNNotificationAction(identifier: Action.viewResult.rawValue, title: "View result", options: [.foreground])], intentIdentifiers: []),
-            UNNotificationCategory(identifier: Category.mail.rawValue, actions: [openMail, snoozeMail, dismissMail], intentIdentifiers: []),
-            UNNotificationCategory(identifier: Category.mailWithRead.rawValue, actions: [openMail, markRead, snoozeMail, dismissMail], intentIdentifiers: []),
+            UNNotificationCategory(identifier: Category.mail.rawValue, actions: [openInGmail, openMail, snoozeMail, dismissMail], intentIdentifiers: []),
+            UNNotificationCategory(identifier: Category.mailWithRead.rawValue, actions: [openInGmail, openMail, markRead, snoozeMail, dismissMail], intentIdentifiers: []),
+            UNNotificationCategory(identifier: Category.advance.rawValue, actions: [done], intentIdentifiers: []),
             UNNotificationCategory(identifier: Category.mailSummary.rawValue,
                                    actions: [UNNotificationAction(identifier: Action.openMail.rawValue, title: "Open Inbox", options: [.foreground]), dismissMail], intentIdentifiers: []),
             UNNotificationCategory(identifier: Category.digest.rawValue,
@@ -206,7 +211,7 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Wre
         content.title = r.title
         content.body = r.body
         content.sound = sound
-        content.categoryIdentifier = Category.reminder.rawValue
+        content.categoryIdentifier = (r.isAdvance ? Category.advance : Category.reminder).rawValue
         content.userInfo = ["commitmentID": r.commitmentID.uuidString]
         content.threadIdentifier = "reminders"
         let trigger: UNCalendarNotificationTrigger
@@ -271,7 +276,10 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Wre
                 case Action.markRead.rawValue: onResponse?(.mail(.markRead(messageID)))
                 case Action.dismissMail.rawValue: onResponse?(.mail(.dismiss(messageID)))
                 case Action.snoozeMail.rawValue: onResponse?(.mail(.snooze(messageID)))
-                case Action.openMail.rawValue, UNNotificationDefaultActionIdentifier: onResponse?(.mail(.open(messageID)))
+                case Action.openMail.rawValue: onResponse?(.mail(.open(messageID)))
+                // A click on the alert opens that conversation in Gmail (the "N more" summary opens Wren's Inbox).
+                case Action.openInGmail.rawValue, UNNotificationDefaultActionIdentifier:
+                    onResponse?(.mail(messageID.hasPrefix("summary-") ? .open(messageID) : .openInGmail(messageID)))
                 default: break
                 }
                 return

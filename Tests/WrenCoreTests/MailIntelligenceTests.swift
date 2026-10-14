@@ -442,14 +442,36 @@ extension MailIntelligenceTests {
         XCTAssertTrue(MailAlertPolicy.decide(&s, candidates: [], level: .important, quiet: off, now: now.addingTimeInterval(6000), calendar: cal).individual.isEmpty)
     }
 
-    func testAlertTextNamesTheSenderSubjectAndReasonButNeverTheBody() {
-        let m = mail("u", from: "Sam Lee <sam@acme.com>", subject: "Proposal confirmation requested today", snippet: "SECRET body text: please confirm by 5pm")
+    func testAlertTextNamesTheSenderSubjectAShortExcerptAndTheReason() {
+        let m = mail("u", from: "Sam Lee <sam@acme.com>", subject: "Proposal confirmation requested today",
+                     snippet: "Could you confirm your availability for an interview by tomorrow? The rest of the message has PRIVATE details that stay out.")
         let item = MailItem(message: m, classification: classify(m), firstSeenAt: now, baseline: false)
         let t = MailAlertText.make(item)
         XCTAssertEqual(t.title, "Important email from Sam Lee")
         XCTAssertTrue(t.body.contains("Proposal confirmation requested today"))
+        XCTAssertTrue(t.body.contains("Could you confirm your availability for an interview by tomorrow?"), "a concise factual excerpt: the first sentence")
+        XCTAssertFalse(t.body.contains("PRIVATE"), "never more than that sentence")
         XCTAssertTrue(t.body.contains("Why:"))
-        XCTAssertFalse(t.body.contains("SECRET"))
+        // Turned off in Settings: subject and reason only.
+        XCTAssertFalse(MailAlertText.make(item, preview: false).body.contains("Could you confirm"))
+    }
+
+    func testAlertExcerptIsShortAndSkipsARepeatedSubject() {
+        XCTAssertNil(MailAlertText.excerpt("Hi", subject: ""), "too little to say anything")
+        XCTAssertEqual(MailAlertText.excerpt("Invoice 42 - Payment of $120 is due Friday. Thanks", subject: "Invoice 42"), "Payment of $120 is due Friday.")
+        let long = String(repeating: "word ", count: 60)
+        let e = try? XCTUnwrap(MailAlertText.excerpt(long))
+        XCTAssertLessThanOrEqual(e?.count ?? 999, 122)
+        XCTAssertTrue(e?.hasSuffix("…") ?? false)
+    }
+
+    func testPreferencesSavedBeforeTheExcerptSettingStillLoad() throws {
+        var old = MailPreferences(); old.pollingMinutes = 9
+        var json = try XCTUnwrap(String(data: JSONEncoder().encode(old), encoding: .utf8))
+        json = json.replacingOccurrences(of: #","alertPreviewSetting":null"#, with: "")
+        let decoded = try JSONDecoder().decode(MailPreferences.self, from: Data(json.utf8))
+        XCTAssertEqual(decoded.pollingMinutes, 9, "the user's saved choices survive the upgrade")
+        XCTAssertTrue(decoded.alertPreview)
     }
 
     func testOlderMailboxFilesWithoutTheSnoozeFieldStillLoad() throws {

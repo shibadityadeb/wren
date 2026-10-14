@@ -40,7 +40,8 @@ final class BriefingContentTests: XCTestCase {
         XCTAssertEqual(b.waiting.map(\.title), ["Recruiter reply"])
         XCTAssertEqual(b.remindersToday.map(\.title), ["Undated with reminder"])
         XCTAssertEqual(b.focus.count, 3, "notification names a few things, not everything")
-        XCTAssertTrue(b.notificationBody.hasPrefix("3 overdue, 2 due today, 2 coming up, 1 follow-up due."))
+        XCTAssertEqual(b.dueTomorrowCount, 1, "Friday is tomorrow")
+        XCTAssertTrue(b.notificationBody.hasPrefix("3 overdue, 2 due today, 1 due tomorrow, 1 more coming up, 1 follow-up due."), b.notificationBody)
         XCTAssertTrue(b.notificationBody.contains("Start with “Overdue high”"))
         XCTAssertLessThan(b.notificationBody.count, 160)
     }

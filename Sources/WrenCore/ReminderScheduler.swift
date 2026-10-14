@@ -13,6 +13,15 @@ public struct ReminderRequest: Equatable, Sendable {
     public var title: String
     public var body: String
     public var trigger: Trigger
+    /// The heads-up before a deadline (not the reminder itself): its notification offers Done, not Snooze.
+    public var isAdvance = false
+}
+
+/// When to send the heads-up before a deadline: `days` before it, at `hour` (the default reminder time).
+public struct DeadlineAdvance: Equatable, Sendable {
+    public var days: Int
+    public var hour: Int
+    public init(days: Int = 1, hour: Int = 10) { self.days = days; self.hour = hour }
 }
 
 /// The slice of macOS notifications the scheduler needs (UserNotifications in the app, a fake in tests).
@@ -46,15 +55,19 @@ public final class ReminderScheduler {
     let center: ReminderNotificationCenter
     let clock: WrenClock
     let pause: () -> NotificationPause?
+    /// The day-before heads-up for deadlines; nil when the user turned it (or deadline reminders) off.
+    public var advance: () -> DeadlineAdvance?
     private var running = false
     private var again = false
     public private(set) var lastReport = ReconcileReport()
 
-    public init(store: WrenStore, center: ReminderNotificationCenter, clock: WrenClock, pause: @escaping () -> NotificationPause? = { nil }) {
-        self.store = store; self.center = center; self.clock = clock; self.pause = pause
+    public init(store: WrenStore, center: ReminderNotificationCenter, clock: WrenClock, pause: @escaping () -> NotificationPause? = { nil },
+                advance: @escaping () -> DeadlineAdvance? = { nil }) {
+        self.store = store; self.center = center; self.clock = clock; self.pause = pause; self.advance = advance
     }
 
     static func onceID(_ c: Commitment, _ d: Date) -> String { "\(prefix)\(c.id.uuidString).at.\(Int(d.timeIntervalSince1970.rounded()))" }
+    static func advanceID(_ c: Commitment, _ d: Date) -> String { "\(prefix)\(c.id.uuidString).before.\(Int(d.timeIntervalSince1970.rounded()))" }
     static func repeatingID(_ c: Commitment, _ comps: DateComponents) -> String {
         "\(prefix)\(c.id.uuidString).rep.\(comps.weekday.map(String.init) ?? "d").\(String(format: "%02d%02d", comps.hour ?? 0, comps.minute ?? 0))"
     }
@@ -77,6 +90,13 @@ public final class ReminderScheduler {
         } else if let next = c.nextReminderAt, next > now {
             out.append(ReminderRequest(id: Self.onceID(c, next), commitmentID: c.id, title: c.title,
                                        body: ReminderPayload.body(for: c), trigger: .at(next)))
+        }
+        // The heads-up the day before a deadline. Its own identifier (item and time), so it is
+        // scheduled once, moves with the deadline and goes when the task is done or deleted.
+        if let a = advance(), let at = ReminderPolicy.advanceReminder(for: c, now: now, advance: a, calendar: cal), let deadline = c.deadline {
+            out.append(ReminderRequest(id: Self.advanceID(c, at), commitmentID: c.id, title: c.title,
+                                       body: "Due \(DueText.describe(deadline, hasTime: c.deadlineHasTime, now: at, calendar: cal)).",
+                                       trigger: .at(at), isAdvance: true))
         }
         // Paused: nothing that would fire during the pause. Repeating ones return when it ends.
         if let p = pause(), p.isActive(at: now) {
