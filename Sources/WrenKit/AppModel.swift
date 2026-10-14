@@ -43,6 +43,10 @@ final class AppModel {
     var reminderSync = ReconcileReport()
     /// After Wren asked "When should I remind you…?", the start of the request the answer completes.
     var reminderFollowUp: String?
+    /// A ChatGPT website request's state changed (detected in the browser); the panel refreshes its card.
+    @ObservationIgnored var webHandoffChanged: (UUID) -> Void = { _ in }
+    /// A message about a ChatGPT website request for the panel (e.g. detection not allowed).
+    @ObservationIgnored var webHandoffNote: (UUID, String) -> Void = { _, _ in }
     /// The pending question is "What should I remind you about?" (the time is already known).
     var reminderFollowUpNeedsSubject = false
     /// What the last command did (operation, success, entity, error). Never holds the user's words.

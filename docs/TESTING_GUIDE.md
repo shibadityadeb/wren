@@ -84,11 +84,12 @@ The log records what Wren did (operation names, states, counts), not your words,
 
 ## 5. GPT and local AI
 
-Wren uses the ChatGPT **website** for "ask GPT" by default: it opens chatgpt.com in your browser with your request and copies it to the clipboard. Your browser should be signed in to ChatGPT.
+Wren uses the ChatGPT **website** for "ask GPT" by default: it opens chatgpt.com in your browser with your question already in the message box. Your browser should be signed in to ChatGPT. Press Enter there to send it: ChatGPT doesn't let apps send for you.
 
 - [ ] **Scenario 1: an explicit GPT request.** `Ask ChatGPT what gradient descent is`.
-  - Expected: no "who should answer?" question. ChatGPT opens in your browser, and the card says "Awaiting your submission".
-  - Paste (⌘V) and send it in ChatGPT, then choose **I sent it**. Expected: "Submitted; completion not verified", never "Completed".
+  - Expected: no "who should answer?" question. ChatGPT opens with the question in its box, and the card says "Prompt loaded, submission unverified".
+  - Click **Detect conversation automatically…** and allow Wren to control your browser when macOS asks. Then press Enter in ChatGPT.
+  - Expected: the card turns to "Submitted to ChatGPT", and **Open conversation in ChatGPT** opens that exact chat. Never "Completed".
 - [ ] **Link the conversation.** In ChatGPT, copy the address bar (`https://chatgpt.com/c/…`). In Wren choose **Link conversation**. Expected: "Conversation linked".
   - Copying something else (the ChatGPT home page, another site) is refused with an explanation.
 - [ ] **Scenario 5: open that in GPT.** `open that in GPT`. Expected: your browser opens that exact conversation.

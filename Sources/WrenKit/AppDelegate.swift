@@ -134,6 +134,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
         model.applyVoiceHotKey = { [weak self] in self?.applyVoiceHotKey() }
         model.startVoice = { [weak self] in self?.popover.performClose(nil); self?.startOrStopVoice(.button) }
         model.prefillCapture = { [weak self] t in self?.captureState.text = t }
+        // The browser tab became a real conversation (or asked to sign in): refresh the card.
+        model.webHandoffChanged = { [weak self] id in
+            guard let self, self.captureState.ask?.recordID == id, let r = self.model.asks?.record(id), let state = r.webState else { return }
+            self.captureState.ask?.phase = .handedOff(state, recordID: id)
+            self.captureState.ask?.note = state == .submittedVerified ? "ChatGPT started the conversation. Its link is saved in Wren." : nil
+        }
+        model.webHandoffNote = { [weak self] id, note in
+            guard let self, self.captureState.ask?.recordID == id else { return }
+            self.captureState.ask?.note = note
+        }
         // A delegation whose result is on screen in the panel doesn't also get a notification.
         model.isShowingDelegation = { [weak self] id in
             guard let self, self.panel.isVisible, self.panel.isKeyWindow else { return false }
@@ -406,7 +416,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
         switch card.phase {
         case .sending: return card.destination == .chatgptWeb ? .completed("Opening ChatGPT…") : (card.destination == .local ? .completed("Asking local AI…") : .completed("GPT request submitted"))
         case .answered, .partial: return card.destination == .local ? .completed("Local AI answered") : .completed("GPT request submitted")
-        case let .handedOff(state, _): return state == .failedToOpen ? .failed(WebHandoffState.failedToOpen.detail) : .completed("Opened in ChatGPT: \(state.label.lowercased())")
+        case let .handedOff(state, _): return state == .failedToOpen ? .failed(WebHandoffState.failedToOpen.detail) : .completed("Asked in ChatGPT: \(state.label.lowercased())")
         case .ready: return card.destination == .choose ? .needsClarification("Local AI isn't set up. Who should answer this?") : .completed("Request ready")
         case .notConnected: return .failed("ChatGPT isn't connected. Connect it below; your request is kept.")
         case let .reconnect(m), let .needsPermission(m), let .usageLimit(m), let .needsReview(m), let .unsupported(m): return .failed(m)
@@ -531,13 +541,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
         captureState.ask = card
         let request = card.request, channel = askChannel
         Task {
-            let (rec, error) = await model.startWebHandoff(request, channel: channel)
+            let start = await model.startWebHandoff(request, channel: channel)
             guard captureState.ask?.request == request else { return }
-            captureState.ask?.recordID = rec?.id
-            if let error {
-                captureState.ask?.phase = .failed(error, retryable: rec != nil)
-            } else if let rec {
+            switch start {
+            case let .started(rec):
+                captureState.ask?.recordID = rec.id
                 captureState.ask?.phase = .handedOff(rec.webState ?? .awaitingSubmission, recordID: rec.id)
+                captureState.ask?.canOfferDetection = rec.webState == .promptLoaded && !model.settings.chatgptDetectConversation && BrowserTabs.defaultBrowser != nil
+                if rec.webState == .promptLoaded, !model.settings.chatgptDetectConversation, BrowserTabs.defaultBrowser != nil {
+                    captureState.ask?.note = "Tip: let Wren detect when you send it, and it saves the conversation link for you."
+                }
+            case let .review(m):
+                captureState.ask?.phase = .needsReview(m)
+            case let .failed(rec, m):
+                captureState.ask?.recordID = rec?.id
+                captureState.ask?.phase = .failed(m, retryable: rec != nil)
             }
         }
     }
@@ -553,6 +571,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
             Task {
                 if let e = await model.reopenInChatGPT(id) { captureState.ask?.note = e }
                 else if let r = model.asks?.record(id) { captureState.ask?.phase = .handedOff(r.webState ?? .awaitingSubmission, recordID: id) }
+            }
+        case .detectConversation:
+            guard let id = card.recordID else { return }
+            Task {
+                captureState.ask?.canOfferDetection = false
+                if let e = await model.detectConversation(for: id) { captureState.ask?.note = e }
+                else { captureState.ask?.note = "Watching for the conversation. Press Enter in ChatGPT to send your question." }
             }
         case .markSent:
             guard let id = card.recordID else { return }

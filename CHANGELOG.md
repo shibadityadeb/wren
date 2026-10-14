@@ -2,6 +2,21 @@
 
 Versions follow [semantic versioning](https://semver.org). The `VERSION` file is the source of truth; release tags are `v<VERSION>` (stable) or `v<VERSION>-preview.N` (prerelease).
 
+## [0.11.1] (unreleased)
+
+"Ask in ChatGPT" puts your question in ChatGPT, not on your clipboard.
+
+- **Your question goes straight into ChatGPT's message box.** Wren opens the ChatGPT website in your normal browser, signed in to your own account, using a `chatgpt.com/?q=` link (undocumented by OpenAI). It no longer opens a blank page with the question on the clipboard.
+  - Tested in Chrome on 14 October 2026: ChatGPT takes the question in **but doesn't send it by itself**, and `?prompt=` behaves the same. So you press Enter there; Wren says so instead of claiming it was sent.
+  - Questions over 1,500 characters, the ChatGPT Mac app, or the link turned off fall back to copy-and-paste, labelled as such.
+- **Detect conversation automatically** (opt-in; Chrome, Brave, Edge, Chromium, Vivaldi). Wren watches only the address of the ChatGPT tab it opened, through the browser's standard scripting; macOS asks you once.
+  - When the tab becomes `chatgpt.com/c/…`, the question was really sent: Wren shows "Submitted to ChatGPT" and saves that exact link for **Open conversation in ChatGPT**.
+  - A sign-in page shows "Sign-in required".
+  - No page content, other tabs, cookies or passwords are read.
+- Truthful states: Preparing request, Opening ChatGPT, Prompt loaded (submission unverified), Submitted to ChatGPT, Conversation available, Sign-in required, Failed to open. No "GPT finished" notification for the website: Wren can't see the answer.
+- A question that looks like it contains a password, key or code isn't put in a link; you check it in Delegate first.
+- "Run with ChatGPT inside Wren" is the name of the plan-API mode.
+
 ## [0.11.0] (unreleased)
 
 ChatGPT as a real external tool, and routing that knows which tool you mean.

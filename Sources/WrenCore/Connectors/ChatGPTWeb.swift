@@ -14,8 +14,8 @@ public enum ChatGPTMode: String, Codable, Sendable, CaseIterable {
     case web, inWren
     public var label: String {
         switch self {
-        case .web: "Open in ChatGPT (website)"
-        case .inWren: "Run with connected ChatGPT in Wren"
+        case .web: "Ask in ChatGPT (website)"
+        case .inWren: "Run with ChatGPT inside Wren"
         }
     }
 }
@@ -29,40 +29,102 @@ public enum WebLaunchMethod: String, Codable, Sendable {
     case prefillLink
 }
 
-/// What Wren actually knows about a ChatGPT website handoff. There is no "completed": opening a
-/// page, copying a prompt or the user saying "I sent it" doesn't tell Wren the work finished.
+/// What Wren actually knows about a ChatGPT website handoff. There is no "completed": Wren can't see
+/// ChatGPT's answer. "Submitted" is only shown when Wren saw ChatGPT create the conversation.
 public enum WebHandoffState: String, Codable, Sendable {
-    case prepared
-    /// Opened with the prompt filled in by link: not confirmed sent.
+    case preparing = "prepared"
+    case opening
+    /// ChatGPT opened with the question in its message box (`?q=`). It isn't sent until the user
+    /// presses Enter there: ChatGPT doesn't let other apps send it (checked live, 2026-10-14).
+    case promptLoaded
+    /// Legacy (0.11.0): opened with an experimental link.
     case openedInChatGPT
-    /// Opened with the prompt on the clipboard: the user still has to paste and send it.
+    /// Opened with the question on the clipboard only (very long questions, the ChatGPT app, or
+    /// the link turned off): the user pastes and sends it.
     case awaitingSubmission
-    /// The user said they sent it. The answer is in ChatGPT; Wren can't see it.
+    /// The user said they sent it; Wren didn't see it.
     case submittedUnverified
-    /// The user gave Wren the conversation's link; Open in ChatGPT goes straight to it.
+    /// Wren saw the opened tab become a ChatGPT conversation: really sent, link saved.
+    case submittedVerified
+    /// The user linked the conversation themselves.
     case conversationLinked
+    /// The opened tab went to ChatGPT's sign-in page.
+    case signInRequired
     case failedToOpen
 
     public var label: String {
         switch self {
-        case .prepared: "Prepared"
-        case .openedInChatGPT: "Opened in ChatGPT"
+        case .preparing: "Preparing request"
+        case .opening: "Opening ChatGPT"
+        case .promptLoaded, .openedInChatGPT: "Prompt loaded, submission unverified"
         case .awaitingSubmission: "Awaiting your submission"
-        case .submittedUnverified: "Submitted; completion not verified"
-        case .conversationLinked: "Conversation linked"
+        case .submittedUnverified: "Marked sent by you"
+        case .submittedVerified: "Submitted to ChatGPT"
+        case .conversationLinked: "Conversation available"
+        case .signInRequired: "Sign-in required"
         case .failedToOpen: "Failed to open"
         }
     }
 
     public var detail: String {
         switch self {
-        case .prepared: "Not opened yet."
-        case .openedInChatGPT: "ChatGPT opened with your request filled in (experimental link). Wren can't see whether it was sent; check ChatGPT."
-        case .awaitingSubmission: "Your request is on the clipboard. Paste it in ChatGPT and send it there."
-        case .submittedUnverified: "You sent it in ChatGPT. The answer is in your ChatGPT conversation; Wren can't see it or tell when it's done."
-        case .conversationLinked: "Open in ChatGPT goes straight to this conversation."
-        case .failedToOpen: "Wren couldn't copy the request or open ChatGPT."
+        case .preparing: "Not opened yet."
+        case .opening: "Opening ChatGPT in your browser…"
+        case .promptLoaded, .openedInChatGPT: "ChatGPT opened with your question in its message box. Press Enter there to send it: ChatGPT doesn't let other apps send for you."
+        case .awaitingSubmission: "Your question is on the clipboard. Paste it in ChatGPT and send it there."
+        case .submittedUnverified: "You said you sent it. Link the conversation to come back to it in one click."
+        case .submittedVerified: "Wren saw ChatGPT start the conversation in your browser, and saved its link. The answer is in ChatGPT; Wren can't see it or tell when it's done."
+        case .conversationLinked: "Open the conversation in ChatGPT from here. The answer is in ChatGPT; Wren can't see it."
+        case .signInRequired: "ChatGPT asked you to sign in, in your browser. Sign in to the account you want, then ask again. Wren never asks for your ChatGPT password."
+        case .failedToOpen: "Wren couldn't open ChatGPT."
         }
+    }
+
+    /// A real conversation is known (detected or linked).
+    public var hasConversation: Bool { self == .submittedVerified || self == .conversationLinked }
+    /// Still waiting for the question to be sent.
+    public var awaitsSending: Bool { [.promptLoaded, .openedInChatGPT, .awaitingSubmission, .opening].contains(self) }
+}
+
+/// One tab of a browser that reports its tabs to AppleScript (only ChatGPT/OpenAI tabs are read).
+public struct BrowserTab: Equatable, Sendable {
+    public var id: String
+    public var url: String
+    public init(id: String, url: String) { self.id = id; self.url = url }
+}
+
+/// Follows the one tab Wren opened, using only its address: it starts on chatgpt.com, goes to the
+/// sign-in page if the browser isn't signed in, and becomes `chatgpt.com/c/<id>` when ChatGPT has
+/// created the conversation, which only happens once the question was really sent.
+public struct ChatGPTTabWatcher: Sendable {
+    public enum Event: Equatable, Sendable { case waiting, opened, signInRequired, conversation(URL), closed }
+    let before: Set<String>
+    public private(set) var tabID: String?
+
+    /// `before`: ChatGPT tabs open before Wren opened its own; those are never taken for Wren's.
+    public init(before: [BrowserTab]) { self.before = Set(before.map(\.id)) }
+
+    public mutating func observe(_ tabs: [BrowserTab]) -> Event {
+        if tabID == nil {
+            let fresh = tabs.filter { !before.contains($0.id) && Self.isOpenAI($0.url) }
+            // Exactly one new ChatGPT tab: Wren's. More than one (the user opened others too): don't guess.
+            guard fresh.count == 1 else { return .waiting }
+            tabID = fresh[0].id
+        }
+        guard let tab = tabs.first(where: { $0.id == tabID }) else { return .closed }
+        if let url = ChatGPTWeb.conversationURL(tab.url) { return .conversation(url) }
+        if Self.isSignIn(tab.url) { return .signInRequired }
+        return .opened
+    }
+
+    static func isOpenAI(_ url: String) -> Bool {
+        guard let host = URLComponents(string: url)?.host?.lowercased() else { return false }
+        return ["chatgpt.com", "www.chatgpt.com", "chat.openai.com", "auth.openai.com", "auth0.openai.com"].contains(host)
+    }
+
+    static func isSignIn(_ url: String) -> Bool {
+        guard let c = URLComponents(string: url), let host = c.host?.lowercased() else { return false }
+        return host.hasPrefix("auth") || c.path.hasPrefix("/auth/") || c.path.hasPrefix("/log-in") || c.path.hasPrefix("/login")
     }
 }
 

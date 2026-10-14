@@ -714,6 +714,18 @@ Rules that let Wren read external data on its own name the scheduler they speak 
 - Wren therefore uses `?q=` only when the user opts in after checking it with **Check it in my browser…** (`PrefillCheck`). Even then it records *opened*, never *sent*, copies the prompt as well, and falls back to clipboard-only above 1,500 characters or for the ChatGPT Mac app.
 - A browser extension that watched chatgpt.com to learn conversation URLs or completion was considered and **not built**: it would read the user's ChatGPT pages, depends on a private and changing UI, and needs a separate extension install and consent per browser. The user links the conversation instead (clipboard read only on click).
 
+**0.11.1: Ask in ChatGPT.** The question goes into ChatGPT's composer by default, with no copying.
+- Measured live on 2026-10-14 in the maintainer's signed-in Chrome, by watching the tab's address:
+  - `?q=` was consumed (the address became `chatgpt.com/`) and no conversation was created within 40 s. `?prompt=` behaved the same.
+  - So the website doesn't auto-submit an app-opened link. The state after opening is *Prompt loaded, submission unverified*.
+- **Opt-in detection** (`chatgptDetectConversation`, `BrowserTabs`, `ChatGPTTabWatcher`):
+  - Before opening, Wren reads the browser's ChatGPT tabs. This uses the standard AppleScript dictionary of Chromium browsers (stable tab `id`), filtered to chatgpt.com/openai.com inside the script, and needs the `NSAppleEventsUsageDescription` text and the `com.apple.security.automation.apple-events` entitlement.
+  - After opening, the single new ChatGPT tab is Wren's. With more than one new tab, Wren doesn't guess and stops.
+  - Every 2 s for up to 20 minutes, `chatgpt.com/c/<id>` means ChatGPT created the conversation, so the question was really sent: `submittedVerified`, with the link stored. An auth page means `signInRequired`; a closed tab ends the watch.
+  - Pitfall found live: inside Chrome's `tell` block `tab` is Chrome's class, so the field separator must be made outside it.
+  - Safari and other browsers aren't followed; the user links conversations there.
+- Questions with apparent secrets aren't put in a URL (`WebStart.review`).
+
 **Follow-ups.** `followUpTarget` is the delegation on screen, else the most recent assistant request.
 - Web: a linked conversation opens directly, with only the new instruction copied to paste. Unlinked, a new chat opens with `ChatGPTWeb.followUpPrompt` quoting the earlier request, and Wren says so.
 - In Wren: the follow-up runs in Wren with the earlier request and answer included in `input` (the plan route has no `previous_response_id`).

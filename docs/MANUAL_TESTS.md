@@ -15,7 +15,21 @@ touched. Debug URLs exist only in debug builds. Read results with:
 /usr/bin/log stream --style compact --predicate 'subsystem == "com.shibadityadeb.wren" AND processImagePath CONTAINS "Wren Dev.app"'
 ```
 
-## Last pass: 2026-10-14, branch `feat/chatgpt-web-handoff` (0.11.0)
+## Last pass: 2026-10-14, branch `feat/ask-in-chatgpt` (0.11.1), Chrome (default browser), signed in to ChatGPT
+
+Automated: `swift test`, 363 tests, 0 failures, 4 skipped. Live checks used the maintainer's real Chrome, observed
+through Chrome's AppleScript (tab address and title only; screen capture isn't available to this terminal).
+The maintainer was in a video call, so the second link was opened in the background (`open -g`).
+
+| ID | Test | Result |
+|---|---|---|
+| B-1 | `open "https://chatgpt.com/?q=What is gradient descent in machine learning?"` (URL-encoded) in the signed-in Chrome | **Observed live**: the address went from `/?q=…` to `https://chatgpt.com/` (the parameter was consumed); **no `/c/…` conversation was created in 40 s**, so it was **not auto-submitted**. Whether the text sat in the composer couldn't be seen (no screen access); community reports and the consumed parameter suggest it does. Confirm in M-ASK 1 |
+| B-2 | `?prompt=Explain the difference between L1 and L2 regularization in one paragraph.` | **Observed live**: the same (consumed, nothing sent) |
+| B-3 | Wren's tab-reading AppleScript against the real Chrome | **Passed live** after a fix: Chrome's `tab` keyword had replaced the field separator (the word "tab" came back), which would have made detection silently fail. It now returns `id<TAB>address` lines for ChatGPT tabs only |
+| B-4 | Wren's watcher on a real send (`chatgpt.com/` → `chatgpt.com/c/…`), Sign-in required, Automation permission prompt | **Not run** in the app: needs the user to allow Wren to control Chrome and to press Enter in ChatGPT (M-ASK). Unit-tested with the addresses observed in B-1 |
+| B-5 | Conclusion | The public website **offers no way for an app to submit a question**; Wren puts it in the box and the user sends it. Wren reports "Prompt loaded, submission unverified" until it sees the conversation |
+
+## Previous pass: 2026-10-14, branch `feat/chatgpt-web-handoff` (0.11.0)
 
 Automated: `swift test`, 353 tests, 0 failures, 4 skipped. Routing, conversation-link validation, launch links,
 honest handoff states and card choices are unit-tested. The browser itself isn't: opening ChatGPT and
@@ -203,6 +217,21 @@ The scenarios are the same as docs/TESTING_GUIDE.md §5:
    - Connect, and ask again. Expected: the result in Wren, Mode "Run with connected ChatGPT in Wren…", no conversation button.
 8. Press Return twice fast on a website request. Expected: one tab and one record. **Retry**/**Open in ChatGPT** reuses the record. No request is ever shown as Completed.
 9. Connectors › ChatGPT › **Check it in my browser…** and record what `?q=` did. Only if it was filled in, turn on the experimental option and repeat step 1. Expected: the request is already in ChatGPT's box, and the status is "Opened in ChatGPT".
+
+### M-ASK: Ask in ChatGPT (Chrome or another Chromium browser, signed in to ChatGPT)
+
+1. `Ask GPT what gradient descent is`.
+   - Expected: Chrome opens ChatGPT with "What is gradient descent?" in the message box. Nothing is on the clipboard.
+   - The card says "Prompt loaded, submission unverified", and Delegate has one entry.
+2. Press Enter in ChatGPT. Expected: ChatGPT answers in a new conversation in your account (it shows in ChatGPT's history).
+3. On the card, **Detect conversation automatically…** → macOS asks to let Wren control Chrome → OK.
+   - Ask a second question (`ask ChatGPT what quantum physics is`) and press Enter in ChatGPT.
+   - Expected: within a few seconds the card says "Submitted to ChatGPT", and **Open conversation in ChatGPT** opens that exact chat.
+   - The first question isn't touched or mixed up.
+4. Sign out of ChatGPT in Chrome and ask again. Expected: "Sign-in required".
+5. `What is gradient descent?` → local AI. Disconnect the in-Wren ChatGPT sign-in and ask GPT something → still the website, never local AI.
+6. Connectors › ChatGPT › *Run with ChatGPT inside Wren* → the answer arrives in Wren, labelled as stored in Wren.
+7. `ask GPT whether my password is hunter2` → not opened; asks you to check it in Delegate first.
 
 ### M-NOTION, M-CAL
 As before: Connectors › Notion › Connect Notion (search, read, create after confirming, disconnect);

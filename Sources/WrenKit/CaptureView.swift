@@ -304,8 +304,8 @@ struct AskCardView: View {
 
     var heading: String {
         switch card.destination {
-        case .chatgptWeb: "ChatGPT (website)"
-        case .chatgpt: "Connected ChatGPT, run in Wren"
+        case .chatgptWeb: "Ask in ChatGPT"
+        case .chatgpt: "Run with ChatGPT inside Wren"
         case .local: "Local AI"
         case .choose: "Question for an assistant"
         }
@@ -321,7 +321,7 @@ struct AskCardView: View {
                 if card.destination == .choose {
                     HStack {
                         if aiAvailable { Button("Ask local AI (on this Mac)") { act(.run(.local)) } }
-                        Button("Open in ChatGPT") { act(.run(.chatgptWeb)) }
+                        Button("Ask in ChatGPT") { act(.run(.chatgptWeb)) }
                         Button("Save as a note") { act(.saveAsNote) }
                     }.controlSize(.small)
                 } else {
@@ -330,27 +330,38 @@ struct AskCardView: View {
                 }
             case let .handedOff(state, _):
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Image(systemName: state == .failedToOpen ? "exclamationmark.triangle.fill" : (state == .conversationLinked ? "link" : "arrow.up.forward.app"))
-                        .foregroundStyle(state == .failedToOpen ? .orange : WrenTheme.accent)
+                    Image(systemName: state == .failedToOpen || state == .signInRequired ? "exclamationmark.triangle.fill" : (state.hasConversation ? "checkmark.bubble.fill" : "text.bubble"))
+                        .foregroundStyle(state == .failedToOpen || state == .signInRequired ? .orange : WrenTheme.accent)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(state.label).font(.caption.weight(.semibold))
                         Text(state.detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 HStack {
-                    Button("Open in ChatGPT") { act(.openInChatGPT) }
-                    if state == .awaitingSubmission || state == .openedInChatGPT { Button("I sent it") { act(.markSent) } }
-                    if state != .conversationLinked {
-                        Button("Link conversation") { act(.linkConversation) }
-                            .help("In ChatGPT, copy the conversation's address (https://chatgpt.com/c/…), then click this. Wren reads the clipboard only when you click.")
+                    if state.hasConversation {
+                        Button("Open conversation in ChatGPT") { act(.openInChatGPT) }
+                    } else {
+                        Button(state == .signInRequired ? "Ask in ChatGPT again" : "Open ChatGPT again") { act(.openInChatGPT) }
+                            .help("Opens ChatGPT with your question again. Nothing new is sent.")
+                        if card.canOfferDetection {
+                            Button("Detect conversation automatically…") { act(.detectConversation) }
+                                .help("Wren watches only the address of the ChatGPT tab it opened, to see when you send the question and save the real conversation link. macOS asks you once to allow it.")
+                        }
                     }
-                    Button("Run in Wren instead") { act(.runInWren) }.help("Run this request with connected ChatGPT in Wren. The answer is stored in Wren, not in ChatGPT's history.")
+                    Button("Run with ChatGPT inside Wren") { act(.runInWren) }.help("Run this question with your connected ChatGPT plan inside Wren. The answer is stored in Wren, not in ChatGPT's history.")
                 }.controlSize(.small)
+                if !state.hasConversation {
+                    HStack(spacing: 10) {
+                        if state.awaitsSending { Button("I sent it") { act(.markSent) }.buttonStyle(.link) }
+                        Button("Link conversation") { act(.linkConversation) }.buttonStyle(.link)
+                            .help("In ChatGPT, copy the conversation's address (https://chatgpt.com/c/…), then click this. Wren reads the clipboard only when you click.")
+                    }.font(.caption)
+                }
                 if Self.asksForSpecialMode(card.request.prompt) {
                     Text("Wren can't switch ChatGPT into Thinking or Deep Research. If you want those, choose them in ChatGPT's composer before sending.").font(.caption2).foregroundStyle(.secondary)
                 }
             case .sending:
-                HStack(spacing: 6) { ProgressView().controlSize(.small); Text(card.destination == .local ? "Asking the local model…" : (card.destination == .chatgptWeb ? "Opening ChatGPT…" : "Running with connected ChatGPT in Wren…")).font(.caption) }
+                HStack(spacing: 6) { ProgressView().controlSize(.small); Text(card.destination == .local ? "Asking the local model…" : (card.destination == .chatgptWeb ? "Opening ChatGPT…" : "Running with ChatGPT inside Wren…")).font(.caption) }
                 if !card.streamed.isEmpty { answerText(card.streamed) }
                 if card.recordID != nil { Button("Open in Wren") { act(.openAnswer) }.controlSize(.small) }
             case let .answered(text, source, _):
@@ -364,15 +375,15 @@ struct AskCardView: View {
                 HStack { Button("Try again") { act(.run(card.destination == .choose ? .chatgpt : card.destination)) }; Button("Copy answer") { act(.copyAnswer) }; Button("Open result") { act(.openAnswer) } }.controlSize(.small)
             case .notConnected:
                 Text("“Run in Wren” needs Sign in with ChatGPT. Connect your account, or open the request on the ChatGPT website; it stays here either way. Wren won't answer it with the local model.").font(.caption).foregroundStyle(.orange)
-                HStack { Button("Connect ChatGPT") { act(.connect) }; Button("Open in ChatGPT website instead") { act(.run(.chatgptWeb)) }; Button("Save as a note instead") { act(.saveAsNote) } }.controlSize(.small)
+                HStack { Button("Connect ChatGPT") { act(.connect) }; Button("Ask in ChatGPT (website) instead") { act(.run(.chatgptWeb)) }; Button("Save as a note instead") { act(.saveAsNote) } }.controlSize(.small)
             case .connecting:
                 HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Finish signing in to ChatGPT in your browser…").font(.caption) }
             case let .reconnect(m):
                 Text(m).font(.caption).foregroundStyle(.orange)
-                HStack { Button("Reconnect ChatGPT") { act(.connect) }; Button("Open in ChatGPT website instead") { act(.run(.chatgptWeb)) } }.controlSize(.small)
+                HStack { Button("Reconnect ChatGPT") { act(.connect) }; Button("Ask in ChatGPT (website) instead") { act(.run(.chatgptWeb)) } }.controlSize(.small)
             case let .needsPermission(m):
                 Text(m).font(.caption).foregroundStyle(.orange)
-                HStack { Button("Allow plan usage…") { act(.allowPlan) }; Button("Open in ChatGPT website instead") { act(.run(.chatgptWeb)) } }.controlSize(.small)
+                HStack { Button("Allow plan usage…") { act(.allowPlan) }; Button("Ask in ChatGPT (website) instead") { act(.run(.chatgptWeb)) } }.controlSize(.small)
             case let .usageLimit(m):
                 Text(m).font(.caption).foregroundStyle(.orange)
                 HStack { Button("Manage usage") { act(.manageUsage) }; Button("Try again") { act(.run(.chatgpt)) } }.controlSize(.small)

@@ -109,6 +109,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>NSMicrophoneUsageDescription</key><string>Wren records only after you press the voice shortcut or click Voice, and stops when your command ends. It never listens in the background. Speech is transcribed on this Mac; audio is never stored or sent anywhere.</string>
 ${PROVIDER_PLIST}  <key>NSCalendarsFullAccessUsageDescription</key><string>Wren reads your calendars (read-only) to answer questions like “what meetings do I have tomorrow?” and to add events to your briefing. Nothing leaves this Mac.</string>
   <key>NSCalendarsUsageDescription</key><string>Wren reads your calendars (read-only) to answer questions about your schedule. Nothing leaves this Mac.</string>
+  <key>NSAppleEventsUsageDescription</key><string>Only if you turn on “Detect conversation automatically”: Wren reads the address of the ChatGPT tab it opened, to see when you send your question and save the real conversation link. It reads no page content, other tabs, cookies or passwords.</string>
   <key>NSSpeechRecognitionUsageDescription</key><string>Wren uses on-device speech recognition to turn your voice capture into text. Audio never leaves this Mac.</string>
   <key>CFBundleURLTypes</key>
   <array><dict>
@@ -127,6 +128,7 @@ cat > "$ENT" <<ENTITLEMENTS
 <plist version="1.0"><dict>
   <key>com.apple.security.device.audio-input</key><true/>
   <key>com.apple.security.personal-information.calendars</key><true/>
+  <key>com.apple.security.automation.apple-events</key><true/>
 </dict></plist>
 ENTITLEMENTS
 
