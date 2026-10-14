@@ -721,6 +721,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
         NSApp.orderFrontStandardAboutPanel(options: [.credits: NSAttributedString(string: "Local-first personal assistant. Your data stays on this Mac.")])
     }
 
+    @objc func openShortcutsAction() {
+        NSWorkspace.shared.open(URL(string: "https://github.com/shibadityadeb/wren/blob/main/docs/SHORTCUTS.md")!)
+    }
+
     @objc func openHelpAction() {
         NSWorkspace.shared.open(URL(string: "https://github.com/shibadityadeb/wren#readme")!)
     }

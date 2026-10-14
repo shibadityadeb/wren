@@ -55,6 +55,7 @@ enum AppMenu {
 
         let help = NSMenu(title: "Help")
         help.addItem(item("Wren Help", #selector(AppDelegate.openHelpAction), "?", target))
+        help.addItem(item("Shortcuts and Commands", #selector(AppDelegate.openShortcutsAction), "", target))
         NSApp.helpMenu = help
         add(help, to: main)
 
