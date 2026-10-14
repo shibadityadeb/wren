@@ -31,7 +31,12 @@ awk -v v="$BASE" '$0 ~ "^## \\[?"v {p=1; next} p && /^## / {exit} p' CHANGELOG.m
 echo
 echo "### Known limitations"
 echo "- Local AI needs Ollama installed separately; Wren does not include a model runtime."
-echo "- Reminders and summaries only arrive while Wren is running (turn on Open at login)."
+echo "- Scheduled reminders arrive even after you quit Wren. The briefing, check-in, email checks and alerts run only while Wren is running (turn on Open at login)."
+echo "- Voice uses Apple's on-device speech model; if Connectors › Voice says it isn't installed, turn on Dictation once in System Settings › Keyboard."
+echo "- Google sign-in is in testing: only accounts on the app's test-user list can connect, and Google asks them to reconnect every 7 days."
+echo
+echo "### Try it"
+echo "Follow the [testing guide](https://github.com/shibadityadeb/wren/blob/${TAG}/docs/TESTING_GUIDE.md) and report problems as issues, with the log it describes."
 echo
 echo "### Checksums (SHA-256)"
 echo '```'

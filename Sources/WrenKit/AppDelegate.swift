@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import WrenCore
+import Carbon.HIToolbox
 import os
 import UserNotifications
 
@@ -110,7 +111,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
         model.showPopover = { [weak self] in self?.openPopover() }
         model.applyHotKey = { [weak self] in self?.applyHotKey() }
         model.openMainWindow = { [weak self] in self?.popover.performClose(nil); self?.mainWindow.show() }
-        // One voice service: the voice shortcut and every Voice button feed the same capture and command path.
+        // One voice service: holding the push-to-talk shortcut and every Voice button feed the same
+        // capture and the same command router as typed text.
         let stream = LiveSpeechStream()
         stream.onLevel = { [weak self] l in
             guard let self, self.captureState.recording else { return }
@@ -118,19 +120,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
         }
         voice = VoiceSession(stream: stream, permissions: model.hub.voicePermissions)
         observeScreenLock()
-        // Nothing here touches the microphone: it opens only when the user presses the voice shortcut
-        // or a Voice button, and closes when that one command ends.
+        // Nothing here touches the microphone: it opens only while the user holds the push-to-talk
+        // shortcut (or after clicking Voice), and closes before transcription.
         voice.onPhase = { [weak self] p in self?.voicePhaseChanged(p) }
-        voice.onLiveCommand = { [weak self] t in
+        voice.onLiveText = { [weak self] t in
             guard let self else { return }
             self.captureState.lastVoiceText = t
             self.captureState.text = t
         }
-        voice.onCommand = { [weak self] t, trigger in self?.runVoiceCommand(t, trigger) }
-        voice.onEndedWithoutCommand = { [weak self] end in
-            self?.captureState.voiceStatus = end == .timeLimit ? "Stopped after 30 seconds. The microphone is off." : "Didn't hear a command, so nothing happened. The microphone is off."
-        }
-        voiceKeys = HotKeyService(id: 2, onPress: { [weak self] in self?.voiceShortcut() })
+        voice.onTranscript = { [weak self] t, assessment in self?.transcriptReady(t, assessment) }
+        voiceKeys = HotKeyService(id: 2, onPress: { [weak self] in self?.pushToTalkDown() },
+                                  onRelease: { [weak self] in self?.pushToTalkUp() })
         model.applyVoiceHotKey = { [weak self] in self?.applyVoiceHotKey() }
         model.startVoice = { [weak self] in self?.popover.performClose(nil); self?.startOrStopVoice(.button) }
         model.prefillCapture = { [weak self] t in self?.captureState.text = t }
@@ -162,36 +162,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
         }
     }
 
-    // MARK: Voice: the voice shortcut and the Voice buttons
+    // MARK: Voice: push-to-talk and the Voice buttons
 
     private func applyVoiceHotKey() {
         captureState.voiceEnabled = true
+        captureState.voiceShortcut = model.settings.voiceEnabled ? model.settings.voiceHotKey.display : nil
         guard model.settings.voiceEnabled else { voiceKeys.unregister(); model.voiceHotKeyError = nil; return }
-        if model.hotKeyEnabled, model.settings.voiceHotKey == model.settings.hotKey {
-            voiceKeys.unregister()
-            model.voiceHotKeyError = "The voice shortcut is the same as the capture shortcut. Choose another."
-            return
-        }
         model.voiceHotKeyError = voiceKeys.register(model.settings.voiceHotKey)
+        if let e = model.voiceHotKeyError {
+            appLog.error("push-to-talk \(self.model.settings.voiceHotKey.display, privacy: .public) not registered: \(e, privacy: .public)")
+        } else {
+            appLog.notice("push-to-talk \(self.model.settings.voiceHotKey.display, privacy: .public) registered")
+        }
+        // The capture shortcut gives way if it clashed (the setting resolves it); re-register it.
+        if model.hotKeyEnabled { applyHotKey() }
+        model.hotKeyDisplay = model.settings.hotKey.display
     }
 
-    private func voiceShortcut() {
+    /// Key-down of the push-to-talk shortcut. Key repeat while held does nothing (the session ignores it).
+    private func pushToTalkDown() {
         guard model.settings.voiceEnabled else { return }
-        startOrStopVoice(.shortcut)
+        appLog.notice("push-to-talk down")
+        startOrStopVoice(.hold)
     }
 
-    /// The shortcut, the Voice buttons and the menu all do the same thing: start one command, or
-    /// end the one being recorded.
+    /// Key-up of the push-to-talk key. Releasing the modifier first is caught by `watchHeldKeys`.
+    private func pushToTalkUp() {
+        // Only a hold (or a hold waiting on the permission prompt) ends on key-up; a Voice-button
+        // recording isn't cut short by an unrelated ⌥ Space release.
+        switch voice.phase {
+        case .listening(.hold), .requestingPermission:
+            appLog.notice("push-to-talk up")
+            voice.release()
+        default: break
+        }
+    }
+
+    /// The shortcut, the Voice buttons and the menu all go through here.
     private func startOrStopVoice(_ trigger: VoiceSession.Trigger) {
+        // A command is still being recorded, transcribed or run: a repeated press does nothing.
+        if voice.phase.isBusy && !(trigger == .button && voice.phase == .listening(.button)) { return }
         if !voice.isCapturing {
+            autoClose?.cancel()
             showCapture()
             captureState.reply = nil; captureState.ask = nil; captureState.reviewingVoice = false
-            captureState.voiceStatus = "Starting the microphone…"
+            captureState.text = ""; captureState.lastVoiceText = ""
         }
-        Task {
-            if let e = await voice.activate(trigger) { captureState.voiceStatus = e.localizedDescription }
-            else if voice.phase == .off, captureState.voiceStatus == "Starting the microphone…" { captureState.voiceStatus = nil }
-        }
+        Task { await voice.press(trigger) }
     }
 
     private func toggleVoice() { startOrStopVoice(.button) }
@@ -200,95 +217,163 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
     private func retryVoice() {
         captureState.text = ""; captureState.lastVoiceText = ""
         captureState.reviewingVoice = false
+        voice.reset()
         startOrStopVoice(.button)
+    }
+
+    /// Modifiers a push-to-talk shortcut needs held, as AppKit reports them.
+    private var heldModifiers: NSEvent.ModifierFlags {
+        let c = model.settings.voiceHotKey.carbonModifiers
+        var f: NSEvent.ModifierFlags = []
+        if c & UInt32(optionKey) != 0 { f.insert(.option) }
+        if c & UInt32(shiftKey) != 0 { f.insert(.shift) }
+        if c & UInt32(controlKey) != 0 { f.insert(.control) }
+        if c & UInt32(cmdKey) != 0 { f.insert(.command) }
+        return f
     }
 
     private func voicePhaseChanged(_ p: VoiceSession.Phase) {
         model.voicePhase = p
         model.hub.voice.phase = p
+        captureState.voicePhase = p
         statusItem?.button?.image = WrenMark.menuBarImage(listening: voice.isCapturing)
         voiceTimer?.invalidate(); voiceTimer = nil
+        captureState.recording = p.isCapturingPhase
         switch p {
-        case let .capturing(trigger):
-            autoClose?.cancel()
+        case let .listening(trigger):
             if !panel.isVisible { showCapture() }
-            captureState.reply = nil
-            captureState.ask = nil
-            captureState.reviewingVoice = false
             captureState.voiceLevel = 0
-            captureState.lastVoiceText = voice.liveCommand
-            captureState.text = voice.liveCommand
-            captureState.recording = true
-            captureState.voiceStatus = trigger == .shortcut ? "Say what you need, then pause, or press the shortcut again to stop." : "Say what you need, then pause, or press Stop."
-            voiceTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated { self?.voice.tick() }
-            }
-        case .handling:
-            captureState.recording = false
             captureState.voiceStatus = nil
-        case .off:
-            captureState.recording = false
+            // Push-to-talk ends when *either* key is let go. Carbon reports the Space key coming up;
+            // the modifier is checked here (reading the current modifier state needs no permission).
+            let needed = heldModifiers
+            voiceTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    if trigger == .hold, !NSEvent.modifierFlags.isSuperset(of: needed) {
+                        appLog.notice("push-to-talk modifier released")
+                        self.voice.release(); return
+                    }
+                    self.voice.tick()
+                }
+            }
+        case let .cancelled(reason):
+            captureState.voiceStatus = reason.message
+            if reason != .byUser { closeAfter(4) }
         case let .failed(e):
-            captureState.recording = false
             captureState.voiceStatus = e.localizedDescription
-            appLog.notice("voice failed: \(e.localizedDescription, privacy: .public)")
+            appLog.notice("voice failed: \(String(describing: e).prefix(40), privacy: .public)")
+        default:
+            captureState.voiceStatus = nil
         }
         model.connectorVersion += 1
     }
 
-    /// A finished spoken command goes through exactly the same handling as typed text, as the user.
-    private func runVoiceCommand(_ text: String, _ trigger: VoiceSession.Trigger) {
-        appLog.notice("voice command received via \(trigger.rawValue, privacy: .public) (\(text.count, privacy: .public) characters)")
+    /// The final transcript, once per utterance. A clear one runs at once, through exactly the same
+    /// router as typed text; an unclear one, or any when "check before running" is on, waits for Return.
+    private func transcriptReady(_ text: String, _ assessment: TranscriptAssessment) {
+        appLog.notice("voice transcript ready (\(text.count, privacy: .public) characters, \(String(describing: assessment).prefix(7), privacy: .public))")
         if !panel.isVisible { showCapture() }
-        if model.settings.voiceReviewFirst {
-            // Show what was heard, editable; nothing happens until the user presses Return.
-            captureState.lastVoiceText = text
-            captureState.text = text
-            captureState.reviewingVoice = true
-            captureState.voiceStatus = nil
-            captureState.presentations += 1
-            panel.makeKey()
-            voice.finishedHandling()
-            appLog.notice("voice command awaiting review")
-            return
-        }
+        captureState.lastVoiceText = text
         captureState.text = text
-        captureState.voiceStatus = "You said: “\(text)”"
+        if case let .confirm(why) = assessment {
+            reviewTranscript(why)
+        } else if model.settings.voiceReviewFirst {
+            reviewTranscript("Transcribed on this Mac. Fix any wrong words, then press Return.")
+        } else {
+            // Long enough to read what was heard, short enough not to feel like waiting.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, self.voice.phase == .transcriptReady(text) else { return }
+                    self.execute(text, channel: .voice)
+                }
+            }
+        }
+    }
+
+    private func reviewTranscript(_ note: String) {
+        captureState.reviewingVoice = true
+        captureState.voiceStatus = note
+        captureState.presentations += 1
+        panel.makeKey()
+    }
+
+    /// Runs one command (typed, reviewed or spoken) and shows its real outcome. For voice the
+    /// session moves processing → completed / needs clarification / failed from the actual reply.
+    private func execute(_ text: String, channel: UserChannel) {
+        guard !captureState.busy else { return }
+        let spoken = channel == .voice
+        if spoken { voice.beginProcessing(text) }
+        captureState.reviewingVoice = false
         captureState.busy = true
         Task {
-            let reply = await model.submitFromCapture(text, channel: .voice)
+            let reply = await model.submitFromCapture(text, channel: channel)
             captureState.busy = false
-            appLog.notice("voice command result: \(Self.describe(reply), privacy: .public)")
+            appLog.notice("command result: \(Self.describe(reply), privacy: .public)")
+            var outcome: VoiceSession.Outcome
             switch reply {
             case .saved:
-                captureState.status = "Saved"
-                captureState.voiceStatus = "Saved “\(text)” as a new item."
-                closeAfter(3)
+                outcome = .completed("Saved")
+                if spoken { captureState.voiceStatus = "Saved “\(text)”."; closeAfterVoice(4) } else { closeCapture() }
             case let .resolution(r):
                 captureState.reply = r
-                if case .answer = r { closeAfter(12) }
+                outcome = Self.outcome(of: r)
+                if case .answer = r, spoken { closeAfterVoice(12) }
             case let .failed(m):
                 captureState.status = m
+                outcome = .failed(m)
             case let .ask(r):
-                showAsk(r, channel: .voice)
+                showAsk(r, channel: channel)
+                outcome = askOutcome()
             }
-            voice.finishedHandling()
+            if spoken {
+                // A follow-up question is answered in the field: clear the old sentence for the answer.
+                if case .needsClarification = outcome, !isProposalReply { captureState.text = ""; captureState.lastVoiceText = "" }
+                voice.finishProcessing(outcome)
+            }
+        }
+    }
+
+    private var isProposalReply: Bool { if case .proposal? = captureState.reply { true } else { false } }
+
+    static func outcome(of r: ContextResolution) -> VoiceSession.Outcome {
+        switch r {
+        case let .answer(a): .completed(a.title)
+        case let .proposal(p): .needsClarification("Confirm this change: \(p.preview)")
+        case let .clarify(q, _, _): .needsClarification(q)
+        case let .needsDate(q): .needsClarification(q)
+        case let .notFound(m): .failed(m)
+        case .notACommand: .completed("Saved")
+        }
+    }
+
+    /// What the Ask card shows right after a spoken GPT request was handed over.
+    private func askOutcome() -> VoiceSession.Outcome {
+        guard let card = captureState.ask else { return .failed("The request couldn't be started.") }
+        switch card.phase {
+        case .sending, .answered, .partial: return .completed("GPT request submitted")
+        case .ready: return card.destination == .choose ? .needsClarification("Who should answer this?") : .completed("GPT request ready")
+        case .notConnected: return .failed("ChatGPT isn't connected. Connect it below; your request is kept.")
+        case let .reconnect(m), let .needsPermission(m), let .usageLimit(m), let .needsReview(m), let .unsupported(m): return .failed(m)
+        case let .failed(m, _): return .failed(m)
+        case .connecting: return .completed("Connecting to ChatGPT…")
         }
     }
 
     /// Kind of result only (never the words), for diagnostics.
     static func describe(_ r: CaptureReply) -> String {
         switch r {
+        // Messages can quote the user's words ("When should I remind you to call Sam?"), so only kinds are logged.
         case .saved: return "saved as a new item"
-        case let .failed(m): return "failed: \(m)"
+        case .failed: return "failed"
         case let .ask(r): return r.target == .chatgpt ? "ask ChatGPT" : "general question (choose who answers)"
         case let .resolution(res):
             switch res {
-            case let .answer(a): return "answer: \(a.title.hasPrefix("Reminder set") ? "reminder set" : "\(a.lines.count) lines")"
+            case let .answer(a): return "answer: \(a.title.hasPrefix("Reminder created") ? "reminder created" : "\(a.lines.count) lines")"
             case .proposal: return "proposal awaiting confirmation"
             case .clarify: return "asked which item"
-            case let .needsDate(q): return "asked: \(q)"
-            case let .notFound(m): return "not found: \(m)"
+            case .needsDate: return "asked a follow-up question"
+            case .notFound: return "not found"
             case .notACommand: return "not a command"
             }
         }
@@ -301,13 +386,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
         let snapshot = captureState.text
         let work = DispatchWorkItem { [weak self] in
             MainActor.assumeIsolated {
-                guard let self, self.captureState.text == snapshot, !self.captureState.recording else { return }
+                guard let self, self.captureState.text == snapshot, !self.voice.phase.isBusy, self.captureState.ask == nil || self.captureState.ask?.phase.isSending == false else { return }
                 self.closeCapture()
             }
         }
         autoClose = work
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: work)
     }
+
+    private func closeAfterVoice(_ seconds: TimeInterval) { closeAfter(seconds) }
 
     // MARK: Capture panel
 
@@ -325,36 +412,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !captureState.busy else { return }
         // A reviewed spoken command runs as voice (same pipeline, same audit channel).
         let channel: UserChannel = captureState.reviewingVoice ? .voice : .hotkey
-        if case .capturing = voice.phase { voice.cancel() }
-        captureState.reviewingVoice = false
+        appLog.notice("panel submit (reviewing voice: \(self.captureState.reviewingVoice, privacy: .public), phase: \(String(describing: self.voice.phase).prefix(20), privacy: .public))")
+        if voice.isCapturing { voice.cancel() }
         captureState.recording = false
-        captureState.busy = true
-        Task {
-            let reply = await model.submitFromCapture(text, channel: channel)
-            captureState.busy = false
-            switch reply {
-            case .saved: closeCapture()
-            case let .resolution(r): captureState.reply = r
-            case let .failed(msg): captureState.status = msg
-            case let .ask(r): showAsk(r, channel: channel)
-            }
-        }
+        execute(text, channel: channel)
     }
 
-    /// Typing while Wren is listening: stop listening and keep what's in the field for editing.
+    /// Typing while Wren is recording: stop recording and keep what's in the field for editing.
     private func editedWhileListening() {
         guard captureState.recording else { return }
         voice.cancel()
         captureState.recording = false
         captureState.reviewingVoice = true
-        captureState.voiceStatus = nil
+        captureState.voiceStatus = "Recording stopped because you typed. Edit the text, then press Return."
     }
 
     /// Locking the screen or sleeping drops a command being recorded. Nothing restarts afterwards.
     private func observeScreenLock() {
         let stop: @MainActor () -> Void = { [weak self] in
-            guard let self, let v = self.voice, v.isCapturing else { return }
-            v.cancel(); self.captureState.voiceStatus = "Recording stopped because the screen locked or the Mac went to sleep."
+            guard let self, let v = self.voice, v.phase.isBusy else { return }
+            v.cancel(.screenLocked)
             appLog.notice("voice capture cancelled: screen locked or sleep")
         }
         DistributedNotificationCenter.default().addObserver(forName: .init("com.apple.screenIsLocked"), object: nil, queue: .main) { _ in
@@ -530,6 +607,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
     }
 
     private func closeCapture() {
+        autoClose?.cancel()
+        voice?.reset()
+        captureState.voiceStatus = nil
         captureState.reviewingVoice = false
         captureState.text = ""
         captureState.reply = nil
@@ -796,10 +876,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
             }
         case "/voice-command":
             // Debug only: the step after transcription, with this text as if it had been spoken.
-            if let text = q.first(where: { $0.name == "text" })?.value { runVoiceCommand(text, .shortcut) }
+            // The step after transcription, with this text as the final transcript: routed and run
+            // exactly as a spoken command (processing → result), without a microphone.
+            if let text = q.first(where: { $0.name == "text" })?.value {
+                showCapture(); captureState.text = text; captureState.lastVoiceText = text
+                execute(text, channel: .voice)
+            }
         case "/voice":
             // Debug only: same as pressing the voice shortcut (the microphone really starts).
-            startOrStopVoice(.shortcut)
+            startOrStopVoice(.hold)
+        case "/voice-release":
+            // Debug only: same as letting go of the push-to-talk shortcut.
+            pushToTalkUp()
+        case "/voice-state":
+            appLog.notice("debug voice phase=\(String(describing: self.voice.phase), privacy: .public) microphoneOpen=\(self.voice.isMicrophoneOpen, privacy: .public) pushToTalk=\(self.model.settings.voiceHotKey.display, privacy: .public) registered=\(self.voiceKeys.isRegistered, privacy: .public) capture=\(self.model.settings.hotKey.display, privacy: .public)")
         case "/reminders":
             Task {
                 let r = await model.reconcileReminders()

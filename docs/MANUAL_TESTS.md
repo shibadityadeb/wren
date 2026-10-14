@@ -15,7 +15,26 @@ touched. Debug URLs exist only in debug builds. Read results with:
 /usr/bin/log stream --style compact --predicate 'subsystem == "com.shibadityadeb.wren" AND processImagePath CONTAINS "Wren Dev.app"'
 ```
 
-## Last pass: 2026-10-13, branch `feat/personal-executor` (0.10.0, schema 7), macOS 26.1, Apple Silicon
+## Last pass: 2026-10-14, branch `fix/push-to-talk` (0.10.1), macOS 26.1, Apple Silicon
+
+Automated: `swift test`, 344 tests, 0 failures, 4 skipped (the push-to-talk state machine runs against a
+fake microphone and fake permissions). Live: a **Wren Dev** build driven by debug URLs. No microphone was
+opened: Wren Dev has never been granted Microphone or Speech Recognition, and granting them needs a person.
+
+| ID | Area | Test | Status |
+|---|---|---|---|
+| P-1 | Shortcut | At launch, push-to-talk registers ⌥ Space and typed capture moves to ⌥⇧ Space (no clash); voice phase `idle`, microphone closed | **Passed live** in Wren Dev (`push-to-talk ⌥ Space registered`, `hotkey ⌥⇧ Space registered`, `microphoneOpen=false`) |
+| P-2 | Command | The step after transcription (`/debug/voice-command`), as a spoken command: "Remind me to call Sam tomorrow at 10 AM." → `completed("Reminder created: Call Sam")`; "I need to finish the report by Friday." → CreateTask, `completed("Saved")`; "Ask GPT to research quantum physics." → DelegateToChatGPT, `failed("ChatGPT isn't connected…")` with the request kept (Wren Dev isn't signed in); "What am I waiting for?" → QueryStoredItems, `completed`; "Remind me every weekday at 3 PM." → `needsClarification("What should I remind you about?")`; microphone closed throughout | **Passed live** in Wren Dev |
+| P-3 | Command | "to stretch" after that question → `completed("Reminder created: Stretch")` (repeating); "I need to send the invoice by Monday." after the same question → CreateTask, not swallowed as the answer | **Passed live** after the fix (first run showed the bug: the invoice sentence became the answer and the weekday schedule was lost) |
+| P-4 | Shortcut + mic | Hold ⌥ Space in another app with Wren's window closed: "I'm listening…", orange mic dot; release (either key) ends recording and the dot goes off at once; key repeat and repeated presses start nothing; Esc cancels | **Not run**: needs a person at the keyboard and Microphone + Speech Recognition granted (steps M-PTT below) |
+| P-5 | Transcription | Real on-device transcription of spoken words, interim text while holding, low-confidence confirmation | **Not run** live (same reason). Mocked: `PushToTalkTests` |
+| P-6 | Lifecycle | Quit unregisters both shortcuts and releases the microphone | **Passed live** for quit (`quit: status item removed, shortcuts released`); microphone part mocked (`testQuitAndScreenLockReleaseTheMicrophone`) |
+
+Observed once and not reproduced: during the first P-3 run, a typed-channel "Capture" submission appeared
+in the log between two debug commands. A clean rerun of the same sequence showed none. A content-free
+`panel submit` log line now records every panel submission, to catch it if it recurs.
+
+## Previous pass: 2026-10-13, branch `feat/personal-executor` (0.10.0, schema 7), macOS 26.1, Apple Silicon
 
 Automated: `swift test` (mocks, see above). Live items below used the maintainer's own signed-in
 accounts through `wren-tools live-check` (same AskService/broker/connectors as the app, throwaway
@@ -124,15 +143,31 @@ Debug: `open "wren-dev://debug/reminders"` logs `debug pending <id> next=<date>`
 3. Open the app again from Finder: still one process and one bird.
 4. ⌘Q while recording a voice command: the bird and Dock icon go and the macOS microphone indicator goes off. Wren no longer checks mail or records; already-scheduled reminders still arrive from macOS.
 
-### M-VOICE (needs Microphone and Speech Recognition allowed)
-1. Launch Wren and wait a minute without using voice. Expected: no orange microphone indicator, ever. Connectors › Voice says "Microphone off" and shows the local model as installed (or links to Dictation settings).
-2. Press ⌥⇧ Space (turn the shortcut on in Connectors › Voice first) and say "remind me to call Sam tomorrow at 10 AM". Expected: the panel shows a red **Recording…** indicator and the orange macOS microphone dot; the words appear as you speak; after you pause the dot goes off and the panel shows "Transcribed on this Mac" with the text editable. Change "10" to "11" and press Return: "Reminder set: Call Sam, tomorrow at 11:00 AM".
-3. Click **Voice** in the capture panel (or the microphone in the menu-bar popover, or the bird's right-click menu › Voice Command), say "ask GPT to research the fundamentals of quantum physics", press **Stop**. Expected: a GPT delegation as in M-GPT 9.
-4. Say something, then choose **Record again**: the old text is discarded and a new recording starts. Press Esc while recording: nothing happens and the microphone dot goes off.
-5. Press the shortcut twice quickly while a command is being handled: no second recording.
-6. Start a recording and lock the screen (⌃⌘Q): the recording is cancelled; unlocking doesn't start anything.
-7. Say "what am I waiting on?": an answer from Wren's own items, nothing sent anywhere.
-8. Activity Monitor › Wren with voice idle: no audio activity; after ⌘Q during a recording, the microphone dot goes off.
+### M-PTT: push-to-talk (needs a person, a microphone, and Microphone + Speech Recognition allowed)
+
+Run with `scripts/try-wren.sh` (Wren Dev) or the installed app, and keep its log open.
+
+1. Launch Wren and close its window. Wait a minute. Expected: no orange microphone dot; log shows `push-to-talk ⌥ Space registered` and `hotkey ⌥⇧ Space registered`.
+2. In TextEdit, press and hold ⌥ Space.
+   - First time: macOS asks for Microphone, then Speech Recognition. Allow both and let go.
+   - Expected: "Microphone access is set. Hold the shortcut again and speak." No space was typed into TextEdit.
+3. Hold ⌥ Space and say "remind me to call Sam tomorrow at 10 AM"; let go.
+   - Expected while holding: the panel shows "I'm listening…", the ring moves with your voice, words appear, and the orange dot is on.
+   - On release (log `push-to-talk up`): the dot goes off immediately, then "Transcribing your voice…".
+   - Then: the sentence, "Working on it…", and "Reminder created: Call Sam · Tomorrow at 10:00 AM". You don't press Return.
+   - The log shows exactly one `execute CreateReminder`.
+4. Hold, speak, and release **⌥ first** while still holding Space. Expected: log `push-to-talk modifier released`, and the same flow as step 3.
+5. Hold ⌥ Space for a few seconds without speaking; let go. Expected: "Didn't hear anything, so nothing was done." No item is created.
+6. Hold ⌥ Space and press Esc while speaking. Expected: "Cancelled. Nothing was done." The dot goes off.
+7. "I need to finish the report by Friday" → a task due Friday. "What am I waiting for?" → the answer. "Ask GPT to research quantum physics" → "GPT request submitted" (or "ChatGPT isn't connected" with Connect ChatGPT and the request kept).
+8. "Remind me every weekday at 3 PM" → "One quick question: What should I remind you about?". Hold again: "to stretch" → "Reminder created: Stretch", weekdays at 3 PM.
+9. While "Working on it…" shows, press ⌥ Space repeatedly. Expected: nothing new starts; one execution in the log.
+10. Mumble. Expected: "I'm not sure I heard that right…" and the words wait for Return or **Record again**.
+11. Return after a result shows "Done" and closes the panel; it doesn't save the words again.
+12. Hold ⌥ Space and lock the screen (⌃⌘Q). Expected: recording cancelled; nothing restarts after unlocking.
+13. System Settings › Privacy & Security › Microphone › turn Wren off, then hold ⌥ Space. Expected: "Microphone access is off" with **Open Privacy Settings**, and no recording.
+14. Settings: typed capture shows ⌥⇧ Space and opens the panel for typing. Connectors › Voice shows "Hold ⌥ Space" and can change or turn off the shortcut.
+15. ⌘Q while holding ⌥ Space: the dot goes off and Wren quits.
 
 ### M-NOTION, M-CAL
 As before: Connectors › Notion › Connect Notion (search, read, create after confirming, disconnect);

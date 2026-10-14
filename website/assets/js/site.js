@@ -69,12 +69,12 @@
       const words = final.split(" ");
       const mark = (n) => steps.forEach((li, i) => li.classList.toggle("is-active", i <= n));
       result.classList.remove("is-in"); text.textContent = ""; panel.classList.add("is-listening");
-      label.textContent = "Recording…"; sub.textContent = "Say what you need, then pause.";
+      label.textContent = "I'm listening…"; sub.textContent = "Release ⌥ Space to finish.";
       mark(0); await wait(900); mark(1);
       for (let i = 1; i <= words.length; i++) { text.textContent = words.slice(0, i).join(" "); await wait(230); }
       mark(2); await wait(1200);
       panel.classList.remove("is-listening");
-      label.textContent = "Transcribed"; sub.textContent = "Edit it if you like, then press Return.";
+      label.textContent = "Transcribing your voice…"; sub.textContent = "Microphone off. Recognising on this Mac.";
       mark(3); await wait(1600);
       mark(4); result.classList.add("is-in");
     },

@@ -92,3 +92,13 @@ final class ExecutionRouterTests: XCTestCase {
         XCTAssertTrue(g.begin(k, now: t.addingTimeInterval(5)), "a deliberate repeat later is allowed")
     }
 }
+
+extension ExecutionRouterTests {
+    func testCarefullyOrInvestigateAloneDontRaiseTheEffort() {
+        func req(_ s: String) -> AIRequest? { if case let .delegateToChatGPT(r) = op(s) { r } else { nil } }
+        XCTAssertEqual(req("Ask GPT to carefully summarize this article")?.wantsHighEffort, false)
+        XCTAssertEqual(req("Ask GPT to investigate why my build fails")?.wantsHighEffort, false)
+        XCTAssertEqual(req("Ask GPT to investigate this carefully: why my build fails")?.wantsHighEffort, true)
+        XCTAssertEqual(req("Ask GPT to think carefully about my options")?.wantsHighEffort, true)
+    }
+}

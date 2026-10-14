@@ -28,8 +28,11 @@ public struct AIRequest: Equatable, Sendable {
 /// research that needs outside sources. Nothing is inferred from the topic.
 public enum DelegationIntent {
     /// "think deeply/carefully", "high reasoning effort", "in depth", "investigate … carefully".
+    /// "carefully" or "investigate" alone don't count ("carefully summarize this" is an ordinary request).
     public static func wantsDeepThinking(_ text: String) -> Bool {
-        text.lowercased().firstMatch(of: /\b(think(?:ing)? (?:deeply|hard|harder|carefully|it through)|deep(?:ly)? think\w*|deeper|in[ -]depth|deep analysis|thorough(?:ly)?|carefully|high(?:er)? reasoning(?: effort)?|reason (?:carefully|deeply)|maximum reasoning|investigate)\b/) != nil
+        let lower = text.lowercased()
+        return lower.firstMatch(of: /\b(think(?:ing)? (?:deeply|hard|harder|carefully|it through)|deep(?:ly)? think\w*|deeper|in[ -]depth|deep analysis|thorough(?:ly)?|high(?:er)? reasoning(?: effort)?|reason (?:carefully|deeply)|maximum reasoning)\b/) != nil
+            || lower.firstMatch(of: /\binvestigate(?:\s+\w+){0,4}\s+(?:carefully|thoroughly|deeply)\b/) != nil
     }
 
     /// "research …", "find sources", "with citations", "latest/current news", "search the web".
@@ -72,6 +75,24 @@ public enum ReminderFollowUp {
     public static func mayAnswer(_ text: String) -> Bool {
         let t = ReminderCommand.stripAddress(text)
         return IntentRouter.aiRequest(t) == nil && IntentRouter.explicitCapture(t) == nil
+    }
+
+    /// Wren asked "What should I remind you about?" for `pending` (which has the time, e.g.
+    /// "Remind me every weekday at 3 PM"). The answer becomes the subject and the schedule is kept:
+    /// "to stretch" → "remind me to stretch every weekday at 3 PM". An answer that brings its own
+    /// date or schedule ("I need to send the invoice by Monday") is a new request, not this answer: nil.
+    public static func subjectAnswer(_ answer: String, pending: String, now: Date, calendar: Calendar) -> String? {
+        let a = ReminderCommand.stripAddress(answer).trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ".!")))
+        guard !a.isEmpty, mayAnswer(a) else { return nil }
+        guard DateParser(calendar: calendar).parse(a, now: now) == nil, RecurrenceRule.find(in: a, calendar: calendar) == nil else { return nil }
+        // Its own request ("create a task to buy milk", "what's due?", "mark the report done") isn't a subject.
+        guard !ExecutionRouter.hasTaskFraming(a), !IntentRouter.isQuestion(a),
+              ContextResolver(calendar: calendar).command(a, now: now) == nil else { return nil }
+        let subject = a.replacingOccurrences(of: #"^(?:remind me\s+)?(?:to|about|that)\s+"#, with: "", options: [.regularExpression, .caseInsensitive])
+        let lower = pending.lowercased()
+        guard let trigger = ReminderCommand.triggers.first(where: { lower.hasPrefix($0) }) else { return nil }
+        let schedule = String(pending.dropFirst(trigger.count)).trimmingCharacters(in: .whitespaces)
+        return "remind me to \(subject) \(schedule)"
     }
 }
 

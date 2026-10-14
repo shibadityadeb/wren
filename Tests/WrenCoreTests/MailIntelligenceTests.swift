@@ -460,3 +460,31 @@ extension MailIntelligenceTests {
         XCTAssertNoThrow(try JSONDecoder().decode(MailboxState.self, from: data))
     }
 }
+
+extension MailIntelligenceTests {
+    func testReadingASnoozedEmailEndsTheSnoozeEvenIfItsMarkedUnreadLater() {
+        var s = state(with: [mail("u", subject: "Security alert", snippet: "New sign-in")])
+        let off = QuietHours(enabled: false)
+        _ = MailAlertPolicy.decide(&s, candidates: ["u"], level: .important, quiet: off, now: now, calendar: cal)
+        MailAlertPolicy.snooze(&s, id: "u", until: now.addingTimeInterval(3600))
+        s.items["u"]?.message.labels = ["INBOX"]   // read
+        _ = MailAlertPolicy.decide(&s, candidates: [], level: .important, quiet: off, now: now.addingTimeInterval(3700), calendar: cal)
+        XCTAssertNil(s.items["u"]?.alertSnoozed)
+        s.items["u"]?.message.labels = ["INBOX", "UNREAD"]   // marked unread again
+        XCTAssertTrue(MailAlertPolicy.decide(&s, candidates: [], level: .important, quiet: off, now: now.addingTimeInterval(4000), calendar: cal).individual.isEmpty)
+    }
+}
+
+extension MailIntelligenceTests {
+    func testReadDuringTheSnoozeEndsItEvenIfUnreadAgainBeforeExpiry() {
+        var s = state(with: [mail("u", subject: "Security alert", snippet: "New sign-in")])
+        let off = QuietHours(enabled: false)
+        _ = MailAlertPolicy.decide(&s, candidates: ["u"], level: .important, quiet: off, now: now, calendar: cal)
+        MailAlertPolicy.snooze(&s, id: "u", until: now.addingTimeInterval(3600))
+        s.items["u"]?.message.labels = ["INBOX"]                     // a check during the snooze sees it read
+        _ = MailAlertPolicy.decide(&s, candidates: [], level: .important, quiet: off, now: now.addingTimeInterval(600), calendar: cal)
+        XCTAssertNil(s.items["u"]?.alertSnoozed)
+        s.items["u"]?.message.labels = ["INBOX", "UNREAD"]           // unread again before expiry
+        XCTAssertTrue(MailAlertPolicy.decide(&s, candidates: [], level: .important, quiet: off, now: now.addingTimeInterval(3700), calendar: cal).individual.isEmpty)
+    }
+}

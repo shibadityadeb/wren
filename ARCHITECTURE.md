@@ -648,15 +648,27 @@ Notion's hosted MCP server (`https://mcp.notion.com/mcp`): OAuth discovery, dyna
 - **Privacy**: only the request text is sent by default. Delegate can add Wren items or Notion pages the user picks; private ones need ticking (`noPrivateDataToExternalAI` requires a confirmation minted with `includingPrivate`), secrets are redacted unless the user opts in. A retry re-sends exactly the same text with the same approval. Audit records hold labels and model names only.
 - **Handoff fallback**: `chatgpt.handoff` copies the prompt and opens ChatGPT; status `handedOff` = "Awaiting submission" until the user pastes an answer. It is never reported as a completed GPT query.
 
-## 40. Voice (0.10: explicit activation only)
+## 40. Voice (0.10.1: push-to-talk)
 
-Voice is explicitly activated; there is no wake word, no idle listening and no setting for either (the 0.9 "Hey Wren" listener, `WakeWord` and `VoiceActivityGate` were removed, and the `wakeWordEnabled` preference is deleted at launch). One `VoiceSession` (WrenCore) with two triggers, `.shortcut` (the Carbon hotkey, default ⌥⇧Space) and `.button` (Voice in the capture panel, popover and status-item menu, and Connectors › Voice), fed by `LiveSpeechStream` (`AVAudioEngine` tap → `SFSpeechAudioBufferRecognitionRequest`, `requiresOnDeviceRecognition = true`; buffers go straight to the recogniser and are never written anywhere).
+Voice is explicitly activated only; there is no wake word, no idle listening and no setting for either (the 0.9 "Hey Wren" listener was removed in 0.10).
 
-- `activate(trigger)`: asks for Microphone and Speech Recognition if needed, then opens the microphone and moves `.off → .capturing(trigger)`. Pressed while capturing it ends the command; while `.handling`, or while a permission prompt is open, it does nothing. An `activation` counter makes a prompt answered after Cancel/quit a no-op.
-- `CommandEndpointer` ends the command on a 1.6 s pause, 7 s without speech or a 30 s cap; Stop ends it at once; Cancel/Escape drops it. Ending always calls `stream.stop()` first. The session then goes to `.handling` (one `onCommand` per capture) and `finishedHandling()` returns it to `.off`. Nothing in the session ever restarts the stream: not a finished command, a recogniser error (`.failed`), a screen unlock or a permission change. Screen lock and sleep cancel a capture (`AppDelegate.observeScreenLock`); quit calls `shutdown()`.
-- With "review first" (default) the final text goes into the panel's editable field ("Transcribed on this Mac") and runs only on Return, as channel `.voice`; **Record again** discards it and activates again. Typing during capture cancels the recording and keeps the text.
-- The transcript goes to `AppDelegate.runVoiceCommand` → `AppModel.submitFromCapture(channel: .voice)` → `ExecutionRouter`, exactly the path typed input takes (§45).
-- `LocalSpeechModel.status()` reports Apple's on-device model for the current locale (installed, not installed, unsupported, temporarily unavailable). macOS manages that model (Dictation settings); Wren bundles and downloads none.
+**Shortcut.** Push-to-talk is a Carbon `RegisterEventHotKey` hotkey (default ⌥ Space, `HotKeyService` id 2) registered for both `kEventHotKeyPressed` and `kEventHotKeyReleased`. Carbon reports the *key* going up; letting go of the *modifier* first is caught by polling `NSEvent.modifierFlags` (class property: current modifier state, no Accessibility or Input Monitoring permission) every 50 ms while listening. The hotkey consumes the key combination, so the focused app never receives the space. Typed capture moved to ⌥⇧ Space (`WrenSettings.hotKey` gives way automatically if a saved capture shortcut equals the push-to-talk one). New preference keys (`pushToTalkEnabled`, `pushToTalkHotKey`, `voiceCheckBeforeRunning`) replace the 0.10.0 ones, which are deleted at launch.
+
+**Session** (`VoiceSession`, WrenCore, pure; microphone and permissions injected):
+
+    idle → requestingPermission? → listening(hold|button) → transcribing → transcriptReady → processing
+         → completed | needsClarification | failed            cancelled: from any step before processing
+
+- `press(trigger)`: key-down or a Voice click. Ignored while busy (requestingPermission … processing), so key repeat and repeated presses can't start a second recording. Asks macOS only when a permission is undetermined; a key-up during the prompt (`releasedDuringPermission`) cancels this press (`cancelled(.releasedBeforeRecording)`); the user holds again to record. A `generation` counter makes late permission answers and late transcripts from cancelled utterances no-ops.
+- `release()`: key-up (either key) or Stop → `transcribing`. `SpeechStreaming.finish` closes the microphone (`AVAudioEngine` stopped, tap removed) **before** `endAudio()`, then waits up to 5 s for the recogniser's final result (falls back to the last partial).
+- `TranscriptAssessment`: empty → `cancelled(.nothingHeard)`; confidence below 0.35 (average of final-segment confidences, when reported) or a single short word → shown for confirmation, not run; otherwise run.
+- The app runs a clear transcript ~0.45 s after showing it (`beginProcessing`) through `AppModel.submitFromCapture(channel: .voice)` → `ExecutionRouter` (§45), then reports the real reply with `finishProcessing`: answers → `completed(title)`, proposals / clarifications → `needsClarification`, not-found and failures → `failed(.commandFailed)`, GPT → `completed("GPT request submitted")` (the panel's headline follows the Ask card to "GPT finished"; the completion notification is unchanged).
+- Button mode keeps `CommandEndpointer` (pause, 7 s silence, 30 s cap); a held shortcut is capped at 60 s.
+- Screen lock / sleep → `cancel(.screenLocked)`; quit → `shutdown()`.
+
+The panel (`CaptureView.voiceStatus`) renders one row per real phase: "I'm listening…" with a level-driven ring (real input level from the tap) and the recogniser's genuine interim text, "Transcribing your voice…", "Working on it…", the result, "One quick question", or the failure with its recovery action. Return after a result closes the panel instead of re-submitting the words. A reminder still missing its subject ("remind me every weekday at 3 PM") keeps its schedule when the next answer supplies the subject (`ReminderFollowUp.subjectAnswer`); an answer with its own date is treated as a new request.
+
+`LocalSpeechModel.status()` reports Apple's on-device model for the current locale. macOS manages that model (Dictation settings); Wren bundles and downloads none and sets `requiresOnDeviceRecognition`.
 
 ## 41. Scheduled reminders
 

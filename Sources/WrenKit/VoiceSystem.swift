@@ -95,7 +95,8 @@ enum LocalSpeechModel {
 
 /// Live microphone audio into Apple's speech recogniser, on-device only (`requiresOnDeviceRecognition`):
 /// audio never leaves the Mac, and Wren refuses to run if the on-device model isn't installed.
-/// Recognition runs from `start()` until `stop()`; the microphone is closed at every other time.
+/// The microphone is open from `start()` until `finish` (release) or `stop()` (cancel), and closed
+/// at every other time. After `finish` the recogniser only works on audio already captured.
 @MainActor
 final class LiveSpeechStream: SpeechStreaming {
     var onTranscript: ((String) -> Void)?
@@ -111,6 +112,11 @@ final class LiveSpeechStream: SpeechStreaming {
     private var task: SFSpeechRecognitionTask?
     private var generation = 0
     private var startedAt = Date.distantPast
+    /// The newest text and its confidence, kept so `finish` can fall back to it if the recogniser
+    /// never sends a final result.
+    private var latest = FinalTranscript(text: "", confidence: nil)
+    private var finishing: ((Result<FinalTranscript, VoiceError>) -> Void)?
+    private var finishTimeout: DispatchWorkItem?
     private var configObserver: NSObjectProtocol?
     /// Only touch the input node after it was set up: merely reading `inputNode` opens the audio
     /// input (and can make macOS ask for the microphone), which must never happen just by quitting.
@@ -141,6 +147,7 @@ final class LiveSpeechStream: SpeechStreaming {
             throw VoiceError.recordingFailed("The microphone changed. Try again in a moment.")
         }
         generation += 1
+        latest = FinalTranscript(text: "", confidence: nil)
         let gen = generation
         let state = tap
         input.removeTap(onBus: 0)
@@ -180,14 +187,22 @@ final class LiveSpeechStream: SpeechStreaming {
         let gen = generation
         task = r.recognitionTask(with: req) { [weak self] result, error in
             let text = result?.bestTranscription.formattedString
+            // Final results carry per-segment confidence; partial ones report 0.
+            let scores = result?.bestTranscription.segments.map { Double($0.confidence) }.filter { $0 > 0 } ?? []
+            let confidence = scores.isEmpty ? nil : scores.reduce(0, +) / Double(scores.count)
             let final = result?.isFinal ?? false
             let failure = error.map(Self.classify) ?? nil
             let ended = error != nil || final
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     guard let self, gen == self.generation else { return }
-                    if let text, !text.isEmpty { self.onTranscript?(text) }
-                    if ended { self.finishTask(failure) }
+                    if let text, !text.isEmpty {
+                        self.latest = FinalTranscript(text: text, confidence: final ? confidence : self.latest.confidence)
+                        if self.finishing == nil { self.onTranscript?(text) }
+                    }
+                    guard ended else { return }
+                    if self.finishing != nil { self.complete(failure.map { .failure($0) } ?? .success(self.latest)); return }
+                    self.finishTask(failure)
                 }
             }
         }
@@ -207,19 +222,48 @@ final class LiveSpeechStream: SpeechStreaming {
         onEnded?(failure)
     }
 
+    /// Release / Stop: the microphone closes now, before transcription finishes. The recogniser is
+    /// told the audio has ended and gets a few seconds to produce its final text.
+    func finish(_ completion: @escaping (Result<FinalTranscript, VoiceError>) -> Void) {
+        guard task != nil else { completion(.success(latest)); return }
+        finishing = completion
+        closeMicrophone()
+        tap.detach()?.endAudio()
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated { self?.complete(.success(self?.latest ?? FinalTranscript(text: "", confidence: nil))) }
+        }
+        finishTimeout = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5, execute: work)
+    }
+
+    private func complete(_ r: Result<FinalTranscript, VoiceError>) {
+        guard let done = finishing else { return }
+        finishing = nil
+        finishTimeout?.cancel(); finishTimeout = nil
+        task?.cancel(); task = nil
+        done(r)
+    }
+
     func stop() {
         generation += 1
+        finishing = nil
+        finishTimeout?.cancel(); finishTimeout = nil
         teardown()
     }
 
-    private func teardown() {
+    /// Stops audio input and releases the input device. Recognition may continue on what was captured.
+    private func closeMicrophone() {
         if let o = configObserver { NotificationCenter.default.removeObserver(o) }
         configObserver = nil
-        task?.cancel(); task = nil
-        tap.detach()?.endAudio()
         if engine.isRunning { engine.stop() }
         if tapInstalled { engine.inputNode.removeTap(onBus: 0); tapInstalled = false }
         isRunning = false
+    }
+
+    private func teardown() {
+        task?.cancel(); task = nil
+        tap.detach()?.endAudio()
+        closeMicrophone()
     }
 }
 
@@ -231,7 +275,7 @@ final class VoiceConnector: Connector {
     /// The voice shortcut is on.
     var enabled: Bool
     /// The live session's phase, set by the app.
-    var phase: VoiceSession.Phase = .off
+    var phase: VoiceSession.Phase = .idle
     init(permissions: SystemVoicePermissions, enabled: Bool) { self.permissions = permissions; self.enabled = enabled }
 
     var state: ConnectorState {
@@ -248,6 +292,6 @@ final class VoiceConnector: Connector {
         return .connected(account: "On-device, \(Locale.current.identifier), \(mode)")
     }
     func refresh() async {}
-    var isCapturing: Bool { if case .capturing = phase { true } else { false } }
+    var isCapturing: Bool { phase.isCapturingPhase }
     func disconnect() async { enabled = false }
 }

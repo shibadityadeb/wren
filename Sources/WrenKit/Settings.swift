@@ -8,8 +8,11 @@ public struct HotKeySpec: Codable, Equatable {
     public var carbonModifiers: UInt32
     public var display: String
 
+    /// Default push-to-talk shortcut: hold ⌥ Space to speak, release to run.
     public static let optionSpace = HotKeySpec(keyCode: UInt32(kVK_Space), carbonModifiers: UInt32(optionKey), display: "⌥ Space")
-    /// Default voice shortcut: press ⌥⇧Space to start one command, press again to stop.
+    /// Fallback typed-capture shortcut when push-to-talk uses ⌥⇧ Space.
+    public static let controlOptionSpace = HotKeySpec(keyCode: UInt32(kVK_Space), carbonModifiers: UInt32(controlKey | optionKey), display: "⌃⌥ Space")
+    /// Default typed-capture shortcut since 0.10.1 (it was ⌥ Space before push-to-talk took that).
     public static let optionShiftSpace = HotKeySpec(keyCode: UInt32(kVK_Space), carbonModifiers: UInt32(optionKey | shiftKey), display: "⌥⇧ Space")
 }
 
@@ -22,8 +25,15 @@ final class WrenSettings {
         get { d.object(forKey: "hotKeyEnabled") as? Bool ?? true }
         set { d.set(newValue, forKey: "hotKeyEnabled") }
     }
+    /// The typed-capture shortcut. A saved one that clashes with push-to-talk (⌥ Space was the old
+    /// default) gives way to ⌥⇧ Space, so the two never fight over one key combination.
     var hotKey: HotKeySpec {
-        get { (d.data(forKey: "hotKey")).flatMap { try? JSONDecoder().decode(HotKeySpec.self, from: $0) } ?? .optionSpace }
+        get {
+            let saved = (d.data(forKey: "hotKey")).flatMap { try? JSONDecoder().decode(HotKeySpec.self, from: $0) }
+            let wanted = saved ?? .optionShiftSpace
+            guard voiceEnabled, wanted == voiceHotKey else { return wanted }
+            return [HotKeySpec.optionShiftSpace, .controlOptionSpace].first { $0 != voiceHotKey } ?? .controlOptionSpace
+        }
         set { d.set(try? JSONEncoder().encode(newValue), forKey: "hotKey") }
     }
     var modelName: String? {
@@ -61,9 +71,10 @@ final class WrenSettings {
         get { d.object(forKey: "lastAutomaticBackup") as? Date }
         set { d.set(newValue, forKey: "lastAutomaticBackup") }
     }
+    /// Push-to-talk shortcut on (default since 0.10.1; the old "voiceEnabled" key defaulted to off).
     var voiceEnabled: Bool {
-        get { d.bool(forKey: "voiceEnabled") }
-        set { d.set(newValue, forKey: "voiceEnabled") }
+        get { d.object(forKey: "pushToTalkEnabled") as? Bool ?? true }
+        set { d.set(newValue, forKey: "pushToTalkEnabled") }
     }
     /// Read calendars from macOS (EventKit).
     var macCalendarEnabled: Bool {
@@ -73,15 +84,16 @@ final class WrenSettings {
     /// Before 0.10 Wren could listen for "Hey Wren" in the background. That listener was removed:
     /// voice now starts only from the shortcut or a Voice button. The old preference is deleted so
     /// nothing can turn continuous listening back on.
-    func removeRetiredPreferences() { d.removeObject(forKey: "wakeWordEnabled") }
+    /// Also drops the 0.10.0 voice keys, replaced by push-to-talk's (different defaults).
+    func removeRetiredPreferences() { ["wakeWordEnabled", "voiceEnabled", "voiceHotKey", "voiceReviewFirst"].forEach(d.removeObject(forKey:)) }
     /// Play a sound with Wren's notifications (reminders, GPT results, email alerts, digests).
     var notificationSounds: Bool {
         get { d.object(forKey: "notificationSounds") as? Bool ?? true }
         set { d.set(newValue, forKey: "notificationSounds") }
     }
     var voiceHotKey: HotKeySpec {
-        get { (d.data(forKey: "voiceHotKey")).flatMap { try? JSONDecoder().decode(HotKeySpec.self, from: $0) } ?? .optionShiftSpace }
-        set { d.set(try? JSONEncoder().encode(newValue), forKey: "voiceHotKey") }
+        get { (d.data(forKey: "pushToTalkHotKey")).flatMap { try? JSONDecoder().decode(HotKeySpec.self, from: $0) } ?? .optionSpace }
+        set { d.set(try? JSONEncoder().encode(newValue), forKey: "pushToTalkHotKey") }
     }
     /// The optional copy-and-open handoff fallback (key kept from earlier versions).
     var chatgptHandoffEnabled: Bool {
@@ -106,10 +118,11 @@ final class WrenSettings {
         get { d.stringArray(forKey: "importantSenders") ?? [] }
         set { d.set(newValue, forKey: "importantSenders") }
     }
-    /// After you stop speaking, show the transcript to edit and run with Return (default), or run it at once.
+    /// Off (default): a clearly heard command runs as soon as it's transcribed. On: the transcript waits
+    /// for Return. (A low-confidence transcript always waits.)
     var voiceReviewFirst: Bool {
-        get { d.object(forKey: "voiceReviewFirst") as? Bool ?? true }
-        set { d.set(newValue, forKey: "voiceReviewFirst") }
+        get { d.object(forKey: "voiceCheckBeforeRunning") as? Bool ?? false }
+        set { d.set(newValue, forKey: "voiceCheckBeforeRunning") }
     }
     var mail: MailPreferences {
         get { (d.data(forKey: "mailPreferences")).flatMap { try? JSONDecoder().decode(MailPreferences.self, from: $0) } ?? MailPreferences() }
@@ -118,7 +131,7 @@ final class WrenSettings {
     /// Every preference key Wren writes. "Reset preferences" removes exactly these.
     static let allKeys = ["hotKeyEnabled", "hotKey", "ollamaModel", "useModel", "dateOnlyReminderHour", "captureDraft",
                           "dailySettings", "launchAtLogin", "insightSettings", "notificationPause", "lastAutomaticBackup",
-                          "voiceEnabled", "voiceHotKey", "wakeWordEnabled", "macCalendarEnabled", "chatgptEnabled", "chatgptDestination", "chatgptModel", "openaiModel", "gmailCacheEnabled", "importantSenders", "mailPreferences", "voiceReviewFirst", "notificationSounds"]
+                          "voiceEnabled", "voiceHotKey", "pushToTalkEnabled", "pushToTalkHotKey", "voiceCheckBeforeRunning", "wakeWordEnabled", "macCalendarEnabled", "chatgptEnabled", "chatgptDestination", "chatgptModel", "openaiModel", "gmailCacheEnabled", "importantSenders", "mailPreferences", "voiceReviewFirst", "notificationSounds"]
 
     func resetAll() { Self.allKeys.forEach(d.removeObject(forKey:)) }
 

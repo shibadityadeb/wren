@@ -112,7 +112,7 @@ extension AppModel {
         case let .generalQuestion(request):
             return (operation.name, .ask(request))
         case .createTask, .capture:
-            if let r = await connectorAnswer(trimmed) { return ("SearchGmail", .resolution(r)) }
+            if let r = await connectorAnswer(trimmed) { return (operation.name, .resolution(r)) }
             // Ask the local model only when the text looks like a command or question.
             if ContextResolver.mightBeCommandOrQuestion(trimmed) {
                 switch await modelInterpretation(trimmed, all: all) {
@@ -191,7 +191,12 @@ extension AppModel {
         let cal = clock.calendar, now = clock.now
         var candidate = text
         let isNewRequest = ReminderCommand.parse(text, now: now, calendar: cal, defaultHour: reminderHour) != nil
-        if !isNewRequest, let prefix = reminderFollowUp {
+        if !isNewRequest, let prefix = reminderFollowUp, reminderFollowUpNeedsSubject {
+            // "What should I remind you about?": the answer is the subject; the schedule is kept.
+            reminderFollowUp = nil; reminderFollowUpNeedsSubject = false
+            guard let merged = ReminderFollowUp.subjectAnswer(text, pending: prefix, now: now, calendar: cal) else { return nil }
+            candidate = merged
+        } else if !isNewRequest, let prefix = reminderFollowUp {
             // A new, explicit request (ask GPT, save a note) is never read as the answer to the earlier question.
             if !ReminderFollowUp.mayAnswer(text) { reminderFollowUp = nil; return nil }
             let looksLikeAnswer = DateParser(calendar: cal).parse(text, now: now) != nil
@@ -213,10 +218,11 @@ extension AppModel {
         guard let cmd = ReminderCommand.parse(candidate, now: now, calendar: cal, defaultHour: reminderHour) else { return nil }
         switch cmd {
         case let .create(title, when, explanation):
-            reminderFollowUp = nil
+            reminderFollowUp = nil; reminderFollowUpNeedsSubject = false
             return await createReminder(text: candidate, title: title, when: when, explanation: explanation, channel: channel)
         case let .clarify(title, question):
-            reminderFollowUp = question.hasPrefix("Is that") ? candidate : "remind me to " + title
+            reminderFollowUpNeedsSubject = title.isEmpty
+            reminderFollowUp = question.hasPrefix("Is that") || title.isEmpty ? candidate : "remind me to " + title
             return .resolution(.needsDate(question))
         case let .past(title, message):
             reminderFollowUp = "remind me to " + title
@@ -259,7 +265,7 @@ extension AppModel {
             status = "Saved, but macOS didn't accept the notification. Wren will try again and show it in the app."
         }
         lines.append(AnswerLine(status, recordID: nil))
-        return .resolution(.answer(Answer(title: "Reminder set: \(title)", lines: lines, basis: "From your words: “\(text)”")))
+        return .resolution(.answer(Answer(title: "Reminder created: \(title)", lines: lines, basis: "From your words: “\(text)”")))
     }
 
     enum ModelReading { case resolved(ContextResolution), generalQuestion }
