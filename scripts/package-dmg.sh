@@ -69,7 +69,14 @@ ln -s /Applications "$STAGE/Applications"
 OUT="dist/$NAME.dmg"
 rm -f "$OUT" "$OUT.sha256"
 echo "→ creating $OUT"
-hdiutil create -volname "Wren $VERSION" -srcfolder "$STAGE" -ov -format UDZO -fs HFS+ "$OUT" >/dev/null
+# On CI runners hdiutil sometimes fails with "Resource busy" while another process (Spotlight, a
+# malware scan) briefly holds the staged files. Retry a few times, with a growing pause, before failing.
+for attempt in 1 2 3 4; do
+  if hdiutil create -volname "Wren $VERSION" -srcfolder "$STAGE" -ov -format UDZO -fs HFS+ "$OUT" >/dev/null; then break; fi
+  if [[ $attempt == 4 ]]; then echo "hdiutil create failed after $attempt attempts" >&2; exit 1; fi
+  echo "  hdiutil create failed (attempt $attempt); retrying in $((attempt * 5)) s"
+  rm -f "$OUT"; sleep $((attempt * 5))
+done
 if [[ $SIGNED == 1 ]]; then
   codesign --force --sign "$WREN_SIGN_IDENTITY" --timestamp "$OUT"
 fi

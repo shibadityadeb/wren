@@ -267,7 +267,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
         return f
     }
 
+    /// The phase's name only (never the words), for the log.
+    static func phaseName(_ p: VoiceSession.Phase) -> String {
+        switch p {
+        case .idle: "idle"
+        case .requestingPermission: "requesting permission"
+        case let .listening(t): "listening (\(t.rawValue))"
+        case .transcribing: "transcribing"
+        case .transcriptReady: "transcript ready"
+        case .processing: "processing"
+        case .completed: "completed"
+        case .needsClarification: "needs clarification"
+        case let .failed(e): "failed: \(String(describing: e).prefix(40))"
+        case let .cancelled(r): "cancelled: \(r)"
+        }
+    }
+
     private func voicePhaseChanged(_ p: VoiceSession.Phase) {
+        appLog.notice("voice phase: \(Self.phaseName(p), privacy: .public)")
         model.voicePhase = p
         model.hub.voice.phase = p
         captureState.voicePhase = p
@@ -459,6 +476,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
     /// Typing while Wren is recording: stop recording and keep what's in the field for editing.
     private func editedWhileListening() {
         guard captureState.recording else { return }
+        appLog.notice("voice: typing in the field stopped the recording")
         voice.cancel()
         captureState.recording = false
         captureState.reviewingVoice = true
