@@ -309,7 +309,7 @@ final class VoiceTests: XCTestCase {
         XCTAssertTrue(text.contains("requiresOnDeviceRecognition = true"))
         for banned in ["AVAudioFile", "URLSession", "write(to", "AVAudioRecorder"] { XCTAssertFalse(text.contains(banned), banned) }
         let finish = try XCTUnwrap(text.range(of: "func finish(")).upperBound
-        let body = String(text[finish...].prefix(600))
+        let body = String(text[finish...].prefix(1500))
         let close = try XCTUnwrap(body.range(of: "closeMicrophone()")), end = try XCTUnwrap(body.range(of: "endAudio()"))
         XCTAssertLessThan(close.lowerBound, end.lowerBound, "microphone closed before the recogniser finalises")
     }

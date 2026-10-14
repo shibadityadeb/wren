@@ -61,7 +61,12 @@ struct CaptureView: View {
                     } else if case let .proposal(p)? = state.reply { confirm(p) } else { submit(state.text) }
                 }
                 .onChange(of: state.text) {
-                    if state.recording, state.text != state.lastVoiceText { editedWhileListening() }
+                    if state.recording, state.text != state.lastVoiceText {
+                        // A key the shortcut lets through (⌥ Space types a non-breaking space) isn't typing.
+                        let typed = state.text.trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "\u{00A0}")))
+                        if typed == state.lastVoiceText.trimmingCharacters(in: .whitespacesAndNewlines) { state.text = state.lastVoiceText }
+                        else { editedWhileListening() }
+                    }
                     guard !state.busy else { return }
                     if state.reply != nil { state.reply = nil }
                     // Editing the text after a card was shown starts a new request.

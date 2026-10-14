@@ -1,6 +1,9 @@
 import AVFoundation
 import Speech
 import WrenCore
+import os
+
+private let voiceLog = Logger(subsystem: "com.shibadityadeb.wren", category: "voice")
 
 /// Microphone + Speech Recognition permissions. Asked only when you first record.
 @MainActor
@@ -36,6 +39,12 @@ final class AudioTapState: @unchecked Sendable {
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var lastLevelSent: TimeInterval = 0
     private let started = Date()
+    /// Counts for diagnostics (no audio is kept): buffers seen, buffers given to the recogniser, loudest level.
+    private var buffers = 0, appended = 0
+    private var peak: Float = -90
+
+    func resetStats() { lock.withLock { buffers = 0; appended = 0; peak = -90 } }
+    func stats() -> (buffers: Int, appended: Int, peakDB: Float) { lock.withLock { (buffers, appended, peak) } }
 
     func attach(_ r: SFSpeechAudioBufferRecognitionRequest) { lock.withLock { request = r } }
     func detach() -> SFSpeechAudioBufferRecognitionRequest? { lock.withLock { defer { request = nil }; return request } }
@@ -45,7 +54,8 @@ final class AudioTapState: @unchecked Sendable {
         let db = Self.level(buffer)
         let t = Date().timeIntervalSince(started)
         return lock.withLock {
-            request?.append(buffer)
+            buffers += 1; peak = max(peak, db)
+            if let request { request.append(buffer); appended += 1 }
             guard t - lastLevelSent >= 0.05 else { return nil }
             lastLevelSent = t
             return min(1, max(0, (db + 60) / 50))
@@ -117,6 +127,8 @@ final class LiveSpeechStream: SpeechStreaming {
     private var latest = FinalTranscript(text: "", confidence: nil)
     private var finishing: ((Result<FinalTranscript, VoiceError>) -> Void)?
     private var finishTimeout: DispatchWorkItem?
+    /// Partial results received for the current utterance (diagnostics only).
+    private var partials = 0
     private var configObserver: NSObjectProtocol?
     /// Only touch the input node after it was set up: merely reading `inputNode` opens the audio
     /// input (and can make macOS ask for the microphone), which must never happen just by quitting.
@@ -148,6 +160,8 @@ final class LiveSpeechStream: SpeechStreaming {
         }
         generation += 1
         latest = FinalTranscript(text: "", confidence: nil)
+        partials = 0
+        tap.resetStats()
         let gen = generation
         let state = tap
         input.removeTap(onBus: 0)
@@ -192,11 +206,13 @@ final class LiveSpeechStream: SpeechStreaming {
             let confidence = scores.isEmpty ? nil : scores.reduce(0, +) / Double(scores.count)
             let final = result?.isFinal ?? false
             let failure = error.map(Self.classify) ?? nil
+            if let error { let ns = error as NSError; voiceLog.notice("recogniser ended: \(ns.domain, privacy: .public) \(ns.code, privacy: .public)") }
             let ended = error != nil || final
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     guard let self, gen == self.generation else { return }
                     if let text, !text.isEmpty {
+                        self.partials += 1
                         self.latest = FinalTranscript(text: text, confidence: final ? confidence : self.latest.confidence)
                         if self.finishing == nil { self.onTranscript?(text) }
                     }
@@ -225,6 +241,8 @@ final class LiveSpeechStream: SpeechStreaming {
     /// Release / Stop: the microphone closes now, before transcription finishes. The recogniser is
     /// told the audio has ended and gets a few seconds to produce its final text.
     func finish(_ completion: @escaping (Result<FinalTranscript, VoiceError>) -> Void) {
+        let st = tap.stats()
+        voiceLog.notice("recording ended after \(String(format: "%.1f", Date().timeIntervalSince(self.startedAt)), privacy: .public) s: \(st.buffers, privacy: .public) audio buffers (\(st.appended, privacy: .public) to the recogniser), peak \(Int(st.peakDB), privacy: .public) dB, \(self.partials, privacy: .public) partial results, recogniser task \(self.task == nil ? "missing" : "running", privacy: .public)")
         guard task != nil else { completion(.success(latest)); return }
         finishing = completion
         closeMicrophone()
@@ -238,6 +256,10 @@ final class LiveSpeechStream: SpeechStreaming {
 
     private func complete(_ r: Result<FinalTranscript, VoiceError>) {
         guard let done = finishing else { return }
+        switch r {
+        case let .success(t): voiceLog.notice("final transcript: \(t.text.count, privacy: .public) characters, confidence \(t.confidence.map { String(format: "%.2f", $0) } ?? "not reported", privacy: .public)")
+        case let .failure(e): voiceLog.notice("transcription failed: \(String(describing: e).prefix(60), privacy: .public)")
+        }
         finishing = nil
         finishTimeout?.cancel(); finishTimeout = nil
         task?.cancel(); task = nil
