@@ -92,6 +92,10 @@ The log records what Wren did (operation names, states, counts), not your words,
 
 Wren uses the ChatGPT **website** for "ask GPT" by default: it opens chatgpt.com in your browser with your question already in the message box. Your browser should be signed in to ChatGPT. Press Enter there to send it: ChatGPT doesn't let apps send for you.
 
+- [ ] **Spoken ChatGPT requests.** Hold ⌥ Space: "can you make a query at ChatGPT, what is gradient descent in machine learning?".
+  - Expected: ChatGPT opens with the question. Never "Local AI" and never "GPT finished". If Wren wasn't sure what it heard, it shows the words first.
+- [ ] **Send it for me (optional).** Connectors › ChatGPT › turn on Detect, then **Send it for me**, and allow Accessibility. Ask GPT something.
+  - Expected: Chrome comes forward, Enter is pressed once, and the card shows "Submitted to ChatGPT" only after ChatGPT starts the conversation.
 - [ ] **Scenario 1: an explicit GPT request.** `Ask ChatGPT what gradient descent is`.
   - Expected: no "who should answer?" question. ChatGPT opens with the question in its box, and the card says "Prompt loaded, submission unverified".
   - Click **Detect conversation automatically…** and allow Wren to control your browser when macOS asks. Then press Enter in ChatGPT.

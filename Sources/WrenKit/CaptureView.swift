@@ -177,16 +177,9 @@ struct CaptureView: View {
 
     var isProposal: Bool { if case .proposal? = state.reply { true } else { false } }
 
-    /// While a GPT request runs the headline follows its real state, not the moment it was sent.
-    func completedTitle(_ base: String) -> String {
-        guard let card = state.ask else { return base }
-        switch card.phase {
-        case .answered: return "GPT finished"
-        case .partial: return "GPT stopped early"
-        case .sending: return "GPT request submitted"
-        default: return base
-        }
-    }
+    /// While a request runs, the headline follows its real state and names who really did the work
+    /// (local AI, ChatGPT inside Wren, or the ChatGPT website), never just "GPT".
+    func completedTitle(_ base: String) -> String { state.ask?.headline ?? base }
 
     func failureTitle(_ e: VoiceError) -> String {
         switch e {
@@ -418,9 +411,15 @@ struct AskCardView: View {
         return parts.joined(separator: " ")
     }
 
-    func answerText(_ t: String) -> some View {
-        ScrollView { Text(t).font(.callout).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
-            .frame(maxHeight: 260)
+    /// The answer itself, always visible. (A ScrollView with only a maximum height has no height of its
+    /// own in this panel and collapsed to nothing: the answer was saved but not shown.) Long answers
+    /// show their start; the whole answer is one click away in Wren.
+    @ViewBuilder func answerText(_ t: String) -> some View {
+        Text(t).font(.callout).textSelection(.enabled)
+            .lineLimit(14)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        if t.count > 900 { Text("The full answer is in Wren: Open result in Wren.").font(.caption2).foregroundStyle(.secondary) }
     }
 }
 

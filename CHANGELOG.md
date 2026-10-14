@@ -2,6 +2,25 @@
 
 Versions follow [semantic versioning](https://semver.org). The `VERSION` file is the source of truth; release tags are `v<VERSION>` (stable) or `v<VERSION>-preview.N` (prerelease).
 
+## [0.12.1] (unreleased)
+
+ChatGPT means ChatGPT, and the panel says who really answered.
+
+- **Spoken ChatGPT requests reach ChatGPT.** The router now reads more of the ways people and speech recognition phrase them:
+  - "make a query **at** ChatGPT? What is…", "make a query**,** ChatGPT what is…" and "send a question to GPT about…" (any preposition, punctuation or nothing between the request and the name)
+  - "Hey ChatGPT, …"
+  - spellings such as "chat G P T", "Chat-GPT", "chat GBT", "Chad GPT" and "G.P.T."
+
+  Only the name is normalised; your question is sent as heard, and the record keeps your exact words. These are the two sentences that were answered by the local AI in 0.12.0.
+- **No more "GPT finished" for a local answer.** The headline comes from who actually ran the request: "Local AI answered", "ChatGPT answered, in Wren", or the website's real state ("Prompt loaded, submission unverified", "Submitted to ChatGPT"). A website request is never "finished".
+  - The completion notification is only for ChatGPT run in Wren, titled "ChatGPT finished (in Wren)".
+  - A new command clears the previous card, so an old result can't sit under a new one.
+- **The answer is visible.** Local and in-Wren answers were saved but the card's answer area collapsed to nothing. Long answers now show their start, and the full text is in Wren.
+- **Send it for me** (opt-in, Connectors › ChatGPT): Wren brings the ChatGPT tab it opened to the front and presses Enter there, as you would. It counts the question as sent only when that tab becomes a real `chatgpt.com/c/…` conversation, and saves that link. It needs Detect conversation and Accessibility permission. No page content, cookies or private interfaces are used.
+- A spoken request for ChatGPT that the recogniser wasn't sure of (confidence below 0.85) waits in the field for you to check before it leaves the Mac.
+- "Research this in ChatGPT" keeps the word "research" in what's sent. "… now" at the end is treated as an instruction to Wren and left out.
+- Each routed command names the permission it runs under and its handler. The log now shows when a notification is shown or clicked (kind only), so reminder delivery can be verified.
+
 ## [0.12.0] (unreleased)
 
 Wren does what you asked, and says exactly what it did.

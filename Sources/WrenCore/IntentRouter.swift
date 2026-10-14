@@ -137,6 +137,19 @@ public enum IntentRouter {
     // MARK: Asking an AI
 
     static let assistant = #"(?:chat\s*-?\s*gpt|gpt(?:\s*-?\s*\d+(?:\.\d+)?o?)?|open\s?ai)"#
+
+    /// How speech recognition and quick typing spell the assistant's name, rewritten to "ChatGPT" or
+    /// "GPT" before routing: "chat G P T", "Chat-GPT", "chat G.P.T.", "chat GBT", "Chad GPT", "G.P.T.".
+    /// Only the name changes; the request itself is never rewritten.
+    public static func normalizeAssistantName(_ text: String) -> String {
+        var t = text
+        let letters = #"g\.?\s*[pb]\.?\s*t\b\.?"#
+        for (pattern, name) in [(#"\b(?:chat|chad|chet|chats|chap)\s*-?\s*"# + letters, "ChatGPT"),
+                                (#"\bg\.\s*p\.\s*t\b\.?|\bg\s+p\s+t\b"#, "GPT")] {
+            t = t.replacingOccurrences(of: pattern, with: name, options: [.regularExpression, .caseInsensitive])
+        }
+        return t
+    }
     static let polite = #"^(?:(?:hey|hi|ok(?:ay)?|so|well|um+|hmm+)[\s,]+)*(?:(?:can|could|would|will) you(?: please)?|please|kindly|i (?:want|need|would like|'d like) you to|i want to|i'd like to|let's|help me)?\s*"#
 
     /// Finds a request addressed to ChatGPT/GPT, in many phrasings, and extracts what to send.
@@ -151,14 +164,18 @@ public enum IntentRouter {
         }
         // Ordered from the most specific. Group 1 is always the request.
         let patterns: [String] = [
+            // "make a query at ChatGPT? What is…", "make a query, ChatGPT what is…", "send a question to
+            // GPT about…", "start a chat in ChatGPT on…": a request named as a thing to make, with
+            // ChatGPT after it (by a preposition, punctuation or nothing), then what to ask.
+            "^" + polite + #"(?:make|do|run|send|start|create|open|submit|put in|put|type|enter|write|give|post)\s+(?:me\s+)?(?:a\s+|an\s+|the\s+|this\s+|new\s+)*(?:query|question|request|search|prompt|chat|conversation|message)(?:\s+(?:at|to|in|on|with|for|into|through|via|using|from|of|over)\s+(?:the\s+|my\s+)?|\s*[,:;?.!\-–]+\s*|\s+)"# + a + #"\b[\s,:;?.!\-–]*(?:(?:about|on|for|regarding|asking|whether|if|that|and ask(?: it)?|to ask(?: it)?)\s+)?(.+)$"#,
             // what does ChatGPT say/think about X
             "^" + polite + #"what (?:does|would|do) (?:the\s+)?"# + a + #" (?:say|think|know) (?:about|of|on|regarding)\s+(.+)$"#,
             // ask/get/have/tell/use ChatGPT to/about/whether … ; check/consult with ChatGPT …
             "^" + polite + #"(?:go\s+(?:and\s+)?)?(?:ask|get|have|tell|use|query|prompt|consult|check(?:\s+(?:on|with|in))?|see\s+(?:on|with|in|if|what)|look\s+(?:it\s+)?up\s+(?:on|in|with)|search\s+(?:on|in|with)|find\s+out\s+(?:on|from|with)|run\s+(?:this\s+)?(?:by|past|through)|send\s+(?:this|that|it)?\s*to|let)\s+(?:the\s+|my\s+)?"# + a + #"(?:\s+account)?\b[\s,:]*(.+)$"#,
             // … on/with/via/using ChatGPT: "check what quantum physics is on chatgpt"
             "^" + polite + #"(.+?)\s+(?:on|with|via|using|through|from|in|by)\s+(?:the\s+|my\s+)?"# + a + #"[\s.?!]*$"#,
-            // ChatGPT, explain X
-            "^(?:the\\s+)?" + a + #"[\s,:]+(.+)$"#,
+            // ChatGPT, explain X ("hey ChatGPT, …")
+            "^(?:(?:hey|hi|ok(?:ay)?|so)[\\s,]+)?(?:the\\s+)?" + a + #"[\s,:]+(.+)$"#,
         ]
         for p in patterns {
             guard let re = try? NSRegularExpression(pattern: p, options: [.caseInsensitive, .dotMatchesLineSeparators]),
@@ -198,7 +215,8 @@ public enum IntentRouter {
         guard t.range(of: destination, options: [.regularExpression, .caseInsensitive]) != nil else { return nil }
         var body = t.replacingOccurrences(of: #"[\s,]*"# + destination, with: "", options: [.regularExpression, .caseInsensitive])
         // The request framing left around it: "can you ask", "make a query about", "do a search for".
-        body = body.replacingOccurrences(of: "^" + polite + #"(?:ask|query|prompt|search|look up|research|check|find out|make|do|run|start|create|open)?\s*(?:a\s+|an\s+|new\s+)*(?:query|search|question|request|chat|conversation|prompt)?\s*(?:about|on|for|regarding|whether|if|to|that)?[\s,:]*"#,
+        // "Research" is the instruction itself ("research this in ChatGPT"), so it stays.
+        body = body.replacingOccurrences(of: "^" + polite + #"(?:ask|query|prompt|search|look up|check|find out|make|do|run|start|create|open)?\s*(?:a\s+|an\s+|new\s+)*(?:query|search|question|request|chat|conversation|prompt)?\s*(?:about|on|for|regarding|whether|if|to|that)?[\s,:]*"#,
                                      with: "", options: [.regularExpression, .caseInsensitive])
         let prompt = cleanPrompt(body)
         guard prompt.trimmingCharacters(in: CharacterSet.alphanumerics.inverted).count >= 3 else { return nil }
@@ -222,7 +240,7 @@ public enum IntentRouter {
         if let m = s.firstMatch(of: /^(?i)(what|who|where)\s+(.{2,80}?)\s+(is|are|was|were)[\s.?!]*$/) {
             s = "\(m.1) \(m.3) \(m.2)?"
         }
-        s = s.replacingOccurrences(of: #"[\s,]+(?:for me|please)[\s.!?]*$"#, with: "", options: [.regularExpression, .caseInsensitive])
+        s = s.replacingOccurrences(of: #"[\s,]+(?:for me|please|now|right now|immediately|right away)[\s.!?]*$"#, with: "", options: [.regularExpression, .caseInsensitive])
         s = s.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ",;:")))
         if yesNo { return "Is it true that " + s.trimmingCharacters(in: CharacterSet(charactersIn: "?.! ")) + "?" }
         // A request ("analyze this idea?") is an instruction even if typed with a question mark.

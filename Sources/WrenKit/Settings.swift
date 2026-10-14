@@ -61,6 +61,11 @@ final class WrenSettings {
         get { d.object(forKey: "dateOnlyReminderHour") as? Int ?? 10 }
         set { d.set(min(max(newValue, 6), 21), forKey: "dateOnlyReminderHour") }
     }
+    /// "Send it for me": Wren presses Return in the ChatGPT tab it opened. Off unless the user turns it on.
+    var chatgptSendForMe: Bool {
+        get { d.bool(forKey: "chatgptSendForMe") }
+        set { d.set(newValue, forKey: "chatgptSendForMe") }
+    }
     /// A heads-up the day before a task's deadline, at the default reminder time. On unless turned off.
     var deadlineDayBefore: Bool {
         get { d.object(forKey: "deadlineDayBefore") as? Bool ?? true }
@@ -173,7 +178,7 @@ final class WrenSettings {
     /// Every preference key Wren writes. "Reset preferences" removes exactly these.
     static let allKeys = ["hotKeyEnabled", "hotKey", "ollamaModel", "useModel", "dateOnlyReminderHour", "captureDraft",
                           "dailySettings", "launchAtLogin", "insightSettings", "notificationPause", "lastAutomaticBackup",
-                          "voiceEnabled", "voiceHotKey", "pushToTalkEnabled", "pushToTalkHotKey", "voiceCheckBeforeRunning", "wakeWordEnabled", "macCalendarEnabled", "chatgptEnabled", "chatgptDestination", "chatgptModel", "openaiModel", "gmailCacheEnabled", "importantSenders", "mailPreferences", "voiceReviewFirst", "notificationSounds", "chatgptWebEnabled", "chatgptMode", "chatgptPrefill", "chatgptPrefillCheck", "chatgptPrefillLink", "chatgptDetectConversation", "deadlineDayBefore"]
+                          "voiceEnabled", "voiceHotKey", "pushToTalkEnabled", "pushToTalkHotKey", "voiceCheckBeforeRunning", "wakeWordEnabled", "macCalendarEnabled", "chatgptEnabled", "chatgptDestination", "chatgptModel", "openaiModel", "gmailCacheEnabled", "importantSenders", "mailPreferences", "voiceReviewFirst", "notificationSounds", "chatgptWebEnabled", "chatgptMode", "chatgptPrefill", "chatgptPrefillCheck", "chatgptPrefillLink", "chatgptDetectConversation", "deadlineDayBefore", "chatgptSendForMe"]
 
     func resetAll() { Self.allKeys.forEach(d.removeObject(forKey:)) }
 

@@ -95,6 +95,7 @@ struct ConnectorDetailView: View {
     @State private var working = false
     @State private var recordingVoiceKey = false
     @State private var detectionNote: String?
+    @State private var sendNote: String?
     @State private var voiceKeyMonitor: Any?
 
     var descriptor: ConnectorDescriptor { ConnectorCatalog.descriptor(id) }
@@ -364,6 +365,20 @@ struct ConnectorDetailView: View {
                  ?? "Available when your default browser is Chrome, Brave, Edge, Chromium or Vivaldi (yours is \(BrowserTabs.defaultBrowserName)). Link conversations yourself instead.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if let detectionNote { Text(detectionNote).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
+            Toggle("Send it for me (press Enter in ChatGPT)", isOn: Binding(get: { model.settings.chatgptSendForMe }, set: { on in
+                if on { Task { sendNote = await model.enableSendForMe(); model.connectorsChanged() } }
+                else { model.settings.chatgptSendForMe = false; sendNote = nil; model.connectorsChanged() }
+            }))
+            .disabled(BrowserTabs.defaultBrowser == nil || !model.settings.chatgptPrefill)
+            Text("ChatGPT doesn't let other apps send a question. With this on, Wren brings the ChatGPT tab it opened to the front and presses Enter there, as you would. It only says “Submitted to ChatGPT” when that tab becomes a real conversation. Needs Detect (above) and Accessibility permission for Wren. Off by default.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if model.settings.chatgptSendForMe, let reason = model.autoSendReadiness(method: .prefillLink).reason {
+                HStack {
+                    Text(reason).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                    if !KeyPresser.isTrusted { Button("Open Accessibility Settings") { KeyPresser.requestTrust() }.controlSize(.small) }
+                }
+            }
+            if let sendNote { Text(sendNote).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
         }
         .padding(.leading, 18)
     }

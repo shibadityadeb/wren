@@ -316,6 +316,9 @@ final class AppModel {
         if report.summarizedAfterPause > 0 { resumeNote = "\(report.summarizedAfterPause) reminder\(report.summarizedAfterPause == 1 ? "" : "s") came due while notifications were paused." }
         pause = settings.pause
         automaticBackupIfDue()
+        if report.remindersDelivered > 0 || report.remindersUndelivered > 0 {
+            log.notice("reminders due: \(report.remindersDelivered, privacy: .public) recorded as shown, \(report.remindersUndelivered, privacy: .public) couldn't be shown")
+        }
         if report.remindersDelivered > 0 || report.briefing != nil { reload() }
         let wake = engine.nextWake()
         schedulerTimer = Timer.scheduledTimer(withTimeInterval: max(1, wake.timeIntervalSinceNow + 0.5), repeats: false) { [weak self] _ in

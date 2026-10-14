@@ -128,6 +128,61 @@ public struct ChatGPTTabWatcher: Sendable {
     }
 }
 
+/// "Send it for me" (opt-in): Wren presses Return in the ChatGPT tab it opened, as the user would.
+/// The ChatGPT website offers no supported way for another app to submit a question, and its links
+/// fill the message box without sending it (measured live, B-1). So the only honest automation is a
+/// visible key press in the user's own signed-in browser, which needs two permissions the user grants
+/// in macOS: controlling the browser (to find and bring forward that exact tab) and Accessibility (to
+/// press the key). No page content, cookies, tokens or private ChatGPT interfaces are used. Only a
+/// real conversation address afterwards (`/c/<id>`) counts as sent; a key press alone proves nothing.
+public enum ChatGPTAutoSend {
+    public enum Readiness: Equatable, Sendable {
+        case ready
+        /// Turned off in Connectors › ChatGPT (the default).
+        case off
+        case needsAccessibility
+        case needsBrowserControl
+        case unsupportedBrowser(String)
+        /// The question went by clipboard (too long, or the ChatGPT Mac app), so there's nothing to send.
+        case noPrefill
+
+        /// Why Wren didn't send it, in words; nil when it will.
+        public var reason: String? {
+            switch self {
+            case .ready, .off: nil
+            case .needsAccessibility: "Wren can't press Enter for you until it's allowed in System Settings › Privacy & Security › Accessibility."
+            case .needsBrowserControl: "Wren can't send it for you until it may follow the ChatGPT tab (turn on Detect conversation in Connectors › ChatGPT)."
+            case let .unsupportedBrowser(name): "Wren can't send it for you in \(name). It works in Chrome, Brave, Edge, Chromium and Vivaldi."
+            case .noPrefill: "This question went by clipboard, so there's nothing in ChatGPT's box for Wren to send."
+            }
+        }
+    }
+
+    public static func readiness(enabled: Bool, accessibilityTrusted: Bool, browserControlAllowed: Bool, browser: String?,
+                                 browserName: String, method: WebLaunchMethod) -> Readiness {
+        guard enabled else { return .off }
+        guard method == .prefillLink else { return .noPrefill }
+        guard browser != nil else { return .unsupportedBrowser(browserName) }
+        guard browserControlAllowed else { return .needsBrowserControl }
+        guard accessibilityTrusted else { return .needsAccessibility }
+        return .ready
+    }
+
+    /// The page has read the question from the link: ChatGPT's start page, not a sign-in page or a
+    /// conversation, with `q=` gone from the address (it is removed once the box is filled).
+    public static func pageTookPrompt(_ url: String) -> Bool {
+        guard let c = URLComponents(string: url), let host = c.host?.lowercased(), ["chatgpt.com", "www.chatgpt.com"].contains(host) else { return false }
+        guard c.path.isEmpty || c.path == "/" else { return false }
+        return !(c.queryItems ?? []).contains { $0.name == "q" || $0.name == "prompt" }
+    }
+
+    /// Press now: once, and only after the page has held the question for `settle` seconds.
+    public static func shouldPress(url: String, tookPromptAt: Date?, now: Date, pressed: Bool, settle: TimeInterval = 1.5) -> Bool {
+        guard !pressed, pageTookPrompt(url), let t = tookPromptAt else { return false }
+        return now.timeIntervalSince(t) >= settle
+    }
+}
+
 public enum ChatGPTWeb {
     public static let home = URL(string: "https://chatgpt.com/")!
     /// Longest prompt put in a `?q=` link; longer ones go by clipboard only.

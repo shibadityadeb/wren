@@ -58,7 +58,9 @@ extension AppModel {
         guard r.notifiedAt == nil else { return }
         r.notifiedAt = clock.now
         try? store?.context.save()
-        if isShowingDelegation(r.id) { return }
+        // Only ChatGPT requests run inside Wren have an answer to announce; a website request or a
+        // local answer never produces a "ChatGPT finished" notification.
+        guard r.destination == .chatgptPlan, !isShowingDelegation(r.id) else { return }
         Task { _ = await notifications.deliverDelegation(r) }
     }
 
@@ -114,20 +116,48 @@ extension AppModel {
         rec.webState = launch.method == .prefillLink ? .promptLoaded : .awaitingSubmission
         saveDelegation(rec)
         delegationVersion += 1
-        if let watch { watchConversation(rec.id, bundleID: watch.bundleID, before: watch.before) }
+        let send = autoSendReadiness(method: launch.method)
+        if let watch { watchConversation(rec.id, bundleID: watch.bundleID, before: watch.before, autoSend: send == .ready) }
+        log.notice("website request opened: method=\(launch.method.rawValue, privacy: .public) watching=\(watch != nil, privacy: .public) sendForMe=\(String(describing: send), privacy: .public)")
         return .started(rec)
     }
 
     /// Follows the tab Wren opened (address only) for up to 20 minutes: sign-in page → "Sign-in
     /// required"; `chatgpt.com/c/<id>` → really submitted, with the real link. Never guesses: with
     /// several new ChatGPT tabs, or the tab closed, it stops and the state stays as it was.
-    func watchConversation(_ id: UUID, bundleID: String, before: [BrowserTab]) {
+    /// Whether "Send it for me" can run for a request opened this way, and if not, why.
+    func autoSendReadiness(method: WebLaunchMethod) -> ChatGPTAutoSend.Readiness {
+        ChatGPTAutoSend.readiness(enabled: settings.chatgptSendForMe, accessibilityTrusted: KeyPresser.isTrusted,
+                                  browserControlAllowed: settings.chatgptDetectConversation, browser: BrowserTabs.defaultBrowser?.bundleID,
+                                  browserName: BrowserTabs.defaultBrowserName, method: method)
+    }
+
+    /// Turns "Send it for me" on: browser control (macOS asks once) and Accessibility (macOS shows its
+    /// prompt; the user switches Wren on in the list). nil when both are in place.
+    func enableSendForMe() async -> String? {
+        settings.chatgptSendForMe = true
+        if !settings.chatgptDetectConversation, let e = await detectConversationPermission() { return e }
+        if !KeyPresser.isTrusted {
+            KeyPresser.requestTrust()
+            return "Allow Wren in System Settings › Privacy & Security › Accessibility, then it will press Enter in ChatGPT for you."
+        }
+        return nil
+    }
+
+    func watchConversation(_ id: UUID, bundleID: String, before: [BrowserTab], autoSend: Bool = false) {
         Task { @MainActor [weak self] in
             var watcher = ChatGPTTabWatcher(before: before)
             let started = Date()
+            // "Send it for me": one Return key press, once the page has taken the question from the link.
+            var tookPromptAt: Date?, pressedAt: Date?, toldNoConversation = false
             while Date().timeIntervalSince(started) < 20 * 60 {
-                try? await Task.sleep(for: .seconds(2))
+                try? await Task.sleep(for: autoSend && pressedAt == nil ? .milliseconds(500) : .seconds(2))
                 guard let self, !self.stopping, let r = self.asks?.record(id), r.webState?.hasConversation != true else { return }
+                if autoSend, pressedAt == nil, Date().timeIntervalSince(started) > 30 {
+                    // The page never took the question: don't press anything late.
+                    if tookPromptAt == nil { self.webHandoffNote(id, "ChatGPT didn't take the question from the link in time, so Wren didn't press Enter. Check the ChatGPT tab.") }
+                    pressedAt = .distantPast
+                }
                 switch await BrowserTabs.chatGPTTabs(bundleID: bundleID) {
                 case .failure(.notPermitted):
                     self.log.notice("conversation detection: browser control not allowed")
@@ -135,7 +165,24 @@ extension AppModel {
                     return
                 case .failure: continue
                 case let .success(tabs):
-                    switch watcher.observe(tabs) {
+                    let event = watcher.observe(tabs)
+                    if autoSend, pressedAt == nil, event == .opened, let tid = watcher.tabID, let tab = tabs.first(where: { $0.id == tid }) {
+                        if tookPromptAt == nil, ChatGPTAutoSend.pageTookPrompt(tab.url) { tookPromptAt = Date() }
+                        if ChatGPTAutoSend.shouldPress(url: tab.url, tookPromptAt: tookPromptAt, now: Date(), pressed: false) {
+                            pressedAt = Date()
+                            let focused = await BrowserTabs.focus(tabID: tid, bundleID: bundleID)
+                            let pressed = focused && KeyPresser.pressReturn(inBrowser: bundleID)
+                            self.log.notice("send for me: tab focused=\(focused, privacy: .public) Return pressed=\(pressed, privacy: .public)")
+                            self.webHandoffNote(id, pressed ? "Wren pressed Enter in ChatGPT. Waiting for ChatGPT to start the conversation…"
+                                                            : "Wren couldn't press Enter in that ChatGPT tab (it wasn't in front). Press Enter there yourself.")
+                        }
+                    }
+                    if let p = pressedAt, p != .distantPast, !toldNoConversation, Date().timeIntervalSince(p) > 20 {
+                        toldNoConversation = true
+                        self.log.notice("send for me: no conversation 20 s after pressing Return")
+                        self.webHandoffNote(id, "Wren pressed Enter, but ChatGPT hasn't started a conversation. Check the ChatGPT tab and press Enter there.")
+                    }
+                    switch event {
                     case let .conversation(url):
                         r.providerURL = url.absoluteString
                         r.webState = .submittedVerified
