@@ -17,7 +17,7 @@ touched. Debug URLs exist only in debug builds. Read results with:
 
 ## Last pass: 2026-10-14, branch `fix/push-to-talk` (0.10.1), macOS 26.1, Apple Silicon
 
-Automated: `swift test`, 342 tests, 0 failures, 4 skipped (the push-to-talk state machine runs against a
+Automated: `swift test`, 344 tests, 0 failures, 4 skipped (the push-to-talk state machine runs against a
 fake microphone and fake permissions). Live: a **Wren Dev** build driven by debug URLs. No microphone was
 opened: Wren Dev has never been granted Microphone or Speech Recognition, and granting them needs a person.
 

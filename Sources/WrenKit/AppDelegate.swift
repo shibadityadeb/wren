@@ -188,9 +188,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
 
     /// Key-up of the push-to-talk key. Releasing the modifier first is caught by `watchHeldKeys`.
     private func pushToTalkUp() {
-        guard case .listening(.hold) = voice.phase else { voice.release(); return }
-        appLog.notice("push-to-talk up")
-        voice.release()
+        // Only a hold (or a hold waiting on the permission prompt) ends on key-up; a Voice-button
+        // recording isn't cut short by an unrelated ⌥ Space release.
+        switch voice.phase {
+        case .listening(.hold), .requestingPermission:
+            appLog.notice("push-to-talk up")
+            voice.release()
+        default: break
+        }
     }
 
     /// The shortcut, the Voice buttons and the menu all go through here.
@@ -358,16 +363,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
     /// Kind of result only (never the words), for diagnostics.
     static func describe(_ r: CaptureReply) -> String {
         switch r {
+        // Messages can quote the user's words ("When should I remind you to call Sam?"), so only kinds are logged.
         case .saved: return "saved as a new item"
-        case let .failed(m): return "failed: \(m)"
+        case .failed: return "failed"
         case let .ask(r): return r.target == .chatgpt ? "ask ChatGPT" : "general question (choose who answers)"
         case let .resolution(res):
             switch res {
             case let .answer(a): return "answer: \(a.title.hasPrefix("Reminder created") ? "reminder created" : "\(a.lines.count) lines")"
             case .proposal: return "proposal awaiting confirmation"
             case .clarify: return "asked which item"
-            case let .needsDate(q): return "asked: \(q)"
-            case let .notFound(m): return "not found: \(m)"
+            case .needsDate: return "asked a follow-up question"
+            case .notFound: return "not found"
             case .notACommand: return "not a command"
             }
         }

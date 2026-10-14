@@ -72,3 +72,12 @@ extension ReminderSchedulerTests {
         XCTAssertNil(ReminderFollowUp.subjectAnswer("ask GPT what to stretch", pending: "Remind me every weekday at 3 PM.", now: now, calendar: ist))
     }
 }
+
+extension ReminderSchedulerTests {
+    func testAnOwnRequestAfterWhatToRemindAboutIsntMergedIntoTheSchedule() {
+        let now = at(ist, 2026, 10, 13, 14)
+        for answer in ["create a task to buy milk", "what's due today?", "mark the report as done"] {
+            XCTAssertNil(ReminderFollowUp.subjectAnswer(answer, pending: "Remind me every weekday at 3 PM.", now: now, calendar: ist), answer)
+        }
+    }
+}

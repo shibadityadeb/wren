@@ -430,6 +430,8 @@ public enum MailAlertPolicy {
         let inQuiet = quiet.contains(now, calendar: calendar)
         // Held messages come back once quiet hours are over.
         let held = inQuiet ? [] : state.items.values.filter(\.heldForQuietHours).map(\.id)
+        // Read during its snooze: the snooze is over for good, even if it's marked unread later.
+        for (id, item) in state.items where item.alertSnoozed == true && !item.message.unread { state.items[id]?.alertSnoozed = nil }
         // Snoozed alerts come back once their snooze ends.
         let snoozed = state.items.values.filter { $0.alertSnoozed == true && !$0.isSnoozed(at: now) }.map(\.id)
         var pool = Array(Set(candidates + held + snoozed))

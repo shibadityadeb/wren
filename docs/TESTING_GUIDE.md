@@ -11,7 +11,7 @@ have been run and their results.)
 
 | Option | Use it when | How |
 |---|---|---|
-| **A. The preview release** | You want the real app, as friends would get it | Download `Wren-macOS-universal-unsigned.dmg` from the [latest release](https://github.com/shibadityadeb/wren/releases), check it (below), drag Wren to Applications, open it. macOS blocks unsigned builds the first time: open it once, then **System Settings › Privacy & Security › Open Anyway** |
+| **A. The preview release** | You want the real app, as friends would get it | Download `Wren-macOS-universal-unsigned.dmg` (named `Wren-macOS-universal.dmg` once releases are signed) from the [latest release](https://github.com/shibadityadeb/wren/releases), check it (below), drag Wren to Applications, open it. macOS blocks unsigned builds the first time: open it once, then **System Settings › Privacy & Security › Open Anyway** |
 | **B. A side-by-side test copy** | You have a source checkout and want to keep your installed Wren untouched | `scripts/try-wren.sh`. It builds **Wren Dev** (own data folder, sign-ins and permissions), opens it, and records a log in `build/test-logs/` until you press Ctrl-C |
 
 Option A replaces an installed Wren. Your data is kept and backed up before the upgrade (to data
@@ -29,7 +29,7 @@ For option A, record a log the same way with `scripts/try-wren.sh --installed`, 
 /usr/bin/log stream --style compact --predicate 'subsystem == "com.shibadityadeb.wren"' | tee wren-test.log
 ```
 
-The log records what Wren did (operation names, states, counts), never your words, emails or answers.
+The log records what Wren did (operation names, states, counts), not your words, emails or answers. Skim it before sharing anyway: some macOS error messages may name a file or account.
 
 ## 2. Setup (5 minutes)
 
@@ -120,4 +120,4 @@ Open an [issue](https://github.com/shibadityadeb/wren/issues) with:
 - your macOS version and Mac model
 - the log file
 
-Don't paste tokens or email content. Wren never logs them, so the log is safe to attach.
+Don't paste tokens or email content. Wren doesn't log them, but read the log over and remove anything personal before attaching it.

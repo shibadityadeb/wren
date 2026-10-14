@@ -74,7 +74,7 @@ From a source checkout, you can test without touching your installed Wren:
 scripts/try-wren.sh
 ```
 
-This builds and opens **Wren Dev**, a separate copy with its own data, sign-ins and permissions, and records a diagnostic log to `build/test-logs/`. The log never contains your words, email or answers, so it's safe to attach to an [issue](https://github.com/shibadityadeb/wren/issues).
+This builds and opens **Wren Dev**, a separate copy with its own data, sign-ins and permissions, and records a diagnostic log to `build/test-logs/`. Wren's log lines record operation names, states and counts rather than your words, email or answers. Still, skim the file before attaching it to an [issue](https://github.com/shibadityadeb/wren/issues), and remove anything personal.
 
 ## Privacy at a glance
 

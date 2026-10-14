@@ -85,6 +85,9 @@ public enum ReminderFollowUp {
         let a = ReminderCommand.stripAddress(answer).trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ".!")))
         guard !a.isEmpty, mayAnswer(a) else { return nil }
         guard DateParser(calendar: calendar).parse(a, now: now) == nil, RecurrenceRule.find(in: a, calendar: calendar) == nil else { return nil }
+        // Its own request ("create a task to buy milk", "what's due?", "mark the report done") isn't a subject.
+        guard !ExecutionRouter.hasTaskFraming(a), !IntentRouter.isQuestion(a),
+              ContextResolver(calendar: calendar).command(a, now: now) == nil else { return nil }
         let subject = a.replacingOccurrences(of: #"^(?:remind me\s+)?(?:to|about|that)\s+"#, with: "", options: [.regularExpression, .caseInsensitive])
         let lower = pending.lowercased()
         guard let trigger = ReminderCommand.triggers.first(where: { lower.hasPrefix($0) }) else { return nil }

@@ -201,7 +201,7 @@ and older versions refuse to open it.
 ## Releases
 
 1. Update `VERSION` and add a section to `CHANGELOG.md`.
-2. Commit, then tag: `git tag v0.4.0-preview.1` (prerelease) or `git tag v0.4.0` (stable), and push the tag.
+2. Commit, then tag with the version in `VERSION`: `git tag "v$(cat VERSION)-preview.1"` (prerelease) or `git tag "v$(cat VERSION)"` (stable), and push the tag.
 3. The **Release** workflow runs the full tests on Apple Silicon and Intel, builds the universal app, packages and verifies the DMG on both architectures, signs and notarizes when credentials exist, and publishes a GitHub Release with notes and checksums.
 
 Rules: the tag must match `VERSION`. A **stable** tag is only published if the build is signed and notarized; unsigned builds can only be published under a `-preview`/`-beta`/`-rc` tag, marked as prerelease. **Run workflow** (manual dispatch) builds a release candidate as a downloadable artifact and never publishes.

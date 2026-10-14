@@ -360,7 +360,7 @@ struct ConnectorDetailView: View {
                     .background(.quaternary, in: RoundedRectangle(cornerRadius: 5))
                 Button(recordingVoiceKey ? "Cancel" : "Change…") { recordingVoiceKey ? stopVoiceKeyRecording() : startVoiceKeyRecording() }
                     .disabled(!model.settings.voiceEnabled)
-                Button("Reset") { model.setVoiceHotKey(.optionShiftSpace) }.disabled(!model.settings.voiceEnabled)
+                Button("Reset") { model.setVoiceHotKey(.optionSpace) }.disabled(!model.settings.voiceEnabled)
             }
             if let e = model.voiceHotKeyError { Text(e).font(.caption).foregroundStyle(.orange) }
             Text("Hold it while you speak; letting go of either key ends the recording. Escape cancels. Pressing it again while a command is being transcribed or run does nothing, so one utterance never runs twice. Works with Wren's window closed. Typed capture uses \(model.hotKeyDisplay). The Voice button in the capture panel, the menu-bar popover and the menu-bar item's menu records too (click, speak, pause), even with the shortcut off.")

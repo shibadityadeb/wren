@@ -10,7 +10,8 @@
 # sign-ins and macOS permissions. You sign in to ChatGPT and Google inside it, and macOS asks it for
 # Notifications, Microphone and Speech Recognition separately.
 #
-# The log holds what Wren did (operation names, states, counts), never your words, email or answers.
+# The log holds what Wren did (operation names, states, counts), not your words, email or answers.
+# Skim it before sharing: system error messages can name files or accounts.
 # Follow docs/TESTING_GUIDE.md while it runs, then attach the log file to an issue if something's wrong.
 set -euo pipefail
 cd "$(dirname "$0")/.."
