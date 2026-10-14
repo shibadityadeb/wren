@@ -112,7 +112,7 @@ struct CaptureView: View {
                         Text("I'm listening…").font(.headline)
                     }
                     Text(trigger == .hold ? "Release \(state.voiceShortcut ?? "the shortcut") to finish. Esc cancels."
-                                          : "Speak, then pause or click Stop. Esc cancels.")
+                                          : "Speak, then pause\(state.voiceShortcut.map { ", press \($0) again," } ?? "") or click Stop. Esc cancels.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()

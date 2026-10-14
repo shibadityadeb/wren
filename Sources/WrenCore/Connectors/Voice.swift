@@ -235,6 +235,17 @@ public final class VoiceSession {
         }
     }
 
+    /// A push-to-talk press that ended almost at once (a tap, or a key-up macOS reported while the
+    /// keys were still down): keep listening hands-free, ending on a pause, Stop or another press,
+    /// instead of throwing the recording away. Only from a hold that's listening.
+    public func continueHandsFree() {
+        guard case .listening(.hold) = phase else { return }
+        var e = CommandEndpointer(start: now())
+        e.transcript(liveText, at: now())
+        endpointer = e
+        phase = .listening(.button)
+    }
+
     func transcribe() {
         endpointer = nil
         let ticket = generation
