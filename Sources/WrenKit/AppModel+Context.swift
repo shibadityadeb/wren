@@ -58,26 +58,36 @@ extension AppModel {
 
     private func execute(_ trimmed: String, original text: String, channel: UserChannel) async -> (String, CaptureReply) {
         reload()
-        let source: CaptureSource = channel == .voice ? .voice : .hotkey
+        let source = Self.captureSource(channel)
         func save(_ body: String) -> CaptureReply { capture(body, source: source) ? .saved : .failed("Couldn't save. Your text is still here.") }
-        if let body = IntentRouter.explicitCapture(trimmed) {
-            reminderFollowUp = nil
-            return ("SaveNote", save(body))
+        // One routing decision for every entry point; the executor only runs what it decided.
+        let intent = CommandRouter.intent(for: trimmed, now: clock.now, calendar: clock.calendar)
+        lastIntent = intent
+        log.notice("route \(intent.summary, privacy: .public) via \(channel.rawValue, privacy: .public)")
+        // Wren asked "When should I remind you…?" or "What should I remind you about?": a bare time
+        // or subject answers it. A request of its own (a task, a GPT request, a question) is new.
+        if reminderFollowUp != nil {
+            if intent.rule == .datedStatement || intent.rule == .capture || intent.rule == .reminderRequest {
+                if let r = await reminderRequest(trimmed, channel: channel) { return ("CreateReminder", r) }
+            } else {
+                reminderFollowUp = nil; reminderFollowUpNeedsSubject = false
+            }
         }
-        // Reminders first: this also completes an answer to "When should I remind you…?".
-        if let r = await reminderRequest(trimmed, channel: channel) { return ("CreateReminder", r) }
         let all = (try? store?.all()) ?? []
-        let operation = ExecutionRouter.operation(for: trimmed, now: clock.now, calendar: clock.calendar, resolver: resolver)
+        let operation = intent.operation
         switch operation {
         case let .saveNote(body):
             return (operation.name, save(body))
+        case .createReminder:
+            if let r = await reminderRequest(trimmed, channel: channel) { return (operation.name, r) }
+            // The parser couldn't complete what the router read as a reminder: never lose the words.
+            return (operation.name, save(trimmed))
+        case let .createTask(draft):
+            return (operation.name, await createTask(draft, text: trimmed, channel: channel))
         case let .delegateToChatGPT(request):
             return (operation.name, .ask(request))
         case let .followUpDelegation(f):
             return (operation.name, followUp(f, text: text))
-        case .createReminder:
-            // reminderRequest handles every reminder; reaching here means it couldn't, so keep the words.
-            return (operation.name, save(trimmed))
         case let .clarifyIntent(question):
             return (operation.name, .resolution(.needsDate(question)))
         case .openDelegationResult:
@@ -97,7 +107,7 @@ extension AppModel {
             }
             return (operation.name, r)
         case .changeItem, .queryStoredItems:
-            if let r = await connectorAnswer(trimmed) { return (operation.name, .resolution(r)) }
+            // Wren's own items: answered from the store, never from a connector ("move the meeting prep task" isn't a calendar question).
             let result = resolver.resolve(trimmed, items: all, goals: goals, context: conversation, now: clock.now)
             if case let .notFound(msg) = result {
                 // The model may only help if it found something real; an empty answer would hide the reason.
@@ -108,13 +118,19 @@ extension AppModel {
             }
             if case .notACommand = result { return ("Capture", save(trimmed)) }
             return (operation.name, .resolution(result))
-        case .searchGmail, .queryCalendar:
-            if let r = await connectorAnswer(trimmed) { return (operation.name, .resolution(r)) }
-            return (operation.name, .resolution(.notFound(operation == .searchGmail ? "Gmail isn't connected. Open Connectors › Gmail to set it up." : "No calendar is connected. Open Connectors › Calendar.")))
+        case .searchGmail:
+            // The authorized Gmail account, read now. Never an answer from memory when it can't be read.
+            if trimmed.lowercased().range(of: #"\bneeds? my attention\b"#, options: .regularExpression) != nil { return (operation.name, .resolution(.answer(await attentionAnswer(trimmed)))) }
+            guard hub.gmail.state.isUsable else { return (operation.name, .resolution(.notFound(Self.connectorProblem("Gmail", hub.gmail.state, place: "Connectors › Gmail")))) }
+            do { return (operation.name, .resolution(.answer(try await emailAnswer(trimmed)))) } catch { return (operation.name, .resolution(.notFound(errorText(error)))) }
+        case .queryCalendar:
+            guard calendarUsable else { return (operation.name, .resolution(.notFound("No calendar is connected. Open Connectors › Calendar and allow access to the calendars on this Mac."))) }
+            do { return (operation.name, .resolution(.answer(try await calendarAnswer(trimmed)))) } catch { return (operation.name, .resolution(.notFound(errorText(error)))) }
         case let .generalQuestion(request):
             return (operation.name, .ask(request))
-        case .createTask, .capture:
-            if let r = await connectorAnswer(trimmed) { return (operation.name, .resolution(r)) }
+        case .capture:
+            // Nothing in the words names an action. Only then may the local model help, and only
+            // with a reading it can ground in the user's own words; otherwise the text is kept.
             // Ask the local model only when the text looks like a command or question.
             if ContextResolver.mightBeCommandOrQuestion(trimmed) {
                 switch await modelInterpretation(trimmed, all: all) {
@@ -174,6 +190,22 @@ extension AppModel {
                 : ChatGPTWeb.followUpPrompt(earlierRequest: parent.prompt ?? parent.task, earlierAnswer: parent.response, instruction: instruction)
             return .ask(AIRequest(prompt: prompt, original: text, depth: parent.depth, kind: parent.kind,
                                   target: mode == nil ? nil : .chatgpt, followUpOf: parent.id, mode: mode))
+        }
+    }
+
+    /// Where an item came from, for its history: voice, the menu-bar field, or the capture panel.
+    static func captureSource(_ channel: UserChannel) -> CaptureSource {
+        switch channel { case .voice: .voice; case .popover: .popover; default: .hotkey }
+    }
+
+    /// Why a connector can't answer, in its real state: not connected, sign-in expired, missing permission…
+    static func connectorProblem(_ name: String, _ state: ConnectorState, place: String) -> String {
+        switch state {
+        case let .reauthorizationRequired(d): return "\(name) needs you to sign in again (\(d)). Open \(place) and choose Reconnect. Your question wasn't answered from old data."
+        case let .missingPermissions(d): return "\(name) is missing a permission (\(d)). Open \(place) to allow it."
+        case let .temporarilyUnavailable(d): return "\(name) couldn't be reached (\(d)). Try again in a moment."
+        case let .notAvailableInBuild(d): return "\(name) isn't available in this build of Wren (\(d))."
+        default: return "\(name) isn't connected. Open \(place) to connect it."
         }
     }
 
@@ -260,7 +292,7 @@ extension AppModel {
             candidate = prefix + " " + text
         }
         // "Remind me about the dentist on Friday" may mean an item that already exists.
-        let lower = candidate.lowercased()
+        let lower = (ReminderCommand.canonical(CommandGrammar.request(ReminderCommand.stripAddress(candidate))) ?? candidate).lowercased()
         if lower.hasPrefix("remind me about ") || lower.hasPrefix("remind me of ") {
             let r = resolver.resolve(candidate, items: (try? store?.all()) ?? [], goals: goals, context: conversation, now: now)
             switch r {
@@ -272,7 +304,9 @@ extension AppModel {
         switch cmd {
         case let .create(title, when, explanation):
             reminderFollowUp = nil; reminderFollowUpNeedsSubject = false
-            return await createReminder(text: candidate, title: title, when: when, explanation: explanation, channel: channel)
+            // "… by Friday" also states a deadline; "tomorrow at 10" is only when to remind.
+            let deadline = ReminderCommand.statedDeadline(candidate, now: now, calendar: cal)
+            return await createReminder(text: candidate, title: title, when: when, explanation: explanation, channel: channel, deadline: deadline)
         case let .clarify(title, question):
             reminderFollowUpNeedsSubject = title.isEmpty
             reminderFollowUp = question.hasPrefix("Is that") || title.isEmpty ? candidate : "remind me to " + title
@@ -283,42 +317,95 @@ extension AppModel {
         }
     }
 
-    func createReminder(text: String, title: String, when: ReminderWhen, explanation: String?, channel: UserChannel) async -> CaptureReply {
-        if notificationStatus == .notDetermined {
-            // First reminder: this is when macOS asks for permission, with Wren's reason in the prompt.
-            _ = await notifications.requestPermission()
-            notificationStatus = notifications.status
+    func createReminder(text: String, title: String, when: ReminderWhen, explanation: String?, channel: UserChannel, deadline: ParsedDate? = nil) async -> CaptureReply {
+        guard let store, let broker else { return .failed(storeError ?? "Wren's database isn't available.") }
+        // First reminder: this is when macOS asks for permission, with Wren's reason in the prompt.
+        await askForNotificationsIfNeeded()
+        let source = Self.captureSource(channel)
+        switch await ItemExecution.createReminder(text: text, title: title, when: when, deadline: deadline, source: source, origin: .user(channel),
+                                                  store: store, broker: broker, scheduler: reminders, now: clock.now) {
+        case let .failure(f): reload(); return .failed(f.message)
+        case let .success(o):
+            noteRecent(o.itemID); afterScheduling()
+            let cal = clock.calendar
+            var lines: [AnswerLine] = []
+            switch when {
+            case let .once(d): lines.append(AnswerLine(DueText.describe(d, hasTime: true, now: clock.now, calendar: cal).capitalizedFirstLetter, recordID: o.itemID))
+            case let .repeating(rule):
+                lines.append(AnswerLine(rule.label(calendar: cal) + (o.reminderAt.map { " · first \(DueText.describe($0, hasTime: true, now: clock.now, calendar: cal))" } ?? ""), recordID: o.itemID))
+            }
+            if let explanation { lines.append(AnswerLine(explanation, recordID: nil)) }
+            if let d = o.deadline { lines.append(AnswerLine("Deadline: \(DueText.describe(d, hasTime: o.deadlineHasTime, now: clock.now, calendar: cal))", recordID: nil)) }
+            lines.append(AnswerLine(scheduleStatus(o), recordID: nil))
+            log.notice("reminder created: planned=\(o.planned.count, privacy: .public) accepted=\(o.planned.filter { o.accepted.contains($0.id) }.count, privacy: .public) authorized=\(o.notificationsAuthorized, privacy: .public)")
+            return .resolution(.answer(Answer(title: "Reminder created: \(o.title)", lines: lines, basis: "From your words: “\(text)”")))
         }
-        let id = UUID()
-        let source: CaptureSource = channel == .voice ? .voice : .hotkey
-        let req = ActionRequest(action: BuiltInAction.createReminder, target: TargetRef(kind: "commitment", id: id.uuidString, label: title),
-                                parameters: BuiltInAction.createReminderParameters(text: text, title: title, when: when, source: source),
-                                origin: .user(channel), createdAt: clock.now)
-        let result = await run(req)
-        guard let result, result.status == .succeeded || result.status == .unverified, let c = item(id) else {
-            return .failed(result?.message ?? "The reminder wasn't saved.")
+    }
+
+    /// "I need to submit the assignment by Friday", "Create a task to follow up with the recruiter":
+    /// saves the words, stores the task with the deadline exactly as said (none when none was said),
+    /// schedules the deadline reminders the user's settings call for, checks what macOS accepted, and
+    /// reports only what is really stored and scheduled. The deadline, the reminder times and the
+    /// notifications are reported separately.
+    func createTask(_ draft: TaskDraft, text: String, channel: UserChannel) async -> CaptureReply {
+        let source = Self.captureSource(channel)
+        guard let store, let broker else {
+            return capture(text, source: source) ? .saved : .failed("Couldn't save. Your text is still here.")
         }
-        noteRecent(id)
-        let report = await reconcileReminders()
-        var lines: [AnswerLine] = []
-        switch when {
-        case let .once(d): lines.append(AnswerLine(DueText.describe(d, hasTime: true, now: clock.now, calendar: clock.calendar).capitalizedFirstLetter, recordID: id))
-        case let .repeating(rule):
-            lines.append(AnswerLine(rule.label(calendar: clock.calendar) + (c.nextReminderAt.map { " · first \(DueText.describe($0, hasTime: true, now: clock.now, calendar: clock.calendar))" } ?? ""), recordID: id))
+        let autoRemind = policy.rules.contains(.autoRemindDeadlines)
+        if draft.deadline != nil, autoRemind { await askForNotificationsIfNeeded() }
+        switch await ItemExecution.createTask(draft, text: text, source: source, store: store, broker: broker, scheduler: reminders,
+                                              autoRemind: autoRemind, reminderHour: reminderHour, now: clock.now) {
+        case let .failure(f): reload(); return .failed([f.message, f.recovery].compactMap { $0 }.joined(separator: " "))
+        case let .success(o):
+            noteRecent(o.itemID); afterScheduling()
+            let cal = clock.calendar
+            func when(_ d: Date, time: Bool = true) -> String { DueText.describe(d, hasTime: time, now: clock.now, calendar: cal) }
+            var lines: [AnswerLine] = []
+            if let d = o.deadline {
+                lines.append(AnswerLine("Deadline: \(when(d, time: o.deadlineHasTime))", recordID: o.itemID))
+            } else {
+                lines.append(AnswerLine("No deadline was given, so none is set.", recordID: o.itemID))
+            }
+            if draft.deadline?.isApproximate == true { lines.append(AnswerLine("“\(draft.deadline!.phrase)” is approximate; adjust if needed.", recordID: nil)) }
+            let times: [String] = o.planned.compactMap { r in
+                guard case let .at(d) = r.trigger else { return nil }
+                return r.isAdvance ? "\(when(d)) (the day before)" : when(d)
+            }
+            if !times.isEmpty {
+                lines.append(AnswerLine("Reminder\(times.count == 1 ? "" : "s"): " + times.joined(separator: " and "), recordID: nil))
+                lines.append(AnswerLine(scheduleStatus(o), recordID: nil))
+            } else if o.deadline != nil {
+                lines.append(AnswerLine(autoRemind ? "No reminder: the deadline's reminder time has already passed." : "No reminder: deadline reminders are off in Settings › Permissions.", recordID: nil))
+            } else {
+                lines.append(AnswerLine("Say “remind me to … at …” to add a reminder.", recordID: nil))
+            }
+            log.notice("task created: deadline=\(o.deadline != nil, privacy: .public) planned=\(o.planned.count, privacy: .public) accepted=\(o.planned.filter { o.accepted.contains($0.id) }.count, privacy: .public)")
+            return .resolution(.answer(Answer(title: "Task created: \(o.title)", lines: lines, basis: "From your words: “\(text)”")))
         }
-        if let explanation { lines.append(AnswerLine(explanation, recordID: nil)) }
-        let status: String
-        if !c.scheduledNotificationIDs.isEmpty {
-            status = "Scheduled with macOS: it will appear even if Wren is closed."
-        } else if !report.authorized {
-            status = "Saved, but notifications are off for Wren, so it will only show inside Wren. Turn them on in System Settings › Notifications."
-        } else if report.paused {
-            status = "Saved. Notifications are paused; it will be included when they resume."
-        } else {
-            status = "Saved, but macOS didn't accept the notification. Wren will try again and show it in the app."
-        }
-        lines.append(AnswerLine(status, recordID: nil))
-        return .resolution(.answer(Answer(title: "Reminder created: \(title)", lines: lines, basis: "From your words: “\(text)”")))
+    }
+
+    /// What macOS really holds, in words. Never "scheduled" unless macOS accepted every request.
+    func scheduleStatus(_ o: ScheduledOutcome) -> String {
+        let one = o.planned.count <= 1
+        if o.allScheduled { return "Scheduled with macOS: \(one ? "it appears" : "they appear") even if Wren is closed." }
+        if o.planned.isEmpty { return "Nothing to schedule: the time has passed." }
+        if !o.notificationsAuthorized { return "Saved, but notifications are off for Wren, so \(one ? "it" : "they") will only show inside Wren. Turn them on in System Settings › Notifications." }
+        if o.paused { return "Saved. Notifications are paused; \(one ? "it" : "they") will be included when they resume." }
+        return "Saved, but macOS didn't accept the notification. Wren will try again and show it in the app."
+    }
+
+    func askForNotificationsIfNeeded() async {
+        guard notificationStatus == .notDetermined else { return }
+        _ = await notifications.requestPermission()
+        notificationStatus = notifications.status
+    }
+
+    /// After ItemExecution scheduled: the app's view of the store and of macOS catches up.
+    func afterScheduling() {
+        reload()
+        if let r = reminders?.lastReport { reminderSync = r }
+        notificationStatus = notifications.status
     }
 
     enum ModelReading { case resolved(ContextResolution), generalQuestion }

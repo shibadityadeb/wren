@@ -6,7 +6,36 @@ import WrenKit
 ///   wren-tools trace <logo.png> <out.swift>   trace the bird into WrenMarkData.swift
 ///   wren-tools assets <logo.png> <dir>        write SVGs, iconset, previews from the logo + trace
 let args = CommandLine.arguments
-func usage() -> Never { print("usage: wren-tools trace <logo.png> <out.swift> | assets <logo.png> <dir> | snapshot <dir>"); exit(2) }
+func usage() -> Never { print("usage: wren-tools trace <logo.png> <out.swift> | assets <logo.png> <dir> | snapshot <dir> | route \"<words>\" …"); exit(2) }
+// wren-tools route "Can you make a reminder to call Sam tomorrow at 10 AM?" …
+// Prints the routing decision (operation, destination, rule, confidence) and what the operation
+// would carry, exactly as the app decides it. Nothing is saved, scheduled or sent.
+if args.count >= 3 && args[1] == "route" {
+    let now = Date(), cal = Calendar.current
+    for text in args.dropFirst(2) {
+        let i = CommandRouter.intent(for: text, now: now, calendar: cal)
+        print("“\(text)”")
+        print("  \(i.summary)")
+        switch i.operation {
+        case let .createTask(d):
+            print("  task: \(d.title)" + (d.deadline.map { " · deadline \($0.date.formatted(date: .abbreviated, time: $0.hasTime ? .shortened : .omitted))" } ?? " · no deadline"))
+        case .createReminder:
+            switch ReminderCommand.parse(text, now: now, calendar: cal) {
+            case let .create(title, .once(d), _)?: print("  reminder: \(title) · \(d.formatted(date: .abbreviated, time: .shortened))")
+            case let .create(title, .repeating(r), _)?: print("  reminder: \(title) · \(r.label(calendar: cal))")
+            case let .clarify(_, q)?: print("  asks: \(q)")
+            case let .past(_, m)?: print("  refused: \(m)")
+            case nil: print("  (no reminder parsed)")
+            }
+            if let dl = ReminderCommand.statedDeadline(text, now: now, calendar: cal) { print("  deadline: \(dl.date.formatted(date: .abbreviated, time: dl.hasTime ? .shortened : .omitted))") }
+        case let .delegateToChatGPT(r): print("  to ChatGPT (\(r.kind.rawValue)\(r.wantsHighEffort ? ", high effort" : "")): \(r.prompt)")
+        case let .generalQuestion(r): print("  to local AI: \(r.prompt)")
+        case let .clarifyIntent(q): print("  asks: \(q)")
+        default: break
+        }
+    }
+    exit(0)
+}
 if args.count == 3 && args[1] == "snapshot" {
     let app = NSApplication.shared
     app.setActivationPolicy(.prohibited)

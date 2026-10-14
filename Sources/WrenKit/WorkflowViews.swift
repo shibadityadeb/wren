@@ -485,6 +485,10 @@ struct MailSettingsView: View {
                 Picker("Alert for", selection: Binding(get: { p.alertLevel }, set: { v in model.updateMail { $0.alertLevel = v } })) {
                     ForEach(MailAlertLevel.allCases, id: \.self) { Text($0.label).tag($0) }
                 }.frame(maxWidth: 360).disabled(!p.alertsEnabled)
+                Toggle("Include the email's first sentence in alerts", isOn: Binding(get: { p.alertPreview }, set: { v in model.updateMail { $0.alertPreview = v } }))
+                    .disabled(!p.alertsEnabled)
+                Text("Clicking an alert opens that conversation in Gmail. “Show in Wren” opens it here instead.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Toggle("Quiet hours (hold alerts until they end)", isOn: Binding(get: { p.quietHours.enabled }, set: { v in model.updateMail { $0.quietHours.enabled = v } }))
                 HStack {
                     DatePicker("From", selection: minutes(\.quietHours.startMinutes), displayedComponents: .hourAndMinute)

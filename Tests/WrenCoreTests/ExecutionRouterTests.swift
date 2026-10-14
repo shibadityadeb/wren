@@ -14,8 +14,8 @@ final class ExecutionRouterTests: XCTestCase {
         XCTAssertEqual(name("Remind me to call Sam tomorrow at 10 AM."), "CreateReminder")
         XCTAssertEqual(name("Ask GPT to research the fundamentals of quantum physics."), "DelegateToChatGPT")
         XCTAssertEqual(name("Check whether I have an important email from the recruiter."), "SearchGmail")
-        XCTAssertEqual(name("Move the research task to Sunday."), "ChangeItem")
-        XCTAssertEqual(name("Move that reminder to Sunday."), "ChangeItem")
+        XCTAssertEqual(name("Move the research task to Sunday."), "UpdateTask")
+        XCTAssertEqual(name("Move that reminder to Sunday."), "UpdateTask")
         XCTAssertEqual(name("I need to finish the report by Friday."), "CreateTask")
         XCTAssertEqual(name("Remind me every weekday at 3 PM."), "CreateReminder", "the reminder flow asks what to remind about")
         XCTAssertEqual(name("What am I waiting for?"), "QueryStoredItems")
@@ -70,8 +70,8 @@ final class ExecutionRouterTests: XCTestCase {
         XCTAssertEqual(op("show my last email"), .openEmail(sender: nil))
         XCTAssertEqual(op("Mark the email from the bank as read"), .markEmailRead(sender: "bank"))
         XCTAssertNotEqual(name("Mark the email from the bank"), "MarkEmailRead", "only an explicit “as read”")
-        XCTAssertEqual(name("Show the GPT result"), "OpenDelegationResult")
-        XCTAssertEqual(name("What did ChatGPT say?"), "OpenDelegationResult")
+        XCTAssertEqual(name("Show the GPT result"), "OpenChatGPTRequest")
+        XCTAssertEqual(name("What did ChatGPT say?"), "OpenChatGPTRequest")
     }
 
     func testNonGPTMentionsStayLocal() {

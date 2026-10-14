@@ -14,8 +14,8 @@ public enum BuiltInAction {
     public static let completeOccurrence: ActionID = "reminder.completeOccurrence"
     public static let setRepeat: ActionID = "reminder.setRepeat"
     /// Parameters for `createReminder`.
-    public static func createReminderParameters(text: String, title: String, when: ReminderWhen, source: CaptureSource) -> [String: JSONValue] {
-        CreateReminderHandler.parameters(text: text, title: title, when: when, source: source)
+    public static func createReminderParameters(text: String, title: String, when: ReminderWhen, source: CaptureSource, deadline: ParsedDate? = nil) -> [String: JSONValue] {
+        CreateReminderHandler.parameters(text: text, title: title, when: when, source: source, deadline: deadline)
     }
     /// Parameters for `setRepeat` (nil stops repeating).
     public static func setRepeatParameters(_ rule: RecurrenceRule?) -> [String: JSONValue] {
@@ -238,8 +238,12 @@ final class CreateReminderHandler: ActionHandler {
         .object(["weekdays": .array(r.weekdays.map { .number(Double($0)) }), "hour": .number(Double(r.hour)), "minute": .number(Double(r.minute))])
     }
 
-    nonisolated static func parameters(text: String, title: String, when: ReminderWhen, source: CaptureSource) -> [String: JSONValue] {
+    nonisolated static func parameters(text: String, title: String, when: ReminderWhen, source: CaptureSource, deadline: ParsedDate? = nil) -> [String: JSONValue] {
         var p: [String: JSONValue] = ["text": .string(text), "title": .string(title), "source": .string(source.rawValue)]
+        if let deadline {
+            p["deadline"] = .number(deadline.date.timeIntervalSince1970)
+            p["deadlineHasTime"] = .bool(deadline.hasTime)
+        }
         switch when {
         case let .once(d): p["at"] = .number(d.timeIntervalSince1970)
         case let .repeating(r): p["repeat"] = ruleParameter(r)
@@ -253,7 +257,8 @@ final class CreateReminderHandler: ActionHandler {
         guard let text = r.parameters.string("text"), let title = r.parameters.string("title"), !title.isEmpty else { throw BrokerError.badParameter("title") }
         guard let when = Self.when(r.parameters) else { throw BrokerError.badParameter("when") }
         let source = r.parameters.string("source").flatMap(CaptureSource.init(rawValue:)) ?? .hotkey
-        let c = try store.createReminder(text: text, title: title, when: when, source: source, id: id, calendar: clock.calendar, now: clock.now)
+        let deadline = r.parameters.date("deadline").map { ParsedDate(date: $0, hasTime: r.parameters.bool("deadlineHasTime") ?? false, isApproximate: false, phrase: "") }
+        let c = try store.createReminder(text: text, title: title, when: when, source: source, id: id, deadline: deadline, calendar: clock.calendar, now: clock.now)
         switch when {
         case let .once(d): return HandlerOutcome(detail: "for \(WrenStore.stamp(d))")
         case let .repeating(rule): return HandlerOutcome(detail: rule.label(calendar: clock.calendar) + (c.nextReminderAt.map { ", first \(WrenStore.stamp($0))" } ?? ""))

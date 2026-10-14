@@ -2,6 +2,29 @@
 
 Versions follow [semantic versioning](https://semver.org). The `VERSION` file is the source of truth; release tags are `v<VERSION>` (stable) or `v<VERSION>-preview.N` (prerelease).
 
+## [0.12.0] (unreleased)
+
+Wren does what you asked, and says exactly what it did.
+
+- **One router, outer request first.** Typing, voice and the menu-bar field all go through `CommandRouter`. It reads what you asked Wren to do before what that's about, with explicit rules. The local model only helps with plain notes.
+  - "Can you make a reminder to call Sam tomorrow at 10 AM?" and "Could you remind me to…" were offered to the local AI or ChatGPT. They now create the reminder.
+  - "Remind me to ask GPT about quantum physics tomorrow" is a reminder for tomorrow. "I need to research X in ChatGPT by Friday" is a task.
+  - "I need to send the proposal before the meeting" was a calendar question, and "I need to email Sam by Friday" a Gmail search. Both are tasks now.
+  - "What should I work on today?" and "What deadlines are approaching?" answer from your items.
+  - "Remind me one day before the deadline" changes that task, after a preview.
+  - `swift run wren-tools route "…"` shows how a sentence is read.
+- **Tasks are confirmed, not just saved.** "I need to submit the assignment by Friday" shows *Task created* with the deadline, each reminder time and what macOS really accepted. It never says "scheduled" when notifications are off or macOS refused.
+- **A heads-up the day before a deadline**, at your default reminder time, plus the reminder on the day. Turn it off in Settings › Notifications. A reminder time you pick replaces both. Completing the task withdraws both.
+- **A reminder time is no longer stored as a deadline.** "Remind me to call Sam at 10" doesn't make the item "overdue" at 10:01. "… by Friday at 5 PM" still sets a deadline. Existing items aren't changed.
+- **Email alerts** include the email's first sentence (from Gmail's own preview, turn-off-able in Inbox settings). **Clicking one opens that conversation in Gmail**, in your account; checked on a real account. **Show in Wren** is a button.
+- The morning briefing names what's **due tomorrow** and items you marked **important**.
+- An expired Google sign-in now says so ("sign in again"), not "isn't connected", and never answers from old data.
+- Quitting stops mail checks, timers and ChatGPT tab watching explicitly. Scheduled reminders stay with macOS.
+- Push-to-talk: a key-up that arrives just after recording starts (for example after a permission prompt) now keeps listening hands-free, instead of "Didn't hear anything".
+- Fixed: task titles could lose letters ("Submit the applicati" from "…application next Monday").
+- Slack is listed as not implemented.
+- docs/EXECUTION_AUDIT.md records each defect, its cause, the fix and the tests. No data version change.
+
 ## [0.11.1] (unreleased)
 
 "Ask in ChatGPT" puts your question in ChatGPT, not on your clipboard.

@@ -6,6 +6,8 @@
 > 3. **Data:** a single `Commitment` model holds the verbatim `originalText`, a `kind` (commitment, idea, question, waiting, research, unsorted) and a `processing` state. This replaces a separate `Capture` entity. Only `kind == .commitment` gets automatic reminders. A separate `Capture` can be split out later if Phase 5 needs it.
 > 4. **UI:** the menu bar uses `NSStatusItem` + `NSPopover` rather than `MenuBarExtra`, so a notification tap can open the popover programmatically.
 
+> **0.12.0 (2026-10-14).** One command router, `CommandRouter.intent(for:)`, reads the outer request first and returns a structured intent (operation, destination, rule, confidence). `ItemExecution` runs CreateTask and CreateReminder and reads back what macOS accepted. Deadlines get a day-before heads-up. A reminder time is no longer stored as a deadline. Email alerts open the Gmail conversation (§47). No schema change. docs/EXECUTION_AUDIT.md has the defects and fixes.
+>
 > **0.11.0 (2026-10-14).** "Ask GPT" goes to the ChatGPT website by default (a handoff), the plan API becomes the explicit "Run with connected ChatGPT in Wren" mode, questions naming no assistant go to the local AI, and follow-ups keep their tool (§46). Schema v8.
 >
 > **0.10.0 (2026-10-13).** Voice is explicitly activated only (§40, the wake-word listener is gone), GPT thinking and research record requested versus reported effort and web-search evidence (§39), and every command goes through `ExecutionRouter` (§45). Schema v7.
@@ -731,4 +733,57 @@ Rules that let Wren read external data on its own name the scheduler they speak 
 - In Wren: the follow-up runs in Wren with the earlier request and answer included in `input` (the plan route has no `previous_response_id`).
 - Local: continues with the local AI. "Open that in GPT" on a local answer hands that request to the website.
 - With no earlier request, Wren asks which one.
+
+## 47. Command router and item execution (0.12)
+
+**One decision, made once.** `CommandRouter.intent(for:now:calendar:)` (WrenCore, pure) returns a `CommandIntent`. Its fields:
+- `operation`: an `ExecutionOperation` with its parameters, for example `createTask(TaskDraft)` or `changeItem(PendingCommand.Verb)`.
+- `destination`: `wren`, `chatgpt`, `localAI`, `gmail`, `calendar` or `user`.
+- `rule`: a `RoutingRule` with its letter A–E.
+- `confidence`, `request` (politeness removed), `content` and `original`.
+
+`AppModel.execute` logs `intent.summary` (no user text) and dispatches on it. It doesn't re-route: connector keyword checks no longer run before item commands or notes. `ExecutionRouter.operation(for:)` and `IntentRouter.route` are views of the same decision. Every entry point uses it: the capture panel, push-to-talk and the Voice button (`.voice`), the menu-bar field (through `runInCapturePanel`), the debug URL and `wren-tools route`.
+
+**Outer request first.** `CommandGrammar.request` removes words addressed to Wren ("hey", "can you", "please", "I want you to"). Every frame is then anchored at the start of what's left, in this order:
+1. An explicit note.
+2. An advance reminder on an existing item.
+3. A reminder frame (`ReminderCommand.canonical` maps "make a reminder to", "don't let me forget to", "I'd like a reminder", "ping me", "Reminder:", "Tomorrow at 9, remind me to…" to `remind me …`).
+4. A task frame, an obligation ("I need to / have to / must…"), or a deadline statement ("X is due Friday").
+5. ChatGPT follow-ups and requests.
+6. Email actions.
+7. Item changes.
+8. Stored queries.
+9. Gmail and calendar questions (only questions or lookups).
+10. General questions.
+11. A dated statement.
+12. A note.
+
+What the outer request carries ("ask GPT about …" inside "remind me to …") is its subject and can't change the operation. "I need to know what X is" without a date is a question (`knowledgeRequest`).
+
+**Item execution.** `ItemExecution.createTask` and `ItemExecution.createReminder` (WrenCore, `CommandExecution.swift`) take these steps:
+1. Save the user's words. A task is captured first; a reminder goes through the broker's `createReminder`.
+2. Apply the reading through the broker, using `applyInterpretation` with state `.processed`. The confirmed reading isn't changed later by a model pass.
+3. Reconcile with macOS.
+4. Return a `ScheduledOutcome`: deadline, reminder time, planned requests, the identifiers macOS accepted, authorization and pause.
+
+`allScheduled` is true only when macOS holds every planned request, and `schedulingFailed` marks a real failure. The panel's text is built from this outcome only.
+
+**Deadline, reminder, notifications, status.** These are separate facts.
+- A reminder request sets `nextReminderAt`. It sets `deadline` only when the user stated one (`ReminderCommand.statedDeadline`: "by/before/due …").
+- A task's deadline implies a reminder on the day (`ReminderPolicy.initialReminder`, `reminderFromDeadline`).
+- With `DeadlineAdvance` (the setting *Also remind me the day before a deadline*, plus the `autoRemindDeadlines` rule) it also gets one heads-up `days` before at the default reminder hour (`ReminderPolicy.advanceReminder`):
+  - only while the reminder follows the deadline
+  - only for deadlines set at least a day ahead
+  - never at or after the deadline
+- Its identifier is `wren.reminder.<id>.before.<epoch>`. Its category (`WREN_ADVANCE`) has only Done, so snoozing it can't move the real reminder. Reconcile adds, moves and removes it like any reminder.
+
+**Email alerts.** `MailAlertText.make` builds the alert from:
+- the sender
+- the subject
+- the first sentence of Gmail's preview (`excerpt`, about 120 characters; the `MailPreferences.alertPreviewSetting` setting is optional so old preferences decode)
+- the reason
+
+A click opens `EmailMessage.webURL` (`mail.google.com/mail/?authuser=<account>#all/<threadId>`, checked live as M-GMAIL-LINK). **Show in Wren** opens the message view.
+
+**Quit.** `AppModel.stopBackgroundWork` sets `stopping` and invalidates the scheduler and mail timers. It cancels a pending reconcile and ends tab watching. macOS keeps the scheduled reminders.
 

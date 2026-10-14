@@ -39,16 +39,20 @@ Clicking away keeps what you typed as a draft.
 Say them while holding ⌥ Space, or type them after ⌥⇧ Space.
 
 **Reminders and tasks**
-- `remind me to call Sam tomorrow at 10 AM`
+- `remind me to call Sam tomorrow at 10 AM` (or `can you make a reminder to…`, `don't let me forget to…`)
 - `remind me to stretch every weekday at 3 PM`
-- `I need to finish the report by Friday` (a task with a deadline)
+- `remind me to ask GPT about taxes tomorrow` (a reminder for later; nothing goes to ChatGPT now)
+- `I need to finish the report by Friday` (a task with a deadline, a heads-up the day before and a reminder on the day)
+- `make a task to follow up with the recruiter` (a task with no deadline)
+- `remind me one day before the deadline` (for the task you just made; shows a preview)
 - `move that reminder to Sunday` / `snooze the current reminder for 30 minutes` (shows a preview; Return confirms)
 - `mark the report as done`
 - `note: Friday is a holiday` (just saves the text)
 
 **Your own items**
+- `what should I work on today?`
 - `what am I waiting for?`
-- `what's due this week?`
+- `what's due this week?` / `what deadlines are approaching?`
 - `which goals have I made no progress on?`
 
 **ChatGPT** (naming GPT or ChatGPT always means ChatGPT)
@@ -72,8 +76,9 @@ If Wren isn't sure what you meant, it asks one short question; answer it the sam
 | Notification | Buttons |
 |---|---|
 | Reminder | **Done**, **Remind me in 1 hour**, **Remind me at…** (type `9pm`, `tomorrow 10am`) |
+| Day-before heads-up for a deadline | **Done** |
 | GPT finished (run in Wren) | **View result** |
-| Important email | **Open email**, **Snooze alert for 1 hour**, **Mark as read** (if allowed), **Dismiss alert** |
+| Important email | Click: **opens it in Gmail**. Buttons: **Open in Gmail**, **Show in Wren**, **Snooze alert for 1 hour**, **Mark as read** (if allowed), **Dismiss alert** |
 | Email digest | **Open digest** |
 
 Clicking a notification itself opens exactly what it's about.

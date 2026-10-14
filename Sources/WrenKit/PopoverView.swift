@@ -115,7 +115,14 @@ struct ListPane: View {
                 Image(systemName: "plus").foregroundStyle(.secondary)
                 TextField("Add something…", text: $draft)
                     .textFieldStyle(.plain)
-                    .onSubmit { if model.capture(draft, source: .popover) { draft = "" } }
+                    .onSubmit {
+                        // The same router as the capture panel and voice: "remind me…", "ask GPT…" and
+                        // questions run as commands, with their result shown in the panel.
+                        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !text.isEmpty else { return }
+                        if let run = model.runInCapturePanel { draft = ""; run(text) }
+                        else if model.capture(text, source: .popover) { draft = "" }
+                    }
             }
             .padding(.horizontal, 14).padding(.vertical, 10)
             Divider()

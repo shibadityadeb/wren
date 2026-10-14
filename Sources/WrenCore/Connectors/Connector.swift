@@ -1,7 +1,7 @@
 import Foundation
 
 public enum ConnectorID: String, Codable, Sendable, CaseIterable, Identifiable {
-    case chatgpt, voice, gmail, notion, macCalendar, googleCalendar, localFiles, shortcuts
+    case chatgpt, voice, gmail, notion, macCalendar, googleCalendar, localFiles, shortcuts, slack
     public var id: String { rawValue }
 }
 
@@ -234,6 +234,10 @@ public enum ConnectorCatalog {
               auth: .planned, capabilities: [.init(name: "List shortcuts", implemented: false, external: false),
                                              .init(name: "Run a shortcut (asks first)", implemented: false, external: false)],
               permissions: [], privacy: "Listing and running will be separate permissions; running always asks.", cleanup: "", hosts: [], isPlanned: true),
+        .init(id: .slack, name: "Slack", systemImage: "number",
+              summary: "Coming soon. Not implemented: Wren can't read or send Slack messages, and nothing else waits on it.",
+              auth: .planned, capabilities: [.init(name: "Read messages you choose", implemented: false, external: true)],
+              permissions: [], privacy: "Nothing is connected or stored.", cleanup: "", hosts: [], isPlanned: true),
     ]
 
     public static func descriptor(_ id: ConnectorID) -> ConnectorDescriptor { all.first { $0.id == id }! }

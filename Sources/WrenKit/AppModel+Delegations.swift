@@ -127,7 +127,7 @@ extension AppModel {
             let started = Date()
             while Date().timeIntervalSince(started) < 20 * 60 {
                 try? await Task.sleep(for: .seconds(2))
-                guard let self, let r = self.asks?.record(id), r.webState?.hasConversation != true else { return }
+                guard let self, !self.stopping, let r = self.asks?.record(id), r.webState?.hasConversation != true else { return }
                 switch await BrowserTabs.chatGPTTabs(bundleID: bundleID) {
                 case .failure(.notPermitted):
                     self.log.notice("conversation detection: browser control not allowed")

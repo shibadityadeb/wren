@@ -24,6 +24,19 @@ public struct ReminderPolicy: Sendable, Equatable {
         return when > now ? when : nil
     }
 
+    /// The heads-up before a deadline: `advance.days` before the deadline's day, at `advance.hour`.
+    /// Only for a task whose reminder follows its deadline (a reminder time the user picked replaces
+    /// it), only for a deadline set at least a day ahead ("call Mum tomorrow" gets no same-day
+    /// heads-up), and never at or after the deadline itself. nil when it doesn't apply or has passed.
+    public static func advanceReminder(for c: Commitment, now: Date, advance: DeadlineAdvance, calendar: Calendar) -> Date? {
+        guard c.status == .pending, c.kind == .commitment, c.recurrence == nil, let deadline = c.deadline, advance.days > 0 else { return nil }
+        guard c.reminderFromDeadline || c.nextReminderAt == nil else { return nil }
+        guard let day = calendar.date(byAdding: .day, value: -advance.days, to: calendar.startOfDay(for: deadline)) else { return nil }
+        let at = calendar.time(minutesAfterMidnight: advance.hour * 60, on: day)
+        guard at > now, at < deadline, c.createdAt < day else { return nil }
+        return at
+    }
+
     /// An item is due iff it is pending, has a reminder time that has arrived,
     /// and that exact reminder has not already been sent.
     public static func isDue(_ c: Commitment, now: Date) -> Bool {

@@ -180,7 +180,10 @@ struct SettingsView: View {
                         Text("Applies to reminders, GPT results, email alerts and digests. Reminders macOS already has keep the setting they were scheduled with until they're next rescheduled.")
                             .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         Stepper("Date-only deadlines remind at \(reminderHour):00", value: $reminderHour, in: 6...21)
-                            .onChange(of: reminderHour) { model.settings.dateOnlyReminderHour = reminderHour }
+                            .onChange(of: reminderHour) { model.settings.dateOnlyReminderHour = reminderHour; model.scheduleReconcile() }
+                        Toggle("Also remind me the day before a deadline", isOn: Binding(get: { model.settings.deadlineDayBefore }, set: { model.setDeadlineDayBefore($0) }))
+                        Text("For a task with a deadline set at least a day ahead: one heads-up the day before at \(reminderHour):00, then the reminder on the day. A reminder time you choose yourself replaces both. Each is scheduled once and withdrawn when the task is done.")
+                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         Text(reminderSyncText).font(.caption).foregroundStyle(model.reminderSync.authorized && model.reminderSync.failed.isEmpty ? Color.secondary : Color.orange)
                         Text("Reminders are handed to macOS ahead of time, so they arrive even when Wren isn't running. macOS may hide banners during Focus or Do Not Disturb. Briefings and check-ins need Wren running.")
                             .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)

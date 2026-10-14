@@ -183,7 +183,7 @@ struct ConnectorDetailView: View {
         case .notion: notionSetup(state)
         case .chatgpt: chatgptSetup(state)
         case .voice: voiceSetup(state)
-        case .localFiles, .shortcuts: EmptyView()
+        case .localFiles, .shortcuts, .slack: EmptyView()
         }
     }
 

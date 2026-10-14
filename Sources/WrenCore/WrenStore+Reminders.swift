@@ -2,8 +2,10 @@ import Foundation
 
 public extension WrenStore {
     /// Creates a reminder from an explicit request. Saved before anything is reported.
+    /// The reminder time is not a deadline: only `deadline` (the user said "by Friday", "before Monday")
+    /// sets one. A deadline, a reminder time and the notifications scheduled for them stay separate.
     func createReminder(text: String, title: String, when: ReminderWhen, source: CaptureSource, id: UUID? = nil,
-                        calendar: Calendar = .current, now: Date = .now) throws -> Commitment {
+                        deadline: ParsedDate? = nil, calendar: Calendar = .current, now: Date = .now) throws -> Commitment {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !title.isEmpty else { throw StoreError.emptyText }
         let c = Commitment(originalText: text, source: source, now: now, timeZone: calendar.timeZone)
@@ -18,8 +20,10 @@ public extension WrenStore {
         switch when {
         case let .once(d):
             guard d > now else { context.delete(c); throw StoreError.invalidTransition(from: .pending, action: "set a reminder in the past") }
-            c.deadline = d
-            c.deadlineHasTime = true
+            if let deadline {
+                c.deadline = deadline.date
+                c.deadlineHasTime = deadline.hasTime
+            }
             c.nextReminderAt = d
             log(c, .reminderScheduled, at: now, note: Self.stamp(d))
         case let .repeating(rule):

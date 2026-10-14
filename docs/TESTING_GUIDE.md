@@ -54,7 +54,8 @@ The log records what Wren did (operation names, states, counts), not your words,
   - While holding: "I'm listening…", a red dot, the moving ring, your words appearing, and the orange microphone dot.
   - On release: the orange dot goes off immediately, then "Transcribing your voice…".
   - Then: the sentence stays in the field, "Working on it…", and finally "Reminder created: Call Sam" with tomorrow 10:00 AM. You don't press Return.
-- [ ] **A spoken task.** Hold ⌥ Space: "I need to finish the report by Friday". Expected: saved as a task due Friday.
+- [ ] **A polite reminder.** Hold ⌥ Space: "can you make a reminder to call Sam tomorrow at 10 AM?". Expected: "Reminder created: Call Sam", tomorrow 10:00 AM. Never a "who should answer?" choice.
+- [ ] **A spoken task.** Hold ⌥ Space: "I need to finish the report by Friday". Expected: "Task created: Finish the report", the deadline Friday, and the reminders: Thursday at your default time (the day before) and Friday.
 - [ ] **A spoken GPT request.** Hold ⌥ Space: "ask GPT to research quantum physics".
   - Expected (website mode, the default): ChatGPT opens in your browser with the request copied, and the panel says it's awaiting your submission.
   - In "run in Wren" mode: "GPT request submitted", later "GPT has finished".
@@ -72,7 +73,12 @@ The log records what Wren did (operation names, states, counts), not your words,
 ## 4. Tasks and reminders
 
 - [ ] `I need to finish the report by Friday`
-  - Expected: a task "Finish the report", due Friday.
+  - Expected: "Task created: Finish the report", "Deadline: Friday", "Reminders: Thursday 10:00 AM (the day before) and Friday 10:00 AM", "Scheduled with macOS".
+  - Settings › Notifications › **Also remind me the day before a deadline** off: only the Friday reminder.
+- [ ] `remind me to ask GPT about quantum physics tomorrow`
+  - Expected: "Reminder created: Ask GPT about quantum physics", tomorrow at your default time. Nothing opens in ChatGPT.
+- [ ] `make a task to follow up with the recruiter`, then `remind me one day before the deadline`
+  - Expected: "No deadline was given, so none is set", then "has no deadline yet" (Wren doesn't invent one). With a task that has a deadline, the second sentence shows a preview for the day before.
 - [ ] `remind me every weekday at 3 PM`
   - Expected: Wren asks "What should I remind you about?". Answer `to stretch`: a repeating weekday reminder.
 - [ ] Set `remind me to water the plants tomorrow at 9 AM`, then type `move that reminder to Sunday`.
@@ -121,7 +127,8 @@ Wren uses the ChatGPT **website** for "ask GPT" by default: it opens chatgpt.com
 - [ ] **Alerts.** Turn on Inbox › "Check for new mail while Wren runs". From another account, send yourself `Urgent: please confirm by today`.
   - Expected: within the check interval (default 5 minutes), one notification "Important email from …" with the subject and "Why: …".
 - [ ] **Snooze.** Choose **Snooze alert for 1 hour** on that alert. Expected: it comes back once about an hour later if it's still unread, and not if you read it meanwhile.
-- [ ] **Opening an alert.** Click an alert. Expected: Wren opens that exact message, and **Open in Gmail** opens the right conversation. The email stays unread in Gmail.
+- [ ] **Opening an alert.** Click an alert. Expected: your browser opens that exact conversation in Gmail, in the account you connected (Gmail may mark it read when it opens, as it always does). **Show in Wren** opens it in Wren instead, without changing Gmail.
+- [ ] **What's in an alert.** Expected: the sender, the subject, the email's first sentence and "Why: …". Inbox settings › **Include the email's first sentence in alerts** off: subject and reason only.
 - [ ] **Mark as read (optional).** In the message, choose **Allow Mark as read…** and approve on Google's page. Then **Mark as read**. Expected: it's read in Gmail too.
 - [ ] Quit Wren and send another urgent email. Expected: no alert until Wren runs again.
 
@@ -129,6 +136,7 @@ Wren uses the ChatGPT **website** for "ask GPT" by default: it opens chatgpt.com
 
 - [ ] Settings › **Voice, GPT and Gmail** shows each tool's real state. Toggle **Play notification sounds** off: the next alert is silent.
 - [ ] Close the window: the bird stays in the menu bar. ⌘Q: the bird and Dock icon go.
+- [ ] After ⌘Q, a reminder set earlier still arrives on time, and no email alert arrives until Wren runs again.
 
 ## Reporting a problem
 
