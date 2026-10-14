@@ -122,8 +122,9 @@
   <p>If you install Ollama and choose a model, Wren sends the text of your captures to it on your own Mac (<code>127.0.0.1</code>) to understand them better. Nothing goes to an outside service.</p>
   <h3>ChatGPT (optional)</h3>
   <ul>
-    <li>You connect by signing in on OpenAI's own page (“Sign in with ChatGPT”). Wren never sees your password.</li>
-    <li>When you ask Wren to send something to GPT, the text of that request is sent to OpenAI with your account's authorization and counted against your ChatGPT plan. Wren asks OpenAI not to store the request (<code>store: false</code>); OpenAI's handling of it is governed by OpenAI's terms and policies.</li>
+    <li>By default, “ask GPT” opens the ChatGPT website in your browser and copies your request to the clipboard (or, if you turn on the experimental option, puts it in the page address). You send it there; it then belongs to your ChatGPT account under OpenAI's terms. Wren never reads your ChatGPT conversations. It stores a conversation's address only if you link it, reading the clipboard only when you click Link conversation.</li>
+    <li>To run requests inside Wren instead, you connect by signing in on OpenAI's own page (“Sign in with ChatGPT”). Wren never sees your password.</li>
+    <li>In that mode, the text of your request is sent to OpenAI with your account's authorization and counted against your ChatGPT plan. Wren asks OpenAI not to store the request (<code>store: false</code>); OpenAI's handling of it is governed by OpenAI's terms and policies.</li>
     <li>Only the request is sent. Wren doesn't attach your items, notes, email or anything else, unless you add specific context yourself in Delegate, which shows exactly what will be sent. Items you've marked private are left out unless you tick them for that request, and text that looks like a password, key or card number is removed unless you choose otherwise.</li>
     <li>Wren's background tasks never use your ChatGPT account. Email is never sent to ChatGPT or any other AI service.</li>
     <li>The answer is saved in Wren's database on your Mac, where you can open it later.</li>

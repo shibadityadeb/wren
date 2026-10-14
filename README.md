@@ -12,7 +12,8 @@ Wren is free and runs on your Mac:
 
 ```
 hold ⌥ Space 🎙 "remind me to call Sam tomorrow at 10 AM"           → a reminder macOS delivers, even after you quit
-hold ⌥ Space 🎙 "ask GPT to research quantum physics carefully"    → GPT runs on your plan; you're told when it's done
+hold ⌥ Space 🎙 "ask GPT to research quantum physics"               → opens it on the ChatGPT website, as a real conversation
+hold ⌥ Space 🎙 "what is gradient descent?"                        → answered by Wren's local AI
 ⌥⇧ Space  ⌨  "do I have an important email from the recruiter?"   → an answer from your inbox, with reasons
 ```
 
@@ -20,10 +21,10 @@ hold ⌥ Space 🎙 "ask GPT to research quantum physics carefully"    → GPT r
 
 - **Captures and reminds.** Natural-language tasks and reminders ("by Friday", "every weekday at 3 PM") are saved locally and scheduled with macOS. Repeating reminders follow daylight saving. Changing or completing one updates its notification, and a restart never duplicates it.
 - **Push-to-talk.** Hold ⌥ Space, speak, let go. Wren shows "I'm listening…", turns the microphone off the moment you release, transcribes on this Mac, shows what it heard and runs it, with no Return press needed. It asks first when it isn't sure it heard you, and it never listens in the background.
-- **Delegates to ChatGPT.** "Ask GPT to …" runs on your ChatGPT plan through Sign in with ChatGPT, not an API key.
-  - Wren tracks the request and notifies you when it finishes. Clicking the notification opens the saved answer.
-  - "Think deeply" asks for high reasoning effort. "Research" lets ChatGPT search the web.
-  - The result page shows what ChatGPT reports it actually did.
+- **Knows which tool you mean.** Naming GPT or ChatGPT always means ChatGPT. A question that names no assistant goes to Wren's local AI. "Continue that research" or "open that in GPT" keeps the earlier request's tool.
+- **Hands work to ChatGPT.** By default "ask GPT …" opens the ChatGPT website with your request, so it becomes a real ChatGPT conversation that you send and continue there.
+  - OpenAI offers no supported way for an app to create that conversation or see its answer. Wren says "awaiting your submission", never "done", and lets you link the conversation to reopen it in one click.
+  - Optionally, **run with connected ChatGPT in Wren**: your plan via Sign in with ChatGPT, not an API key, with the real answer, reasoning effort and web-search evidence stored in Wren. Wren notifies you when it finishes. These results aren't in ChatGPT's history, and Wren never says they are.
 - **Watches your inbox while it runs.** Gmail is read-only by default.
   - Important new mail gets one alert, such as "Important email from Sam", with the reason. You can snooze it.
   - Optional: a morning email digest and quiet hours.
@@ -32,12 +33,13 @@ hold ⌥ Space 🎙 "ask GPT to research quantum physics carefully"    → GPT r
 
 ## Status
 
-Wren is a **preview** (0.10). Every feature below is built and covered by automated tests. "Verified live" means it was also checked against the real service or real macOS; the record is in [docs/MANUAL_TESTS.md](docs/MANUAL_TESTS.md).
+Wren is a **preview** (0.11). Every feature below is built and covered by automated tests. "Verified live" means it was also checked against the real service or real macOS; the record is in [docs/MANUAL_TESTS.md](docs/MANUAL_TESTS.md).
 
 | Feature | Verified live |
 |---|---|
 | Tasks and reminders from your words | Yes, in the running app |
-| ChatGPT requests, high reasoning effort, web search with sources | Yes, on a real ChatGPT plan |
+| Running GPT requests in Wren: high reasoning effort, web search with sources | Yes, on a real ChatGPT plan |
+| Opening GPT requests on the ChatGPT website, linking the conversation | **Not yet. [Help test it](docs/TESTING_GUIDE.md)** |
 | Gmail sync and triage (read-only) | Yes, on a real Google account |
 | Voice with a real microphone, notification delivery and click-through, Gmail Mark as read | **Not yet. [Help test it](docs/TESTING_GUIDE.md)** |
 | Notion, Calendar | Built; needs a sign-in to verify |

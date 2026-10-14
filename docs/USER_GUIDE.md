@@ -111,7 +111,27 @@ If a connector says **Maintainer setup required**, the copy of Wren you have was
 
 ### ChatGPT
 
-**Continue with ChatGPT** opens OpenAI's sign-in page ("Sign in with ChatGPT"). Sign in and approve Wren, including use of your ChatGPT plan. Wren then lists the models your plan offers and shows:
+**Who answers what.**
+- Naming GPT or ChatGPT always means ChatGPT: "ask GPT …", "ask in ChatGPT …", "make a query in ChatGPT about …", "search in GPT for …". Wren never asks "local AI or ChatGPT?" for those, and never answers them with the local model.
+- A question that names no assistant ("what is gradient descent?", "explain this code") goes to Wren's **local AI**. If no local AI is set up, Wren offers the choices instead of picking one. A connected ChatGPT doesn't take those questions over.
+- **Follow-ups keep their tool.** "Continue that research", "ask it to go deeper", "find more sources" and "open that in GPT" refer to the request on screen, or the most recent one. With no earlier request, Wren asks which you mean.
+
+**Two ways to run "ask GPT".** Connectors › ChatGPT › *When you ask GPT* chooses:
+
+1. **Open in ChatGPT (website)** (default).
+   - Wren opens ChatGPT in your browser with your request (also copied to the clipboard). You send it there.
+   - It becomes a normal ChatGPT conversation that you continue and find in ChatGPT's history.
+   - **OpenAI offers no supported way for an app to create that conversation, send it, read the answer or learn its address.** So Wren shows only what it knows: *Opened in ChatGPT* / *Awaiting your submission*, then *Submitted; completion not verified* once you click **I sent it**. It never shows *Completed*.
+   - To return to the conversation in one click, copy its address in ChatGPT (`https://chatgpt.com/c/…`) and choose **Link conversation**. Wren reads the clipboard only when you click, and accepts only a real ChatGPT conversation link.
+   - After that, **Open in ChatGPT** and "open that in GPT" go to that exact conversation. "Continue that research" opens it and copies the follow-up for you to paste.
+   - Without a link, a follow-up starts a new ChatGPT chat that quotes your earlier request, and Wren says so.
+   - *Experimental:* Connectors › ChatGPT › **Fill in my request automatically** uses a `chatgpt.com/?q=…` link. OpenAI doesn't document it and has changed it, so it's off until you press **Check it in my browser…** and report what you saw. Even then, Wren records it as *opened*, never *sent*.
+2. **Run with connected ChatGPT in Wren.**
+   - Sign in with ChatGPT (below). Wren sends the request through your plan and shows the real streamed answer and completion here, with a notification.
+   - The request and answer live in Wren. They aren't a ChatGPT conversation and don't appear in ChatGPT's history, so the result's main action is **Open result in Wren**, and **Open ChatGPT website** opens only the site.
+   - You can switch a single website request to this mode with **Run in Wren instead**. Wren never switches on its own.
+
+**Signing in (for mode 2).** **Continue with ChatGPT** opens OpenAI's sign-in page ("Sign in with ChatGPT"). Sign in and approve Wren, including use of your ChatGPT plan. Wren then lists the models your plan offers and shows:
 
 | State | Meaning |
 |---|---|
@@ -122,20 +142,19 @@ If a connector says **Maintainer setup required**, the copy of Wren you have was
 | Usage limit reached | Your plan's allowance for apps is used up for now. **Manage usage** opens ChatGPT's usage page |
 | Temporarily unavailable | ChatGPT or your connection had a problem; nothing was removed |
 
-Say or type "search in GPT: explain quantum physics and give me a few beginner resources", "ask GPT to brainstorm names for my project", or use **Delegate**. Wren treats it as a delegation, not a task or a note:
-
-1. It sends exactly your request (without "ask GPT" and "let me know when it's done") using your ChatGPT plan, once. A repeated Return or voice event doesn't send it twice.
+**What runs in Wren (mode 2).**
+1. Wren sends exactly your request (without "ask GPT" and "let me know when it's done") using your ChatGPT plan, once. A repeated Return or voice event doesn't send it twice.
 2. The request is saved as **Running** first, so it keeps going if you close the panel and stays in your history after a restart.
-3. When ChatGPT finishes, Wren tells you once: "GPT has finished · Research: quantum physics", with **View result**. Clicking it (or the entry in Overview › GPT requests or Delegate) opens the saved result: your words, what was sent, the model requested and reported, the times, and the answer exactly as returned.
-4. Failures say why (not connected, permission, usage limit, network, Wren closed mid-request). **Retry** reruns the same entry; a completed request is never re-sent.
+3. When it finishes, Wren tells you once: "GPT has finished · Research: …". Clicking it opens the saved result: your words, what was sent, the mode, the model requested and reported, the times, and the answer exactly as returned.
+4. Failures say why. **Retry** reruns the same entry; a completed request is never re-sent.
+5. If you're not signed in, Wren offers **Connect ChatGPT** or **Open in ChatGPT website instead**. It never answers with the local model.
 
-**Thinking and research.** "Ask GPT to think deeply about …", "… use high reasoning effort" or "investigate this carefully" asks the model for **high reasoning effort** (or the strongest level the model's list allows). "Ask GPT to research …", "find sources for …" or "the latest …" also offers ChatGPT's **web search** tool, which plan sharing allows subject to your model and account or workspace policy. The result page shows what was asked for and what ChatGPT reports actually ran: the reasoning effort, how many web searches it made and the sources it cited. If it didn't search, the page says so; Wren never claims research that didn't happen. If your plan refuses web search or the reasoning setting, the request fails with that reason and **Run with standard settings** reruns it without them, only if you choose. This is the Responses API on your plan, not the ChatGPT website's Thinking or Deep Research modes, and Wren doesn't claim it is.
+**Thinking and research.**
+- Your instruction is always kept in the request: "think deeply", "research", "use Deep Research".
+- In mode 2, "think deeply" asks for high reasoning effort, and "research" offers ChatGPT's web search, subject to your plan. The result shows what ChatGPT reports actually ran.
+- On the website, ChatGPT decides. Wren can't switch on its Thinking or Deep Research modes, and says so when you ask for them; pick them in ChatGPT's composer.
 
-The plan API is called with storage off, so the request doesn't appear in your ChatGPT history and there's no link to a ChatGPT conversation; Wren doesn't invent one. **Open ChatGPT** just opens ChatGPT. Nothing from Wren (items, notes, email) is attached unless you add it yourself in Delegate, which shows exactly what will leave your Mac; private items need ticking and detected secrets are replaced with "[removed]". Wren never switches to paid API billing.
-
-Wren uses your plan only for requests you start and confirm; background tasks never use it. Wren can't see your ChatGPT conversations, memories or custom instructions. Tokens stay in a private file in Wren's data folder that only your macOS account can read (not the Keychain, so there are no Keychain password prompts) and never appear on screen, in logs, exports or backups. **Disconnect** revokes the sign-in with OpenAI and deletes the tokens.
-
-**Fallback: copy and open.** Under Connectors › ChatGPT you can also allow copying a prompt and opening ChatGPT in your browser or the ChatGPT app. You paste and send it yourself, then paste the answer back into Delegate. This works without signing in.
+**Privacy.** Only your request is sent or copied; nothing else from Wren is attached unless you add it yourself in Delegate. Wren uses your plan only for requests you start; background tasks never use it. Wren can't see your ChatGPT conversations, memories or custom instructions. Tokens stay in a private file in Wren's data folder that only your macOS account can read, and never appear in logs, exports or backups. **Disconnect** revokes the sign-in with OpenAI and deletes the tokens.
 
 ### Voice: push-to-talk
 

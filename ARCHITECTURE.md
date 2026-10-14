@@ -6,6 +6,8 @@
 > 3. **Data:** a single `Commitment` model holds the verbatim `originalText`, a `kind` (commitment, idea, question, waiting, research, unsorted) and a `processing` state. This replaces a separate `Capture` entity. Only `kind == .commitment` gets automatic reminders. A separate `Capture` can be split out later if Phase 5 needs it.
 > 4. **UI:** the menu bar uses `NSStatusItem` + `NSPopover` rather than `MenuBarExtra`, so a notification tap can open the popover programmatically.
 
+> **0.11.0 (2026-10-14).** "Ask GPT" goes to the ChatGPT website by default (a handoff), the plan API becomes the explicit "Run with connected ChatGPT in Wren" mode, questions naming no assistant go to the local AI, and follow-ups keep their tool (§46). Schema v8.
+>
 > **0.10.0 (2026-10-13).** Voice is explicitly activated only (§40, the wake-word listener is gone), GPT thinking and research record requested versus reported effort and web-search evidence (§39), and every command goes through `ExecutionRouter` (§45). Schema v7.
 >
 > **0.9.0 (2026-10-11).** §35–§44 are rewritten as built: file-based credentials (no Keychain), Sign in with ChatGPT, tracked GPT delegations, Gmail inbox intelligence, Notion MCP, the continuous "Hey Wren" listener (removed in 0.10, see §40) and schema v6. §16 and §17 are the original plans and are superseded by §37–§39. docs/AUDIT_REPORT.md lists what is verified live.
@@ -680,7 +682,7 @@ Single instance (`InstanceGuard` + `flock` on `Wren.lock`), one status item crea
 
 ## 43. Schema history
 
-v4: `Commitment.isPrivate`, `DelegationRecord`. v5: `recurrenceRaw`, `notificationIDsRaw`. v6 (0.9.0): `DelegationRecord.original, channelRaw, requestedModel, reportedModel, startedAt, completedAt, attempts, failureRaw, notifiedAt, seenAt, providerURL, includesPrivate`; new statuses `running` and `partial`. v7 (0.10.0): `DelegationRecord.kindRaw, requestedEffort, reportedEffort, webSearchRequested, webSearchCalls, sourcesJSON`. Every change is additive (lightweight migration); a consistent backup is taken before a new schema first opens data, and a newer schema is refused by older Wren (`Wren.schema` marker). Verified on a copy of a real 0.8.0 store.
+v4: `Commitment.isPrivate`, `DelegationRecord`. v5: `recurrenceRaw`, `notificationIDsRaw`. v6 (0.9.0): `DelegationRecord.original, channelRaw, requestedModel, reportedModel, startedAt, completedAt, attempts, failureRaw, notifiedAt, seenAt, providerURL, includesPrivate`; new statuses `running` and `partial`. v7 (0.10.0): `DelegationRecord.kindRaw, requestedEffort, reportedEffort, webSearchRequested, webSearchCalls, sourcesJSON`. v8 (0.11.0): `DelegationRecord.webStateRaw, webMethodRaw, parentID`. Every change is additive (lightweight migration); a consistent backup is taken before a new schema first opens data, and a newer schema is refused by older Wren (`Wren.schema` marker). Verified on a copy of a real 0.8.0 store.
 
 ## 44. Standing-rule scope
 
@@ -689,3 +691,32 @@ Rules that let Wren read external data on its own name the scheduler they speak 
 ## 45. Execution router (0.10)
 
 `ExecutionRouter.operation(for:)` (WrenCore, pure) names one operation before anything runs: `CreateTask`, `CreateReminder`, `QueryStoredItems`, `ChangeItem`, `DelegateToChatGPT`, `SearchGmail`, `OpenEmail`, `MarkEmailRead`, `QueryCalendar`, `OpenDelegationResult`, `SaveNote`, `GeneralQuestion`, `Capture`, `ClarifyIntent`. It layers on the existing deterministic classifiers (`IntentRouter`, `ReminderCommand`, `ContextResolver`, `EmailQuestion`, `CalendarQuestion`) and adds email actions, result lookup and clarification for empty assistant requests. `AppModel.submitFromCapture` (typed, panel, voice, debug URL) runs the operation through its own subsystem: reminders via `BuiltInAction.createReminder`, item changes as confirmed proposals, GPT via `AskService`, Gmail via the broker. `MarkEmailRead` from words only opens the message; the provider change needs the button, its confirmation and the `gmail.modify` grant. Each run stores an `ExecutionResult` (operation, success, entity ID, error, needs-user) and logs it without user text. `SubmissionGuard` drops the same channel+text while it runs or within 3 s after, and the same guard keys notification actions (Done, Snooze, Mark as read, Snooze alert) so a duplicated action changes state once. Nothing the router reads (model output, email text, GPT answers) can grant a permission; authorization stays in the broker.
+
+## 46. ChatGPT website vs. ChatGPT in Wren (0.11)
+
+**Routing** (deterministic, WrenCore):
+- `IntentRouter.aiRequest` matches the fixed phrasings and, as a general rule, any sentence naming GPT/ChatGPT as a destination ("in/on/with/via/using/through/into GPT", `destinationRequest`). That sentence goes to ChatGPT, with only the destination and the framing around it removed. "Email the GPT team" names it as a topic and doesn't match.
+- Questions naming no assistant are `generalQuestion` → `AskLocalAI`.
+- `DelegationFollowUp.detect` ("continue that research", "ask it to go deeper", "find more sources", "open that in GPT") runs before new-request detection, so "continue that research in ChatGPT" is a follow-up, not a new request about continuing.
+
+**Two modes** (`ChatGPTMode`, setting *When you ask GPT*):
+- **`web`** (default): the ChatGPT website, through the existing broker action `chatgpt.handoff` (permission `chatgptHandoff`, now granted by default and revocable in Connectors).
+  - The record (`destination = .chatgptHandoff`) is saved as `prepared`. Then the prompt is copied (always) and `chatgpt.com` opened, and it becomes `awaitingSubmission`, or `openedInChatGPT` with the experimental link. If either step fails it becomes `failedToOpen`.
+  - **I sent it** → `submittedUnverified`; a pasted link validated by `ChatGPTWeb.conversationURL` → `conversationLinked`, stored in `providerURL`.
+  - `DelegationStatus` stays `handedOff` (not final), so a handoff is never announced, never notified and never shown as *Completed*.
+- **`inWren`**: the Sign in with ChatGPT Responses path (§39), labelled *Run with connected ChatGPT in Wren*.
+  - Its records say they aren't ChatGPT conversations. The primary action is *Open result in Wren*; *Open ChatGPT website* opens only the site.
+  - If not signed in, the card offers Connect or *Open in ChatGPT website instead*, never the local model.
+  - Switching a request between modes is an explicit user action (*Run in Wren instead*); Wren never switches silently.
+
+**Why a handoff.** OpenAI documents no supported way for an app to create a ChatGPT website conversation, submit to it, read its answer or learn its URL. Sign in with ChatGPT explicitly "does not grant access to their ChatGPT conversations", and the plan route requires `store: false` and rejects `conversation`.
+- `chatgpt.com/?q=` is undocumented and community-reported. Tenable (TRA-2025-22) reported that it auto-submitted, and OpenAI then added "auto-submit protections based on the sec-fetch-site header", so its behaviour varies.
+- Wren therefore uses `?q=` only when the user opts in after checking it with **Check it in my browser…** (`PrefillCheck`). Even then it records *opened*, never *sent*, copies the prompt as well, and falls back to clipboard-only above 1,500 characters or for the ChatGPT Mac app.
+- A browser extension that watched chatgpt.com to learn conversation URLs or completion was considered and **not built**: it would read the user's ChatGPT pages, depends on a private and changing UI, and needs a separate extension install and consent per browser. The user links the conversation instead (clipboard read only on click).
+
+**Follow-ups.** `followUpTarget` is the delegation on screen, else the most recent assistant request.
+- Web: a linked conversation opens directly, with only the new instruction copied to paste. Unlinked, a new chat opens with `ChatGPTWeb.followUpPrompt` quoting the earlier request, and Wren says so.
+- In Wren: the follow-up runs in Wren with the earlier request and answer included in `input` (the plan route has no `previous_response_id`).
+- Local: continues with the local AI. "Open that in GPT" on a local answer hands that request to the website.
+- With no earlier request, Wren asks which one.
+
