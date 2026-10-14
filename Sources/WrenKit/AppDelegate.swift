@@ -180,22 +180,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
     }
 
     /// Key-down of the push-to-talk shortcut. Key repeat while held does nothing (the session ignores it).
+    /// When the current push-to-talk press began.
+    private var pttPressedAt: Date?
+    /// Whether the push-to-talk key's physical state can be read (it read as down at key-down).
+    /// When it can't, Wren relies on the modifier state and the timing below.
+    private var pttKeyStateReadable = false
+    /// A press shorter than this is a tap: Wren keeps listening hands-free instead of stopping.
+    static let tapThreshold: TimeInterval = 0.6
+
+    private func pttKeyIsDown() -> Bool {
+        CGEventSource.keyState(.combinedSessionState, key: CGKeyCode(model.settings.voiceHotKey.keyCode))
+    }
+    private var pttModifiersHeld: Bool { NSEvent.modifierFlags.isSuperset(of: heldModifiers) }
+
     private func pushToTalkDown() {
         guard model.settings.voiceEnabled else { return }
-        appLog.notice("push-to-talk down")
+        // Pressed again during a hands-free recording: that's "stop".
+        if voice.phase == .listening(.button) { appLog.notice("push-to-talk pressed again: stop"); voice.release(); return }
+        if voice.isCapturing { return }   // key repeat while held
+        pttPressedAt = Date()
+        pttKeyStateReadable = pttKeyIsDown()
+        appLog.notice("push-to-talk down (key state readable: \(self.pttKeyStateReadable, privacy: .public))")
         startOrStopVoice(.hold)
     }
 
-    /// Key-up of the push-to-talk key. Releasing the modifier first is caught by `watchHeldKeys`.
+    /// macOS reported the push-to-talk key going up. On some setups that report arrives while the
+    /// keys are still held (seen live: 80–330 ms after key-down, as the panel takes focus), so it's
+    /// checked rather than trusted.
     private func pushToTalkUp() {
-        // Only a hold (or a hold waiting on the permission prompt) ends on key-up; a Voice-button
-        // recording isn't cut short by an unrelated ⌥ Space release.
         switch voice.phase {
-        case .listening(.hold), .requestingPermission:
-            appLog.notice("push-to-talk up")
-            voice.release()
+        case .requestingPermission: voice.release()
+        case .listening(.hold): holdMayHaveEnded("key-up event")
         default: break
         }
+    }
+
+    /// The keys look released. Still physically down: ignore. A tap: keep listening hands-free.
+    /// Otherwise: the user let go, so stop and transcribe.
+    private func holdMayHaveEnded(_ why: String) {
+        guard case .listening(.hold) = voice.phase else { return }
+        if pttKeyStateReadable, pttModifiersHeld, pttKeyIsDown() {
+            appLog.notice("push-to-talk: ignored \(why, privacy: .public); keys still held")
+            return
+        }
+        let held = Date().timeIntervalSince(pttPressedAt ?? .distantPast)
+        if held < Self.tapThreshold {
+            appLog.notice("push-to-talk: short press (\(Int(held * 1000), privacy: .public) ms, \(why, privacy: .public)); listening hands-free until a pause")
+            voice.continueHandsFree()
+            return
+        }
+        appLog.notice("push-to-talk up (\(why, privacy: .public), held \(Int(held * 1000), privacy: .public) ms)")
+        voice.release()
     }
 
     /// The shortcut, the Voice buttons and the menu all go through here.
@@ -250,9 +285,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
             voiceTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated {
                     guard let self else { return }
-                    if trigger == .hold, !NSEvent.modifierFlags.isSuperset(of: needed) {
-                        appLog.notice("push-to-talk modifier released")
-                        self.voice.release(); return
+                    if trigger == .hold {
+                        // Letting go of either key ends a hold (checked here, not only on macOS's key-up event).
+                        if !NSEvent.modifierFlags.isSuperset(of: needed) { self.holdMayHaveEnded("modifier released"); return }
+                        if self.pttKeyStateReadable, !self.pttKeyIsDown() { self.holdMayHaveEnded("key released"); return }
                     }
                     self.voice.tick()
                 }

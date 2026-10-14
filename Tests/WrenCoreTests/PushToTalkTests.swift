@@ -313,4 +313,49 @@ final class VoiceTests: XCTestCase {
         let close = try XCTUnwrap(body.range(of: "closeMicrophone()")), end = try XCTUnwrap(body.range(of: "endAudio()"))
         XCTAssertLessThan(close.lowerBound, end.lowerBound, "microphone closed before the recogniser finalises")
     }
+
+    // MARK: A press that ends almost at once (a tap, or a spurious key-up)
+
+    func testAShortPressKeepsListeningHandsFreeAndEndsOnAPause() async {
+        let (v, s, c) = make()
+        var heard: [String] = []
+        v.onTranscript = { t, _ in heard.append(t) }
+        await v.press(.hold)
+        v.continueHandsFree()
+        XCTAssertEqual(v.phase, .listening(.button), "still recording")
+        XCTAssertTrue(v.isMicrophoneOpen)
+        s.say("remind me to call Sam tomorrow at 10 AM")
+        c.t += 1; v.tick()
+        XCTAssertEqual(v.phase, .listening(.button), "mid-sentence")
+        c.t += 1; v.tick()
+        XCTAssertEqual(v.phase, .transcribing, "a pause ends it")
+        XCTAssertFalse(v.isMicrophoneOpen)
+        s.deliver("Remind me to call Sam tomorrow at 10 AM.")
+        XCTAssertEqual(heard, ["Remind me to call Sam tomorrow at 10 AM."])
+    }
+
+    func testHandsFreeEndsOnAnotherPressAndSilenceCancels() async {
+        let (v, s, c) = make()
+        await v.press(.hold); v.continueHandsFree()
+        s.say("what am I waiting for")
+        await v.press(.button)            // the shortcut pressed again maps to Stop
+        XCTAssertEqual(v.phase, .transcribing)
+        let (v2, s2, c2) = make()
+        await v2.press(.hold); v2.continueHandsFree()
+        c2.t += 8; v2.tick()
+        XCTAssertEqual(v2.phase, .cancelled(.nothingHeard)); XCTAssertFalse(s2.isRunning)
+        _ = c
+    }
+
+    func testHandsFreeOnlyFromAHoldThatsListening() async {
+        let (v, _, _) = make()
+        v.continueHandsFree()
+        XCTAssertEqual(v.phase, .idle)
+        await v.press(.button)
+        v.continueHandsFree()
+        XCTAssertEqual(v.phase, .listening(.button))
+        await v.press(.hold); v.release()
+        v.continueHandsFree()
+        XCTAssertEqual(v.phase, .transcribing, "after release it's too late to switch")
+    }
 }
