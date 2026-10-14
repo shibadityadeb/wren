@@ -1,6 +1,6 @@
 # Wren user guide
 
-Everything Wren does, in detail. For a quick start see the [README](../README.md); to try it with your own accounts, follow [TESTING_GUIDE.md](TESTING_GUIDE.md).
+Everything Wren does, in detail. For a one-page list of keys and phrases, see [SHORTCUTS.md](SHORTCUTS.md). For a quick start see the [README](../README.md); to try it with your own accounts, follow [TESTING_GUIDE.md](TESTING_GUIDE.md).
 
 ## Using Wren
 

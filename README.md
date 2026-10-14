@@ -64,7 +64,8 @@ Upgrading keeps your data in `~/Library/Application Support/Wren` and backs it u
 2. **Connectors › ChatGPT › Continue with ChatGPT**: sign in and approve plan usage.
 3. **Connectors › Gmail › Connect Google**: approve read-only Gmail.
 4. **Hold ⌥ Space**, say "ask GPT to explain black holes in two sentences", and let go. Allow the microphone and speech recognition the first time. You'll get a notification when GPT is done.
-5. **Settings › Voice, GPT and Gmail** shows how each tool is set up, along with alert frequency, quiet hours, digest time and sounds.
+5. Keep the [shortcuts and commands cheat sheet](docs/SHORTCUTS.md) handy.
+6. **Settings › Voice, GPT and Gmail** shows how each tool is set up, along with alert frequency, quiet hours, digest time and sounds.
 
 ## Try it for real
 
@@ -94,6 +95,7 @@ The full policy is at [website/privacy](website/privacy/index.html), and every d
 
 | Read this | For |
 |---|---|
+| [Shortcuts and commands](docs/SHORTCUTS.md) | One-page cheat sheet: keys, things to say, notification buttons |
 | [User guide](docs/USER_GUIDE.md) | Everything in detail: capture, reminders, voice, ChatGPT, Gmail, Calendar, Notion, local AI, permissions, your data |
 | [Testing guide](docs/TESTING_GUIDE.md) | Trying Wren with your own accounts |
 | [Changelog](CHANGELOG.md) | What changed in each version |
