@@ -15,7 +15,23 @@ touched. Debug URLs exist only in debug builds. Read results with:
 /usr/bin/log stream --style compact --predicate 'subsystem == "com.shibadityadeb.wren" AND processImagePath CONTAINS "Wren Dev.app"'
 ```
 
-## Last pass: 2026-10-14, branch `fix/push-to-talk` (0.10.1), macOS 26.1, Apple Silicon
+## Last pass: 2026-10-14, branch `feat/chatgpt-web-handoff` (0.11.0)
+
+Automated: `swift test`, 353 tests, 0 failures, 4 skipped. Routing, conversation-link validation, launch links,
+honest handoff states and card choices are unit-tested. The browser itself isn't: opening ChatGPT and
+copying the request were not run from automation on this Mac, because the maintainer was using it
+(the browser and clipboard are theirs).
+
+| ID | Area | Test | Status |
+|---|---|---|---|
+| W-1 | Routing | "What is gradient descent?", "Help me understand this concept." → AskLocalAI, answered by the local model in Wren Dev (Ollama present) | **Passed live** in Wren Dev |
+| W-2 | Follow-ups | "Open that in GPT." / "Continue that research." resolve to the most recent request and keep its tool (here: a local answer continued with the local AI) | **Passed live** in Wren Dev; the website branch of "open that in GPT" is mocked only |
+| W-3 | Website handoff | Scenarios 1, 3, 4, 5, 8 in a real browser (opens chatgpt.com, request copied, Awaiting your submission, I sent it, Link conversation, open the exact conversation) | **Not run**: needs the user's browser and ChatGPT session (steps M-WEB) |
+| W-4 | `?q=` link | What `chatgpt.com/?q=` does today (fill in / send / nothing) | **Not run**: can only be judged by a person looking at their browser; Wren keeps it off until they report it |
+| W-5 | In Wren | Scenario 7 (result stays in Wren, labelled) | Mocked (UI labels); the plan API path itself passed live on 2026-10-13 (E-GPT-1/2) |
+| W-6 | Not signed in | Scenario 6: Connect / Open in ChatGPT website instead, never the local model | Mocked (card logic) |
+
+## Previous pass: 2026-10-14, branch `fix/push-to-talk` (0.10.1), macOS 26.1, Apple Silicon
 
 Automated: `swift test`, 344 tests, 0 failures, 4 skipped (the push-to-talk state machine runs against a
 fake microphone and fake permissions). Live: a **Wren Dev** build driven by debug URLs. No microphone was
@@ -168,6 +184,25 @@ Run with `scripts/try-wren.sh` (Wren Dev) or the installed app, and keep its log
 13. System Settings › Privacy & Security › Microphone › turn Wren off, then hold ⌥ Space. Expected: "Microphone access is off" with **Open Privacy Settings**, and no recording.
 14. Settings: typed capture shows ⌥⇧ Space and opens the panel for typing. Connectors › Voice shows "Hold ⌥ Space" and can change or turn off the shortcut.
 15. ⌘Q while holding ⌥ Space: the dot goes off and Wren quits.
+
+### M-WEB: ChatGPT website and routing (needs a browser signed in to ChatGPT)
+
+The scenarios are the same as docs/TESTING_GUIDE.md §5:
+1. `Ask ChatGPT what gradient descent is`.
+   - Expected: no provider question. The browser opens chatgpt.com, the request is on the clipboard, and the card shows "Awaiting your submission".
+   - Delegate history has one entry with Mode "ChatGPT website (handoff…)".
+2. `What is gradient descent?`. Expected: local AI answers. Without local AI, the choices are offered and nothing is sent.
+3. `Ask GPT to research this topic: the history of the transistor`. Expected: "Research the history of the transistor." (or similar) is what's copied; the word "research" is kept.
+4. Send it in ChatGPT, copy the conversation address, then in Wren: **I sent it**, then **Link conversation**.
+   - Expected: "Submitted; completion not verified", then "Conversation linked", with the link shown on the request page.
+   - A non-conversation address is refused.
+5. `Continue that research in ChatGPT`. Expected: that exact conversation opens, and "Please continue this research and go further." is on the clipboard.
+6. `Open that in GPT`. Expected: the exact conversation opens. With an unlinked request: chatgpt.com opens, and the reply says no link is saved.
+7. Switch to *Run with connected ChatGPT in Wren*, disconnect ChatGPT, then `ask GPT what a monad is`.
+   - Expected: Connect ChatGPT / Open in ChatGPT website instead. No local answer.
+   - Connect, and ask again. Expected: the result in Wren, Mode "Run with connected ChatGPT in Wren…", no conversation button.
+8. Press Return twice fast on a website request. Expected: one tab and one record. **Retry**/**Open in ChatGPT** reuses the record. No request is ever shown as Completed.
+9. Connectors › ChatGPT › **Check it in my browser…** and record what `?q=` did. Only if it was filled in, turn on the experimental option and repeat step 1. Expected: the request is already in ChatGPT's box, and the status is "Opened in ChatGPT".
 
 ### M-NOTION, M-CAL
 As before: Connectors › Notion › Connect Notion (search, read, create after confirming, disconnect);

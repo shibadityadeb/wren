@@ -56,8 +56,8 @@ The log records what Wren did (operation names, states, counts), not your words,
   - Then: the sentence stays in the field, "Working on it…", and finally "Reminder created: Call Sam" with tomorrow 10:00 AM. You don't press Return.
 - [ ] **A spoken task.** Hold ⌥ Space: "I need to finish the report by Friday". Expected: saved as a task due Friday.
 - [ ] **A spoken GPT request.** Hold ⌥ Space: "ask GPT to research quantum physics".
-  - Expected: "GPT request submitted", and later a "GPT has finished" notification.
-  - If ChatGPT isn't connected: "ChatGPT isn't connected" with **Connect ChatGPT**, and your request is still shown.
+  - Expected (website mode, the default): ChatGPT opens in your browser with the request copied, and the panel says it's awaiting your submission.
+  - In "run in Wren" mode: "GPT request submitted", later "GPT has finished".
 - [ ] **A spoken question.** Hold ⌥ Space: "what am I waiting for?". Expected: the answer from your items.
 - [ ] **A follow-up question.** Hold ⌥ Space: "remind me every weekday at 3 PM".
   - Expected: "One quick question: What should I remind you about?".
@@ -82,19 +82,36 @@ The log records what Wren did (operation names, states, counts), not your words,
   - Click it: Wren opens on that item. Then try **Done** and **Remind me in 1 hour** on another reminder.
 - [ ] Reopen Wren. Expected: no second notification for the same reminder.
 
-## 5. GPT (uses your ChatGPT plan's allowance)
+## 5. GPT and local AI
 
-- [ ] `ask GPT to think deeply about whether I should learn Rust or Go first`
-  - Expected: the card says it asks for high reasoning effort and runs.
-  - You can close the panel. A notification "GPT has finished" with "Deep thinking: …" appears.
-  - Click it: the exact result opens. Reasoning should read "high (asked for and reported)".
-- [ ] `ask GPT to research the latest stable Swift release and cite sources`
-  - Expected: the result shows "Web search: Used: N searches" and a "Sources ChatGPT cited" list.
-  - If ChatGPT didn't search, it says so.
-  - Find in answer highlights words.
-- [ ] Press Return twice quickly on a new GPT request. Expected: only one request in Delegate.
-- [ ] Turn Wi-Fi off and ask GPT something. Expected: Failed, with a reason. Turn Wi-Fi on and press **Retry**: it completes on the same entry.
-- [ ] `Ask GPT.` with nothing else. Expected: Wren asks what ChatGPT should do and sends nothing.
+Wren uses the ChatGPT **website** for "ask GPT" by default: it opens chatgpt.com in your browser with your request and copies it to the clipboard. Your browser should be signed in to ChatGPT.
+
+- [ ] **Scenario 1: an explicit GPT request.** `Ask ChatGPT what gradient descent is`.
+  - Expected: no "who should answer?" question. ChatGPT opens in your browser, and the card says "Awaiting your submission".
+  - Paste (⌘V) and send it in ChatGPT, then choose **I sent it**. Expected: "Submitted; completion not verified", never "Completed".
+- [ ] **Link the conversation.** In ChatGPT, copy the address bar (`https://chatgpt.com/c/…`). In Wren choose **Link conversation**. Expected: "Conversation linked".
+  - Copying something else (the ChatGPT home page, another site) is refused with an explanation.
+- [ ] **Scenario 5: open that in GPT.** `open that in GPT`. Expected: your browser opens that exact conversation.
+  - Without a link it opens ChatGPT and says the link is missing.
+- [ ] **Scenario 4: continue in ChatGPT.** `continue that research in ChatGPT`. Expected: the linked conversation opens, and the follow-up is on the clipboard to paste there.
+  - Without a link, a new ChatGPT chat opens with a request that quotes your earlier one, and Wren says so.
+- [ ] **Scenario 3: research.** `ask GPT to research this topic: the history of the transistor`. Expected: the instruction "research" is kept in what's copied or filled in.
+  - `ask ChatGPT to use Deep Research to investigate this` adds a note that Wren can't turn on Deep Research; choose it in ChatGPT yourself.
+- [ ] **Scenario 2: no assistant named.** `What is gradient descent?`. Expected: Wren's local AI answers.
+  - If no local AI is set up, you get choices (Ask local AI / Open in ChatGPT / Save as a note), not an automatic ChatGPT request.
+- [ ] **Follow-ups keep their tool.** After a local answer, `continue that research` continues with local AI. After an in-Wren GPT answer, it continues in Wren.
+- [ ] **Experimental prefill (optional).** Connectors › ChatGPT › **Check it in my browser…**. Report what you saw: filled in and sent / filled in, not sent / empty.
+  - Only if it was filled in can you turn on **Fill in my request automatically**. Then an `ask GPT …` request opens ChatGPT with the request already there, and the status reads "Opened in ChatGPT", not "sent".
+- [ ] **Scenario 7: run with connected ChatGPT in Wren** (uses your plan's allowance). Connectors › ChatGPT › When you ask GPT › *Run with connected ChatGPT in Wren*. Then `ask GPT to think deeply about whether I should learn Rust or Go first`.
+  - Expected: a "GPT has finished" notification, and the result opens in Wren with Mode "Run with connected ChatGPT in Wren…".
+  - There's no "Open conversation" button; **Open ChatGPT website** only opens the site.
+  - `ask GPT to research the latest stable Swift release and cite sources` shows the web searches and sources ChatGPT reports.
+- [ ] **Scenario 6: not signed in.** In that mode, disconnect ChatGPT and `ask GPT what a monad is`.
+  - Expected: **Connect ChatGPT** and **Open in ChatGPT website instead**. Never an answer from the local model.
+- [ ] **Scenario 8: no duplicates.** Press Return twice quickly on a GPT request.
+  - Expected: one browser tab (website mode) or one request in Delegate (in-Wren mode).
+  - Retry reruns the same entry. Opening the browser or copying is never shown as completed.
+- [ ] `Ask GPT.` with nothing else. Expected: Wren asks what ChatGPT should do and opens nothing.
 
 ## 6. Gmail (while Wren runs)
 

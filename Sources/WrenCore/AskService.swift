@@ -18,7 +18,8 @@ public enum AskOutcome: Equatable, Sendable {
 
 /// The capture panel's state for "Ask ChatGPT" (or a general question).
 public struct AskCard: Equatable, Sendable {
-    public enum Destination: Equatable, Sendable { case chatgpt, local, choose }
+    /// `chatgptWeb`: the ChatGPT website (handoff). `chatgpt`: run with connected ChatGPT in Wren.
+    public enum Destination: Equatable, Sendable { case chatgptWeb, chatgpt, local, choose }
     public enum Phase: Equatable, Sendable {
         case ready
         /// Sent; the request runs in the background and Wren announces when it finishes.
@@ -32,6 +33,8 @@ public struct AskCard: Equatable, Sendable {
         case usageLimit(String)
         case needsReview(String)
         case unsupported(String)
+        /// Handed to the ChatGPT website: what Wren knows about it, never "done".
+        case handedOff(WebHandoffState, recordID: UUID)
         case failed(String, retryable: Bool)
         public var isSending: Bool { if case .sending = self { true } else { false } }
     }
@@ -54,9 +57,10 @@ public struct AskCard: Equatable, Sendable {
     public var primary: AskAction? {
         switch phase {
         case .ready:
+            // A question that names no assistant is the local model's; without one the user picks.
             guard destination == .choose else { return .run(destination) }
-            // ChatGPT when you're connected; the local model only when ChatGPT isn't available.
-            return .run(chatgptReady || !localAvailable ? .chatgpt : .local)
+            return localAvailable ? .run(.local) : nil
+        case .handedOff: return nil
         case .sending, .answered, .partial, .connecting: return nil
         case .notConnected: return .connect
         case .reconnect: return .connect
@@ -73,6 +77,14 @@ public enum AskAction: Equatable, Sendable {
     case run(AskCard.Destination), connect, allowPlan, manageUsage, openDelegate, openAnswer, copyAnswer, saveAsNote
     /// Run again without web search or the reasoning setting ChatGPT refused.
     case runStandard
+    /// The ChatGPT website: the linked conversation, or the site with the request copied again.
+    case openInChatGPT
+    /// "I sent it" (the user's word; recorded as unverified).
+    case markSent
+    /// Link the conversation whose address the user copied in ChatGPT.
+    case linkConversation
+    /// The user explicitly chooses to run this request in Wren with connected ChatGPT instead.
+    case runInWren
     public func title(_ card: AskCard) -> String {
         switch self {
         case .run(.chatgpt): if case .ready = card.phase { return "Ask ChatGPT" } else { return "Try again" }
@@ -86,6 +98,11 @@ public enum AskAction: Equatable, Sendable {
         case .copyAnswer: return "Copy answer"
         case .saveAsNote: return "Save as a note instead"
         case .runStandard: return "Run with standard settings"
+        case .run(.chatgptWeb): return "Open in ChatGPT"
+        case .openInChatGPT: return "Open in ChatGPT"
+        case .markSent: return "I sent it"
+        case .linkConversation: return "Link conversation"
+        case .runInWren: return "Run in Wren instead"
         }
     }
 }
@@ -125,7 +142,7 @@ public final class AskService {
         self.store = store; self.broker = broker; self.chatgpt = chatgpt; self.clock = clock
     }
 
-    static func key(_ prompt: String) -> String {
+    public static func key(_ prompt: String) -> String {
         prompt.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }.joined(separator: " ")
     }
 
@@ -188,6 +205,7 @@ public final class AskService {
         }
         let rec = DelegationRecord(task: r.prompt, destination: .chatgptPlan, depth: r.depth, now: clock.now)
         rec.kind = r.kind
+        rec.parentID = r.followUpOf
         rec.webSearchRequested = r.wantsWebSearch
         rec.prompt = draft.prompt
         rec.original = r.original

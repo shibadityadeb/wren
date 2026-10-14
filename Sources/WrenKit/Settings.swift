@@ -16,6 +16,19 @@ public struct HotKeySpec: Codable, Equatable {
     public static let optionShiftSpace = HotKeySpec(keyCode: UInt32(kVK_Space), carbonModifiers: UInt32(optionKey | shiftKey), display: "⌥⇧ Space")
 }
 
+/// What the experimental `?q=` link did in the user's browser, as they reported it.
+enum PrefillCheck: String {
+    case filledAndSent, filledNotSent, notFilled
+    var filledIn: Bool { self != .notFilled }
+    var label: String {
+        switch self {
+        case .filledAndSent: "You saw it filled in and sent"
+        case .filledNotSent: "You saw it filled in, not sent"
+        case .notFilled: "You saw an empty chat: the link doesn't work in your browser"
+        }
+    }
+}
+
 /// User preferences, persisted in UserDefaults. Personal data never goes here.
 @MainActor
 final class WrenSettings {
@@ -95,10 +108,27 @@ final class WrenSettings {
         get { (d.data(forKey: "pushToTalkHotKey")).flatMap { try? JSONDecoder().decode(HotKeySpec.self, from: $0) } ?? .optionSpace }
         set { d.set(try? JSONEncoder().encode(newValue), forKey: "pushToTalkHotKey") }
     }
-    /// The optional copy-and-open handoff fallback (key kept from earlier versions).
+    /// Wren may open ChatGPT in the browser with your request (on by default since 0.11, when the
+    /// website became where "ask GPT" goes; the old opt-in key was "chatgptEnabled").
     var chatgptHandoffEnabled: Bool {
-        get { d.bool(forKey: "chatgptEnabled") }
-        set { d.set(newValue, forKey: "chatgptEnabled") }
+        get { d.object(forKey: "chatgptWebEnabled") as? Bool ?? true }
+        set { d.set(newValue, forKey: "chatgptWebEnabled") }
+    }
+    /// Where an explicit "ask GPT" request runs. Default: the ChatGPT website.
+    var chatgptMode: ChatGPTMode {
+        get { d.string(forKey: "chatgptMode").flatMap(ChatGPTMode.init(rawValue:)) ?? .web }
+        set { d.set(newValue.rawValue, forKey: "chatgptMode") }
+    }
+    /// Fill the prompt in with an undocumented `chatgpt.com/?q=` link. Off until the user has checked
+    /// in their own browser that the link fills it in (`chatgptPrefillCheck`).
+    var chatgptPrefill: Bool {
+        get { d.bool(forKey: "chatgptPrefill") && chatgptPrefillCheck?.filledIn == true }
+        set { d.set(newValue, forKey: "chatgptPrefill") }
+    }
+    /// What the user saw when Wren opened a test link: nil until checked.
+    var chatgptPrefillCheck: PrefillCheck? {
+        get { d.string(forKey: "chatgptPrefillCheck").flatMap(PrefillCheck.init(rawValue:)) }
+        set { d.set(newValue?.rawValue, forKey: "chatgptPrefillCheck") }
     }
     /// "app" (ChatGPT for Mac, if installed) or "browser".
     var chatgptDestination: String {
@@ -131,7 +161,7 @@ final class WrenSettings {
     /// Every preference key Wren writes. "Reset preferences" removes exactly these.
     static let allKeys = ["hotKeyEnabled", "hotKey", "ollamaModel", "useModel", "dateOnlyReminderHour", "captureDraft",
                           "dailySettings", "launchAtLogin", "insightSettings", "notificationPause", "lastAutomaticBackup",
-                          "voiceEnabled", "voiceHotKey", "pushToTalkEnabled", "pushToTalkHotKey", "voiceCheckBeforeRunning", "wakeWordEnabled", "macCalendarEnabled", "chatgptEnabled", "chatgptDestination", "chatgptModel", "openaiModel", "gmailCacheEnabled", "importantSenders", "mailPreferences", "voiceReviewFirst", "notificationSounds"]
+                          "voiceEnabled", "voiceHotKey", "pushToTalkEnabled", "pushToTalkHotKey", "voiceCheckBeforeRunning", "wakeWordEnabled", "macCalendarEnabled", "chatgptEnabled", "chatgptDestination", "chatgptModel", "openaiModel", "gmailCacheEnabled", "importantSenders", "mailPreferences", "voiceReviewFirst", "notificationSounds", "chatgptWebEnabled", "chatgptMode", "chatgptPrefill", "chatgptPrefillCheck"]
 
     func resetAll() { Self.allKeys.forEach(d.removeObject(forKey:)) }
 

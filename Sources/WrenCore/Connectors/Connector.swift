@@ -152,12 +152,14 @@ public enum ConnectorCatalog {
 
     public static let all: [ConnectorDescriptor] = [
         .init(id: .chatgpt, name: "ChatGPT", systemImage: "bubble.left.and.text.bubble.right",
-              summary: "Sign in with your ChatGPT account so Wren can send requests you approve and bring the answer back, using your ChatGPT plan (Plus or Pro). Copy-and-open handoff stays available as an optional fallback.",
+              summary: "“Ask GPT …” opens the ChatGPT website with your request, so it becomes a normal ChatGPT conversation you send and continue there (no sign-in needed). Optionally, sign in with ChatGPT to run requests in Wren on your plan (Plus or Pro) and get the answer back here.",
               auth: .chatgptSignIn,
-              capabilities: [.init(name: "Sign in with ChatGPT", implemented: true, external: true),
-                             .init(name: "Send a request you approve and stream the answer back", implemented: true, external: true),
+              capabilities: [.init(name: "Open your request on the ChatGPT website (you send it there)", implemented: true, external: true),
+                             .init(name: "Link the ChatGPT conversation, reopen it in one click", implemented: true, external: false),
+                             .init(name: "Know when a website conversation is sent or finished", implemented: false, external: true),
+                             .init(name: "Sign in with ChatGPT", implemented: true, external: true),
+                             .init(name: "Run with connected ChatGPT in Wren: stream the answer back", implemented: true, external: true),
                              .init(name: "List the models your plan offers", implemented: true, external: true),
-                             .init(name: "Copy the prompt and open ChatGPT (optional fallback)", implemented: true, external: true),
                              .init(name: "Import an answer, summarise it locally, propose follow-ups", implemented: true, external: false),
                              .init(name: "Use your plan from background tasks", implemented: false, external: true)],
               permissions: [.externalAI, .chatgptHandoff],

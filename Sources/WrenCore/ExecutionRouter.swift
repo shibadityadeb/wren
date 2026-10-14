@@ -27,8 +27,10 @@ public enum ExecutionOperation: Equatable, Sendable {
     case openDelegationResult
     /// "Note: …": keep the text without acting on it.
     case saveNote(String)
-    /// A question that names no assistant; the user chooses who answers.
+    /// A question that names no assistant: Wren's local AI answers (ChatGPT only if the user picks it).
     case generalQuestion(AIRequest)
+    /// "Continue that research", "open that in GPT": a follow-up to an earlier delegation.
+    case followUpDelegation(DelegationFollowUp)
     /// Something to remember, with nothing to execute.
     case capture
     /// Too unclear to act on safely; Wren asks this question instead of guessing.
@@ -48,7 +50,8 @@ public enum ExecutionOperation: Equatable, Sendable {
         case .queryCalendar: "QueryCalendar"
         case .openDelegationResult: "OpenDelegationResult"
         case .saveNote: "SaveNote"
-        case .generalQuestion: "GeneralQuestion"
+        case .generalQuestion: "AskLocalAI"
+        case .followUpDelegation: "FollowUpDelegation"
         case .capture: "Capture"
         case .clarifyIntent: "ClarifyIntent"
         }
@@ -78,6 +81,8 @@ public enum ExecutionRouter {
         guard !text.isEmpty else { return .clarifyIntent("What would you like Wren to do?") }
         if let body = IntentRouter.explicitCapture(text) { return .saveNote(body) }
         if ReminderCommand.parse(text, now: now, calendar: calendar) != nil { return .createReminder }
+        // Before new GPT requests: "continue that research in ChatGPT" refers to an earlier one.
+        if let f = DelegationFollowUp.detect(text) { return .followUpDelegation(f) }
         if let ask = IntentRouter.aiRequest(text) { return .delegateToChatGPT(ask) }
         // "Ask GPT." with nothing to ask: don't send an empty request or save it as a note.
         if addressesAssistantWithoutRequest(text) { return .clarifyIntent("What should ChatGPT do? For example: “ask GPT to research the basics of quantum physics”.") }

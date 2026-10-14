@@ -73,6 +73,8 @@ extension AppModel {
             return (operation.name, save(body))
         case let .delegateToChatGPT(request):
             return (operation.name, .ask(request))
+        case let .followUpDelegation(f):
+            return (operation.name, followUp(f, text: text))
         case .createReminder:
             // reminderRequest handles every reminder; reaching here means it couldn't, so keep the words.
             return (operation.name, save(trimmed))
@@ -122,6 +124,56 @@ extension AppModel {
                 }
             }
             return (operation.name, save(trimmed))
+        }
+    }
+
+    /// "Continue that research", "open that in GPT": acts on the earlier request, in its own tool. A
+    /// ChatGPT website request continues on the website (in its linked conversation when there is one);
+    /// a request run in Wren continues in Wren; naming ChatGPT never lands on the local model.
+    func followUp(_ f: DelegationFollowUp, text: String) -> CaptureReply {
+        func answer(_ title: String, _ line: String) -> CaptureReply {
+            .resolution(.answer(Answer(title: title, lines: [AnswerLine(line, recordID: nil)], basis: "About your earlier request")))
+        }
+        guard let parent = followUpTarget else {
+            return .resolution(.needsDate(f.action == .open
+                ? "There's no earlier GPT request to open. Say what to ask, for example “ask GPT to research …”."
+                : "Which request should I continue? Open it in Delegate first, or say the whole request, for example “ask GPT to research …”."))
+        }
+        let title = "“\(parent.task.prefix(60))\(parent.task.count > 60 ? "…" : "")”"
+        switch f.action {
+        case .open:
+            if let url = parent.conversationURL {
+                NSWorkspace.shared.open(url)
+                return answer("Opened the ChatGPT conversation", "\(title), at its linked conversation.")
+            }
+            switch parent.destination {
+            case .chatgptHandoff:
+                NSWorkspace.shared.open(ChatGPTWeb.home)
+                return answer("Opened ChatGPT", "\(title) has no conversation link in Wren, so Wren can't open that exact chat. Find it in ChatGPT's history, then paste its link on the request in Wren.")
+            case .chatgptPlan where f.namesChatGPT:
+                NSWorkspace.shared.open(ChatGPTWeb.home)
+                return answer("Opened ChatGPT", "\(title) ran in Wren with connected ChatGPT, so there's no ChatGPT conversation to open; its result is in Wren. To take it to the website, say “continue that research in ChatGPT”.")
+            case .localModel where f.namesChatGPT:
+                // Named GPT: take the earlier request to the ChatGPT website (a new conversation there).
+                return .ask(AIRequest(prompt: parent.prompt ?? parent.task, original: text, depth: parent.depth, kind: parent.kind,
+                                      target: .chatgpt, followUpOf: parent.id, mode: .web))
+            default:
+                openDelegation(parent.id)
+                return answer("Opened the result in Wren", "\(title) ran in Wren (\(parent.modeLabel)), so it isn't a ChatGPT conversation and has no ChatGPT link.")
+            }
+        case let .continue(instruction):
+            let mode: ChatGPTMode?
+            switch parent.destination {
+            case .chatgptHandoff: mode = .web
+            case .chatgptPlan: mode = f.namesChatGPT ? settings.chatgptMode : .inWren
+            default: mode = f.namesChatGPT ? settings.chatgptMode : nil
+            }
+            // In a linked conversation, ChatGPT already has the context: only the new instruction goes.
+            let linked = mode == .web && parent.conversationURL != nil
+            let prompt = linked ? instruction
+                : ChatGPTWeb.followUpPrompt(earlierRequest: parent.prompt ?? parent.task, earlierAnswer: parent.response, instruction: instruction)
+            return .ask(AIRequest(prompt: prompt, original: text, depth: parent.depth, kind: parent.kind,
+                                  target: mode == nil ? nil : .chatgpt, followUpOf: parent.id, mode: mode))
         }
     }
 
@@ -178,6 +230,7 @@ extension AppModel {
         else { return .failed("The local model didn't answer.", retryable: true) }
         guard let record = newDelegation(r.prompt, destination: .localModel, depth: r.depth) else { return .failed("Couldn't save the answer.", retryable: false) }
         record.prompt = r.prompt; record.response = a; record.responseSource = "Local model \(name) on this Mac"; record.status = .responseImported
+        record.parentID = r.followUpOf; record.original = r.original
         saveDelegation(record)
         return .answered(text: a, source: "Local model \(name), on this Mac", recordID: record.id)
     }

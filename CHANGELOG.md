@@ -2,6 +2,20 @@
 
 Versions follow [semantic versioning](https://semver.org). The `VERSION` file is the source of truth; release tags are `v<VERSION>` (stable) or `v<VERSION>-preview.N` (prerelease).
 
+## [0.11.0] (unreleased)
+
+ChatGPT as a real external tool, and routing that knows which tool you mean.
+
+- **Naming GPT or ChatGPT always means ChatGPT**, in any phrasing ("can you ask in GPT …", "make a query in ChatGPT about …", "search in GPT for …"). It's never a "local or ChatGPT?" choice, and never answered by the local model. **A question that names no assistant goes to Wren's local AI**; with no local AI set up you get the choices, and a connected ChatGPT no longer takes those questions over.
+- **"Ask GPT" opens the ChatGPT website by default**, with your request copied, so it becomes a normal ChatGPT conversation you send and continue there.
+  - OpenAI offers no supported way for an app to create that conversation or see its answer, so Wren shows exactly what it knows: Opened in ChatGPT / Awaiting your submission / Submitted; completion not verified / Conversation linked / Failed to open. Never Completed.
+  - **Link conversation** stores the real `chatgpt.com/c/…` address (validated, read from the clipboard only on click), and **Open in ChatGPT** then goes straight to it.
+  - Optional, experimental: fill the request in with a `chatgpt.com/?q=` link, enabled only after you check it in your browser.
+- **Run with connected ChatGPT in Wren** is now an explicit mode (setting, or **Run in Wren instead** per request): your plan through Sign in with ChatGPT, with the real answer stored in Wren and labelled as not being a ChatGPT conversation. Not signed in → Connect, or open it on the website instead.
+- **Follow-ups keep their tool:** "continue that research", "ask it to go deeper", "find more sources", "open that in GPT". With nothing to refer to, Wren asks.
+- Request pages show the destination, mode, real status, follow-up chain and, for website requests, the link and next steps.
+- Data version 8 (new request fields; a backup is made before the upgrade).
+
 ## [0.10.1] (unreleased)
 
 Push-to-talk that actually runs what you say.

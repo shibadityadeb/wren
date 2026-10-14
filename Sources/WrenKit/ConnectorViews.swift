@@ -94,6 +94,7 @@ struct ConnectorDetailView: View {
     let id: ConnectorID
     @State private var working = false
     @State private var recordingVoiceKey = false
+    @State private var prefillTesting = false
     @State private var voiceKeyMonitor: Any?
 
     var descriptor: ConnectorDescriptor { ConnectorCatalog.descriptor(id) }
@@ -319,24 +320,63 @@ struct ConnectorDetailView: View {
                 }
                 connectedActions(state)
             }
-            Text("Each request shows the exact text first and is sent only after you confirm. It uses your ChatGPT plan's allowance; Wren never switches to paid API billing. Background tasks never use your plan. Wren can't see your ChatGPT conversations or memories.")
+            Text("Sign-in powers “Run with connected ChatGPT in Wren”. It uses your ChatGPT plan's allowance; Wren never switches to paid API billing, background tasks never use your plan, and Wren can't see your ChatGPT conversations or memories.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if let note = c.disconnectNote { Text(note).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
             Divider()
-            Text("Optional fallback: copy and open").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-            Toggle("Allow copying a prompt and opening ChatGPT", isOn: Binding(get: { c.handoffEnabled }, set: { c.handoffEnabled = $0; model.connectorsChanged() }))
+            Text("When you ask GPT").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            Picker("“Ask GPT …” goes to", selection: Binding(get: { model.settings.chatgptMode }, set: { model.settings.chatgptMode = $0; model.connectorsChanged() })) {
+                ForEach(ChatGPTMode.allCases, id: \.self) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.radioGroup)
+            Text(model.settings.chatgptMode == .web
+                 ? "The ChatGPT website (default): Wren opens ChatGPT in your browser with your request, and you send it there. It becomes a normal ChatGPT conversation you can continue and find in your history. OpenAI offers no supported way for an app to create that conversation or read its answer, so Wren shows it as awaiting your submission and never as done. Link the conversation to return to it in one click."
+                 : "Connected ChatGPT in Wren: Wren sends the request through your plan (Sign in with ChatGPT above) and shows the real answer and completion here. The request and answer are stored in Wren; they aren't a ChatGPT conversation and don't appear in ChatGPT's history.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Toggle("Let Wren open ChatGPT in my browser with my request", isOn: Binding(get: { c.handoffEnabled }, set: { c.handoffEnabled = $0; model.connectorsChanged() }))
                 .font(.callout)
             if c.handoffEnabled {
                 Picker("Open in", selection: Binding(get: { model.settings.chatgptDestination }, set: { model.settings.chatgptDestination = $0; model.connectorsChanged() })) {
                     Text("Default browser (chatgpt.com)").tag("browser")
-                    Text(ConnectorHub.chatGPTAppURL == nil ? "ChatGPT for Mac (not installed)" : "ChatGPT for Mac").tag("app")
+                    Text(ConnectorHub.chatGPTAppURL == nil ? "ChatGPT for Mac (not installed)" : "ChatGPT for Mac (paste the request there)").tag("app")
                 }
-                .frame(maxWidth: 360)
+                .frame(maxWidth: 380)
+                prefillSetup
             }
-            Text("Works without signing in: Wren copies the prompt and opens ChatGPT, and you paste and send it yourself, then paste the answer back in Delegate.")
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Button("Open Delegate") { model.route = .delegate }.controlSize(.small)
         }
+    }
+
+    /// The undocumented `chatgpt.com/?q=` link: off until the user has seen what it does in their browser.
+    @ViewBuilder var prefillSetup: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle("Fill in my request automatically (experimental)", isOn: Binding(get: { model.settings.chatgptPrefill }, set: { model.settings.chatgptPrefill = $0; model.connectorsChanged() }))
+                .disabled(model.settings.chatgptPrefillCheck?.filledIn != true || model.settings.chatgptDestination == "app")
+            Text("Uses a chatgpt.com/?q=… link. OpenAI doesn't document it and has changed how it behaves (it may fill the request in, send it, or do nothing), so Wren turns it on only after you've checked it in your browser. The request is always copied too. Requests over \(ChatGPTWeb.maxPrefillCharacters) characters go by clipboard only.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if let check = model.settings.chatgptPrefillCheck { Text("Last check: \(check.label).").font(.caption) }
+            if prefillTesting {
+                Text("ChatGPT opened with a test request (“Reply with the single word: ok”). What did you see?").font(.caption.weight(.semibold))
+                HStack {
+                    Button("Filled in and sent") { finishPrefillTest(.filledAndSent) }
+                    Button("Filled in, not sent") { finishPrefillTest(.filledNotSent) }
+                    Button("An empty chat") { finishPrefillTest(.notFilled) }
+                }.controlSize(.small)
+            } else {
+                Button("Check it in my browser…") {
+                    let (url, _) = ChatGPTWeb.launch("Reply with the single word: ok", prefill: true)
+                    NSWorkspace.shared.open(url); prefillTesting = true
+                }.controlSize(.small).help("Opens ChatGPT with a harmless test request so you can see what the link does in your browser and account.")
+            }
+        }
+        .padding(.leading, 18)
+    }
+
+    func finishPrefillTest(_ result: PrefillCheck) {
+        model.settings.chatgptPrefillCheck = result
+        model.settings.chatgptPrefill = result.filledIn
+        prefillTesting = false
+        model.connectorsChanged()
     }
 
     @ViewBuilder func voiceSetup(_ state: ConnectorState) -> some View {

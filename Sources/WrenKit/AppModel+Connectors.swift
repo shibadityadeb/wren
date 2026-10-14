@@ -290,32 +290,14 @@ extension AppModel {
     /// The user pressed "Copy and open ChatGPT" on the preview: that press is the confirmation for
     /// exactly this prompt. Wren copies and opens; it does not send.
     func handOff(_ draft: HandoffDraft, record: DelegationRecord) async -> String? {
-        guard let broker else { return "No database." }
-        let prompt = draft.prompt
-        let req = ActionRequest(action: BuiltInAction.chatgptHandoff, target: TargetRef(kind: "prompt", id: record.id.uuidString, label: draft.task),
-                                parameters: ["prompt": .string(prompt)], origin: .user(.popover), createdAt: clock.now,
-                                containsPrivateContent: draft.containsPrivate)
-        let destination = settings.chatgptDestination
-        do {
-            try await broker.performExternal(req, confirmation: broker.confirm(req, includingPrivate: draft.containsPrivate),
-                                             detail: { _ in "copied \(prompt.count) characters; opened ChatGPT (not sent)" }) {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(prompt, forType: .string)
-                guard NSPasteboard.general.string(forType: .string) == prompt else { throw ConnectorError.badResponse("couldn't copy") }
-                if destination == "app", let app = ConnectorHub.chatGPTAppURL {
-                    NSWorkspace.shared.openApplication(at: app, configuration: .init())
-                } else {
-                    NSWorkspace.shared.open(URL(string: "https://chatgpt.com/")!)
-                }
-            }
-            record.prompt = prompt
-            record.status = .handedOff
-            saveDelegation(record)
-            return nil
-        } catch {
-            record.status = .failed; record.error = errorText(error); saveDelegation(record)
-            return errorText(error)
-        }
+        record.includesPrivate = draft.containsPrivate
+        record.webState = .prepared
+        let launch = ChatGPTWeb.launch(draft.prompt, prefill: settings.chatgptPrefill && settings.chatgptDestination != "app")
+        if let e = await openInChatGPT(prompt: draft.prompt, url: launch.url, record: record, channel: .popover) { return e }
+        record.webMethod = launch.method
+        record.webState = launch.method == .prefillLink ? .openedInChatGPT : .awaitingSubmission
+        saveDelegation(record)
+        return nil
     }
 
     func importResponse(_ text: String, into r: DelegationRecord) {

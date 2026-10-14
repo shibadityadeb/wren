@@ -14,9 +14,16 @@ public struct AIRequest: Equatable, Sendable {
     public var target: Target?
     public enum Target: String, Equatable, Sendable { case chatgpt }
 
-    public init(prompt: String, original: String, depth: HandoffDepth = .normal, kind: DelegationKind? = nil, target: Target?) {
+    /// A follow-up to this earlier delegation ("continue that research").
+    public var followUpOf: UUID?
+    /// Forces where a ChatGPT request runs (a follow-up keeps its parent's tool). nil: the user's setting.
+    public var mode: ChatGPTMode?
+
+    public init(prompt: String, original: String, depth: HandoffDepth = .normal, kind: DelegationKind? = nil, target: Target?,
+                followUpOf: UUID? = nil, mode: ChatGPTMode? = nil) {
         self.prompt = prompt; self.original = original; self.depth = depth; self.target = target
         self.kind = kind ?? (depth == .deep ? .thinking : .question)
+        self.followUpOf = followUpOf; self.mode = mode
     }
 
     /// What to ask of the model: higher reasoning effort only when asked for, web search only for research.
@@ -169,12 +176,32 @@ public enum IntentRouter {
             let deep = DelegationIntent.wantsDeepThinking(t)
             return AIRequest(prompt: prompt, original: text, depth: deep ? .deep : .normal, kind: DelegationIntent.kind(t), target: .chatgpt)
         }
+        // Any other sentence that names GPT as where the work should happen ("can you ask in GPT what …",
+        // "make a query in ChatGPT about …"): it's for ChatGPT. Only the destination and the framing
+        // around it are removed; the request itself is kept as said.
+        if let r = destinationRequest(t) { return r }
         // Earlier, fixed phrasings ("send this research question to GPT and …").
         if let h = HandoffRequest.detect(t) {
             let deep = h.depth == .deep || DelegationIntent.wantsDeepThinking(t)
             return AIRequest(prompt: sentence(h.task), original: text, depth: deep ? .deep : .normal, kind: DelegationIntent.kind(t), target: .chatgpt)
         }
         return nil
+    }
+
+    /// GPT named as a destination anywhere: "… in/on/with/via/using/through GPT …", "query/prompt ChatGPT …".
+    /// "email the GPT team" or "I compared GPT models" name it as a topic, not a destination: no match.
+    static func destinationRequest(_ t: String) -> AIRequest? {
+        let a = assistant
+        let destination = #"\b(?:in|on|with|via|using|through|into)\s+(?:the\s+|my\s+)?"# + a + #"\b"#
+        guard t.range(of: destination, options: [.regularExpression, .caseInsensitive]) != nil else { return nil }
+        var body = t.replacingOccurrences(of: #"[\s,]*"# + destination, with: "", options: [.regularExpression, .caseInsensitive])
+        // The request framing left around it: "can you ask", "make a query about", "do a search for".
+        body = body.replacingOccurrences(of: "^" + polite + #"(?:ask|query|prompt|search|look up|research|check|find out|make|do|run|start|create|open)?\s*(?:a\s+|an\s+|new\s+)*(?:query|search|question|request|chat|conversation|prompt)?\s*(?:about|on|for|regarding|whether|if|to|that)?[\s,:]*"#,
+                                     with: "", options: [.regularExpression, .caseInsensitive])
+        let prompt = cleanPrompt(body)
+        guard prompt.trimmingCharacters(in: CharacterSet.alphanumerics.inverted).count >= 3 else { return nil }
+        let deep = DelegationIntent.wantsDeepThinking(t)
+        return AIRequest(prompt: prompt, original: t, depth: deep ? .deep : .normal, kind: DelegationIntent.kind(t), target: .chatgpt)
     }
 
     /// Removes leftover framing ("to", "about", "what … is", "and tell me") without changing meaning.
@@ -206,7 +233,7 @@ public enum IntentRouter {
     public static func isQuestion(_ text: String) -> Bool {
         let s = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if s.hasSuffix("?") { return true }
-        return s.lowercased().firstMatch(of: /^(?:what|what's|whats|why|how|who|whom|whose|when|where|which|is|are|was|were|can|could|does|do|did|should|would|will|explain|define)\b/) != nil
+        return s.lowercased().firstMatch(of: /^(?:what|what's|whats|why|how|who|whom|whose|when|where|which|is|are|was|were|can|could|does|do|did|should|would|will|explain|define|describe|summari[sz]e|help me understand|teach me|tell me about)\b/) != nil
     }
 
     static func startsLikeQuestion(_ s: String) -> Bool {
@@ -218,7 +245,7 @@ public enum IntentRouter {
     static func questionPrompt(_ s: String) -> String {
         var q = s.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ".!")))
         q = q.prefix(1).uppercased() + q.dropFirst()
-        if q.lowercased().firstMatch(of: /^(?:explain|define|describe|tell)\b/) != nil { return q + "." }
+        if q.lowercased().firstMatch(of: /^(?:explain|define|describe|tell|summari[sz]e|help me|teach me)\b/) != nil { return q + "." }
         return q.hasSuffix("?") ? q : q + "?"
     }
 
