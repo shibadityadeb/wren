@@ -19,11 +19,11 @@ const lastmod = new Date().toISOString().slice(0, 10);
 
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
-for (const f of ["index.html", "404.html", "privacy", "assets", "robots.txt", "sitemap.xml"]) {
+for (const f of ["index.html", "404.html", "privacy", "download", "assets", "robots.txt", "sitemap.xml"]) {
   cpSync(join(here, f), join(out, f), { recursive: true, filter: (p) => !p.endsWith(".DS_Store") });
 }
 
-for (const f of ["index.html", "privacy/index.html", "404.html", "robots.txt", "sitemap.xml"]) {
+for (const f of ["index.html", "privacy/index.html", "download/index.html", "404.html", "robots.txt", "sitemap.xml"]) {
   const p = join(out, f);
   let s = readFileSync(p, "utf8");
   if (site) s = s.replaceAll("{{SITE_URL}}", site).replaceAll("{{LASTMOD}}", lastmod);
@@ -38,7 +38,7 @@ if (!site) rmSync(join(out, "sitemap.xml"), { force: true });
 // The Content-Security-Policy in vercel.json allows exactly one inline script, by hash. Fail if it drifted.
 const vercel = JSON.parse(readFileSync(join(here, "..", "vercel.json"), "utf8"));
 const csp = vercel.headers.flatMap((h) => h.headers).find((h) => h.key === "Content-Security-Policy").value;
-for (const page of ["index.html", "privacy/index.html"]) {
+for (const page of ["index.html", "privacy/index.html", "download/index.html"]) {
   const html = readFileSync(join(out, page), "utf8");
   for (const m of html.matchAll(/<script>([\s\S]*?)<\/script>/g)) {
     const hash = "'sha256-" + createHash("sha256").update(m[1]).digest("base64") + "'";
@@ -50,5 +50,7 @@ for (const page of ["index.html", "privacy/index.html"]) {
 }
 
 execFileSync(process.execPath, [join(here, "tools", "check.mjs"), out], { stdio: "inherit" });
+// The download functions (../api), with Supabase and the network faked.
+execFileSync(process.execPath, [join(here, "tools", "check-api.mjs")], { stdio: "inherit" });
 console.log(`✓ built website/dist${site ? ` for ${site}` : " (no SITE_URL: canonical and sitemap left out)"}${preview ? " · preview: noindex" : ""}`);
 if (!existsSync(join(out, "404.html"))) process.exit(1);

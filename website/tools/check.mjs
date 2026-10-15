@@ -48,6 +48,8 @@ for (const page of pages) {
     const url = m[1];
     if (/^mailto:/.test(url)) continue;
     if (/^https?:\/\//.test(url)) { external.add(url); continue; }
+    // Vercel functions (../api), not files in the built site; tested by tools/check-api.mjs.
+    if (/^\/api\/[a-z-]+\/?$/.test(url)) continue;
     const target = resolve(page, url);
     if (!existsSync(target)) { problems.push(`${rel}: broken link ${url}`); continue; }
     const hash = url.includes("#") ? url.split("#")[1] : "";

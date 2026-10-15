@@ -557,3 +557,10 @@ kbd { font: 600 13px/1 var(--sans); padding: 6px 8px; border-radius: 6px; backgr
   .btn { width: 100%; max-width: 340px; }
   .nav .btn { max-width: none; }
 }
+
+/* Download page */
+.download__box { margin: 8px 0 8px; padding: 26px 28px; border: 1px solid var(--line-strong); border-radius: 18px; background: var(--paper); }
+.download__box p { margin: 0 0 12px; }
+.download__box p:last-child { margin-bottom: 0; }
+.download__box [hidden] { display: none !important; }
+
