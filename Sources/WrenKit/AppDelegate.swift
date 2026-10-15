@@ -350,7 +350,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
         if !panel.isVisible { showCapture() }
         captureState.lastVoiceText = text
         captureState.text = text
+        // Where it would go, decided by the same router that will run it.
+        let destination = CommandRouter.intent(for: text, now: model.clock.now, calendar: model.clock.calendar).destination
         if case let .confirm(why) = assessment {
+            reviewTranscript(why)
+        } else if let why = TranscriptAssessment.checkBeforeSending(destination: destination, confidence: voice.lastConfidence) {
+            appLog.notice("voice: a ChatGPT request heard with low confidence waits for checking")
             reviewTranscript(why)
         } else if model.settings.voiceReviewFirst {
             reviewTranscript("Transcribed on this Mac. Fix any wrong words, then press Return.")
@@ -379,6 +384,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
         let spoken = channel == .voice
         if spoken { voice.beginProcessing(text) }
         captureState.reviewingVoice = false
+        // A new command: the previous one's card and answer must not stay on screen as if they were its result.
+        captureState.ask = nil; captureState.reply = nil
         captureState.busy = true
         Task {
             let reply = await model.submitFromCapture(text, channel: channel)
@@ -425,8 +432,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
     private func askOutcome() -> VoiceSession.Outcome {
         guard let card = captureState.ask else { return .failed("The request couldn't be started.") }
         switch card.phase {
-        case .sending: return card.destination == .chatgptWeb ? .completed("Opening ChatGPT…") : (card.destination == .local ? .completed("Asking local AI…") : .completed("GPT request submitted"))
-        case .answered, .partial: return card.destination == .local ? .completed("Local AI answered") : .completed("GPT request submitted")
+        case .sending, .answered, .partial: return .completed(card.headline ?? "Request started")
         case let .handedOff(state, _): return state == .failedToOpen ? .failed(WebHandoffState.failedToOpen.detail) : .completed("Asked in ChatGPT: \(state.label.lowercased())")
         case .ready: return card.destination == .choose ? .needsClarification("Local AI isn't set up. Who should answer this?") : .completed("Request ready")
         case .notConnected: return .failed("ChatGPT isn't connected. Connect it below; your request is kept.")
@@ -558,9 +564,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
             case let .started(rec):
                 captureState.ask?.recordID = rec.id
                 captureState.ask?.phase = .handedOff(rec.webState ?? .awaitingSubmission, recordID: rec.id)
+                appLog.notice("ask card: \(self.captureState.ask?.headline ?? "-", privacy: .public)")
                 captureState.ask?.canOfferDetection = rec.webState == .promptLoaded && !model.settings.chatgptDetectConversation && BrowserTabs.defaultBrowser != nil
-                if rec.webState == .promptLoaded, !model.settings.chatgptDetectConversation, BrowserTabs.defaultBrowser != nil {
-                    captureState.ask?.note = "Tip: let Wren detect when you send it, and it saves the conversation link for you."
+                let send = model.autoSendReadiness(method: rec.webMethod ?? .clipboard)
+                if send == .ready {
+                    captureState.ask?.note = "Wren will press Enter in ChatGPT for you, then show the conversation once ChatGPT starts it."
+                } else if let reason = send.reason {
+                    captureState.ask?.note = reason + " Press Enter in ChatGPT to send it."
+                } else if rec.webState == .promptLoaded, !model.settings.chatgptDetectConversation, BrowserTabs.defaultBrowser != nil {
+                    captureState.ask?.note = "Press Enter in ChatGPT to send it. Tip: let Wren detect when you send it, and it saves the conversation link for you."
+                } else if rec.webState == .promptLoaded {
+                    captureState.ask?.note = "Your question is in ChatGPT's box. Press Enter there to send it."
                 }
             case let .review(m):
                 captureState.ask?.phase = .needsReview(m)
@@ -623,6 +637,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
                     captureState.busy = false
                     guard captureState.ask?.request == request else { return }
                     captureState.ask?.phase = Self.phase(for: outcome)
+                    appLog.notice("ask card: \(self.captureState.ask?.headline ?? "-", privacy: .public)")
                 }
                 return
             }
@@ -657,6 +672,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
                     guard captureState.ask?.request == request else { return }
                     captureState.ask?.phase = Self.phase(for: outcome)
                     captureState.ask?.note = nil
+                    appLog.notice("ask card: \(self.captureState.ask?.headline ?? "-", privacy: .public)")
                 }
             }
         case .connect:

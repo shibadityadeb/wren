@@ -125,7 +125,7 @@ final class CommandRouterRulesTests: XCTestCase {
 
     func testLogSummaryNamesTheDecisionButNeverTheWords() {
         let i = intent("Can you make a reminder to call Sam tomorrow at 10 AM?")
-        XCTAssertTrue(i.summary.hasPrefix("CreateReminder → wren (rule A reminderRequest"), i.summary)
+        XCTAssertTrue(i.summary.hasPrefix("CreateReminder → wren via ItemExecution.createReminder (rule A reminderRequest"), i.summary)
         XCTAssertFalse(i.summary.contains("Sam"))
     }
 }

@@ -15,7 +15,54 @@ touched. Debug URLs exist only in debug builds. Read results with:
 /usr/bin/log stream --style compact --predicate 'subsystem == "com.shibadityadeb.wren" AND processImagePath CONTAINS "Wren Dev.app"'
 ```
 
-## Last pass: 2026-10-14 evening, branch `fix/end-to-end-execution` (0.12.0)
+## Last pass: 2026-10-14 night, branch `fix/chatgpt-destination-and-reminders` (0.12.1)
+
+What triggered it: in the installed 0.12.0, two spoken "ChatGPT" requests were answered by the local AI,
+and the panel said "GPT finished". The exact words came from the installed app's own records:
+- "Can you make a query at ChatGPT? What is the gradient descent machine learning?" (confidence 0.78)
+- "Can you make a query, ChatGPT what is great in decent machine learning?"
+
+The router knew "in/on/with ChatGPT" but not "at ChatGPT", a comma before the name, or a question mark
+in the middle, so both read as general questions. The heading said "GPT finished" for any answered card,
+whoever answered. Automated: `swift test`, 400 tests, 0 failures, 4 skipped.
+
+| ID | Test | Result |
+|---|---|---|
+| G-1 | Installed 0.12.0, voice: "Can you make a reminder to call Sam tomorrow at 10 AM" | **Passed live** (your run, 21:47): `CreateReminder`, `planned=1 accepted=1 authorized=true`, so macOS accepted the notification. Its delivery at 10:00 on 15 Oct is still to be seen (G-7) |
+| G-2 | Installed 0.12.0, voice: the two ChatGPT sentences above | **Failed live** (your run, 21:48): `AskLocalAI`, headline "GPT finished". Fixed in 0.12.1 |
+| G-3 | Wren Dev 0.12.1: the same two sentences, word for word | **Passed live**: `DelegateToChatGPT (rule B)`, prompts "What is the gradient descent machine learning?" and "What is great in decent machine learning?" (kept as heard). Chrome opened `chatgpt.com` with the question; the card read "Prompt loaded, submission unverified". Nothing was sent, and the tabs were closed |
+| G-4 | Wren Dev 0.12.1: "What is gradient descent?" | **Passed live**: `AskLocalAI`, card "Local AI answered" (not "GPT finished"). Your screenshot of that run showed the answer missing from the card, though 313 characters were saved: the answer area had no height. Fixed, and checked in the `capture-local-answer-*.png` snapshots (`wren-tools snapshot`) |
+| G-5 | Wren Dev 0.12.1: "Can you make a reminder for to call Sam tomorrow at 10 AM?" (the 20:38 transcript) | **Passed live**: `CreateReminder` "Call Sam". Notifications are denied for Wren Dev, and that was reported, not "scheduled" |
+| G-6 | Send it for me: Wren presses Enter in the ChatGPT tab it opened, and "Submitted to ChatGPT" appears only when the tab becomes `/c/…` | **Not run live**: needs you to allow Wren in Accessibility and browser control (steps M-SEND). Its decisions are unit-tested (`ChatGPTAutoSendTests`). This terminal isn't allowed to press keys, so it couldn't be tried from here |
+| G-7 | A scheduled reminder fires, and Done withdraws it | **Not yet observed** (steps M-FIRE). 0.12.1 logs `notification shown: reminder (scheduled)` and `notification opened: …` so the log proves it |
+| G-8 | A doubtful spoken ChatGPT request (confidence below 0.85) waits in the field for checking | Automated (`VoiceDestinationReviewTests`). **Not run live** (needs your voice) |
+
+### Steps for you (0.12.1)
+
+Record a log first: `scripts/try-wren.sh --installed`, or the `log stream` line at the top of this page.
+
+**M-GPT: ChatGPT means ChatGPT**
+1. Hold ⌥ Space and say "Can you make a query at ChatGPT, what is gradient descent in machine learning?".
+2. Expected: ChatGPT opens with the question in its box. The panel says "Prompt loaded, submission unverified", or "Check the words I heard" if the recogniser wasn't sure. Never "Local AI" or "GPT finished".
+3. Log: `route DelegateToChatGPT … (rule B …)`, `ask card: Prompt loaded, submission unverified`.
+4. Hold ⌥ Space and say "What is gradient descent?". Expected: "Local AI answered", with the answer visible in the card. Log: `ask card: Local AI answered`.
+
+**M-SEND: Send it for me (optional)**
+1. Connectors › ChatGPT: turn on **Detect when I send it**, and allow Wren to control Chrome when macOS asks.
+2. Turn on **Send it for me**. macOS opens Accessibility: switch Wren on.
+3. Say "ask GPT what gradient descent is". Expected:
+   - Chrome comes forward with the question in the box, and Enter is pressed once.
+   - The card goes to "Submitted to ChatGPT", and **Open conversation in ChatGPT** opens that exact `chatgpt.com/c/…`.
+   - Log: `send for me: tab focused=true Return pressed=true`, then `conversation detection: ChatGPT conversation created`.
+4. If ChatGPT doesn't start a conversation within 20 s, the card says so and asks you to press Enter. It never says "Submitted".
+
+**M-FIRE: a reminder really fires**
+1. Type `remind me to stretch in 2 minutes`. Expected: "Reminder created: Stretch … Scheduled with macOS", and log `reminder created: planned=1 accepted=1`.
+2. Quit Wren (⌘Q) and wait. Expected: the notification appears on time.
+3. Reopen Wren. Expected: no second notification. Log: `reminders due: 1 recorded as shown`.
+4. Repeat with Wren running and click **Done**. Expected: log `notification opened: reminder (scheduled) action=WREN_DONE`, and the item is completed.
+
+## Previous pass: 2026-10-14 evening, branch `fix/end-to-end-execution` (0.12.0)
 
 Automated: `swift test`, 388 tests, 0 failures, 4 skipped. The brief's ten acceptance scenarios have automated
 versions in `EndToEndAcceptanceTests` and `CommandRouterRulesTests`. Those use `FakeReminderCenter` for macOS,

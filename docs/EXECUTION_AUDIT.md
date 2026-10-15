@@ -258,6 +258,61 @@ or in the installed app's log. The tests named under **Tests** fail without the 
 - **Fix.** Slack is listed as **Not implemented**, and nothing depends on it. Notion keeps its real
   status: it has working sign-in, search and confirmed page creation.
 
+## 3a. Follow-up in 0.12.1: what live testing of 0.12.0 showed
+
+### D-18. Spoken ChatGPT requests were answered by the local AI
+
+- **Observed.** In the installed 0.12.0 (log 21:47:54 and 21:48:30), `route AskLocalAI (rule C question)`. The
+  saved records hold the exact transcripts:
+  - "Can you make a query at ChatGPT? What is the gradient descent machine learning?"
+  - "Can you make a query, ChatGPT what is great in decent machine learning?"
+- **Root cause.** `IntentRouter.aiRequest` knew ChatGPT as a destination only after "in, on, with, via,
+  using, through or into", or right after a verb such as "ask". A request noun ("make a query") followed
+  by "at", a comma or a question mark matched nothing, and the trailing "?" made it a general question.
+  Speech spellings of the name ("chat G P T", "chat GBT") weren't recognised either.
+- **Fix.** A request-noun pattern: make, send or start a query, question, request, search, chat or
+  message, then any preposition, punctuation or nothing, then the name, then what to ask. There is also
+  a polite vocative form ("Hey ChatGPT, …"). `IntentRouter.normalizeAssistantName` rewrites speech
+  spellings of the name before routing; the request keeps the user's exact words. Naming GPT as a topic
+  ("What is GPT?", "email the GPT team") still isn't a request.
+- **Tests.** `ChatGPTDestinationTests`, which uses both transcripts word for word. **Live:** G-3.
+
+### D-19. "GPT finished" over a local answer
+
+- **Root cause.** `CaptureView.completedTitle` returned "GPT finished" for any card in the answered
+  phase. It never looked at who answered.
+- **Fix.** `AskCard.headline` (WrenCore) is built from the destination that really ran and its real
+  phase: "Local AI answered", "ChatGPT answered, in Wren", or the website state's own label. A website
+  request has no "finished" state. The voice outcome and the log use the same headline.
+  - The completion notification is sent only for `chatgptPlan` records, as "ChatGPT finished (in Wren)".
+  - `execute` clears the previous card, so a stale result can't show under a new command.
+- **Tests.** `AskHeadlineTests`. **Live:** G-4.
+
+### D-20. Answers saved but not shown
+
+- **Observed.** In your screenshot of G-4, the 313-character answer was missing from the card.
+- **Root cause.** `answerText` was a `ScrollView` with only a maximum height. In the panel it has no
+  height of its own, so it collapsed to zero.
+- **Fix.** The answer is now a text view, up to 14 lines, with a pointer to the full result in Wren.
+  Checked in the new `capture-local-answer-*.png` snapshots.
+
+### D-21. ChatGPT website requests could only wait for you
+
+- **Context.** The website takes the question from the link but doesn't send it (B-1).
+- **Fix.** **Send it for me** (`ChatGPTAutoSend`, `BrowserTabs.focus`, `KeyPresser`) is opt-in and off
+  by default. Once the page has taken the question, Wren brings that exact tab forward and presses
+  Return in that browser process only. It counts the question as sent only when the tab becomes
+  `/c/<id>`, the conversation detection Wren already had. It needs two macOS permissions only the user
+  can grant: browser control and Accessibility.
+- **Tests.** The decisions are unit-tested in `ChatGPTAutoSendTests`. It was **not run live**, because
+  this terminal can't press keys and Wren Dev has no Accessibility permission (G-6, steps M-SEND).
+
+### D-22. A doubtful transcript went straight out
+
+- **Fix.** `TranscriptAssessment.checkBeforeSending` holds a spoken request bound for ChatGPT with a
+  reported confidence below 0.85 in the field for checking. The destination stays ChatGPT.
+- **Tests.** `VoiceDestinationReviewTests`.
+
 ## 4. Checked and unchanged
 
 These were traced and found to work, with tests and earlier live evidence:

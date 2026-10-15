@@ -55,6 +55,26 @@ public struct AskCard: Equatable, Sendable {
 
     public init(request: AIRequest, destination: Destination) { self.request = request; self.destination = destination }
 
+    /// The headline for what has really happened, naming who did the work. A local answer is never
+    /// "GPT", a website request is never "finished" (Wren can't see ChatGPT's answer there), and a
+    /// result from ChatGPT inside Wren says so. nil while nothing has run.
+    public var headline: String? {
+        switch (destination, phase) {
+        case (.local, .sending): return "Asking local AI on this Mac…"
+        case (.local, .answered): return "Local AI answered"
+        case (.local, .partial): return "Local AI stopped early"
+        case (.chatgpt, .sending): return "Sent to ChatGPT (runs in Wren)"
+        case (.chatgpt, .answered): return "ChatGPT answered, in Wren"
+        case (.chatgpt, .partial): return "ChatGPT stopped early, in Wren"
+        case (.chatgptWeb, .sending): return "Opening ChatGPT…"
+        case let (.chatgptWeb, .handedOff(state, _)): return state.label
+        case (_, .failed), (_, .notConnected), (_, .reconnect), (_, .needsPermission), (_, .usageLimit), (_, .unsupported):
+            return destination == .local ? "Local AI didn't answer" : "Not sent to ChatGPT"
+        case (_, .needsReview): return "Check it before it's sent"
+        default: return nil
+        }
+    }
+
     /// What Return does now. nil while sending or after an answer, so Return can't send twice.
     public var primary: AskAction? {
         switch phase {

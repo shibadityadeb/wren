@@ -77,8 +77,39 @@ public struct CommandIntent: Equatable, Sendable {
 
     /// Stable name for logs and tests: the operation (never the user's words).
     public var action: String { operation.name }
+
+    /// What authorizes the operation (checked by the broker or by the user at run time; the router grants nothing).
+    public var authorization: String {
+        switch operation {
+        case .createReminder: BuiltInAction.createReminder.rawValue
+        case .createTask: BuiltInAction.applyInterpretation.rawValue
+        case .changeItem: "your confirmation of the preview"
+        case .delegateToChatGPT, .followUpDelegation: "\(BuiltInAction.chatgptHandoff.rawValue) (website) or \(BuiltInAction.delegateToExternalAI.rawValue) (in Wren)"
+        case .searchGmail, .openEmail: BuiltInAction.readEmail.rawValue
+        case .markEmailRead: "\(BuiltInAction.markEmailRead.rawValue) and your confirmation"
+        case .queryCalendar: BuiltInAction.readCalendar.rawValue
+        case .queryStoredItems, .generalQuestion, .openDelegationResult, .saveNote, .capture, .clarifyIntent: "none (stays on this Mac)"
+        }
+    }
+
+    /// The subsystem that runs it.
+    public var handler: String {
+        switch operation {
+        case .createReminder: "ItemExecution.createReminder"
+        case .createTask: "ItemExecution.createTask"
+        case .changeItem: "ContextResolver proposal"
+        case .delegateToChatGPT, .followUpDelegation: "ChatGPT (your mode: website or in Wren)"
+        case .generalQuestion: "local model"
+        case .queryStoredItems: "stored items"
+        case .searchGmail, .openEmail, .markEmailRead: "Gmail"
+        case .queryCalendar: "calendar"
+        case .openDelegationResult: "Delegate"
+        case .saveNote, .capture: "store"
+        case .clarifyIntent: "a question back"
+        }
+    }
     /// For logs: operation, destination, rule and confidence. Contains no user text.
-    public var summary: String { "\(operation.name) → \(destination.rawValue) (rule \(rule.letter) \(rule.rawValue), confidence \(String(format: "%.2f", confidence)))" }
+    public var summary: String { "\(operation.name) → \(destination.rawValue) via \(handler) (rule \(rule.letter) \(rule.rawValue), confidence \(String(format: "%.2f", confidence)))" }
 }
 
 /// The single router for every entry point: typed capture, the capture panel, voice transcripts,
@@ -87,7 +118,8 @@ public struct CommandIntent: Equatable, Sendable {
 /// for inputs these rules leave as a plain capture, and its reading is checked against the words.
 public enum CommandRouter {
     public static func intent(for raw: String, now: Date, calendar: Calendar = .current) -> CommandIntent {
-        let stripped = ReminderCommand.stripAddress(raw).trimmingCharacters(in: .whitespacesAndNewlines)
+        // Speech recognition's spellings of the assistant ("chat G P T", "Chad GPT") read as ChatGPT.
+        let stripped = IntentRouter.normalizeAssistantName(ReminderCommand.stripAddress(raw)).trimmingCharacters(in: .whitespacesAndNewlines)
         let request = CommandGrammar.request(stripped)
         func make(_ op: ExecutionOperation, _ d: CommandDestination, _ rule: RoutingRule, _ confidence: Double, content: String? = nil) -> CommandIntent {
             CommandIntent(operation: op, destination: d, rule: rule, confidence: confidence, request: request, content: content ?? request, original: raw)
@@ -121,7 +153,11 @@ public enum CommandRouter {
         // Rule B: ChatGPT, when the user names it as who should do the work now.
         // Follow-ups first: "continue that research in ChatGPT" refers to an earlier request.
         if let f = DelegationFollowUp.detect(stripped) { return make(.followUpDelegation(f), .chatgpt, .delegationFollowUp, 0.9) }
-        if let ask = IntentRouter.aiRequest(stripped) { return make(.delegateToChatGPT(ask), .chatgpt, .assistantRequest, 0.95, content: ask.prompt) }
+        if var ask = IntentRouter.aiRequest(stripped) {
+            // The request records exactly what was said; only routing saw the normalized name.
+            ask.original = ReminderCommand.stripAddress(raw).trimmingCharacters(in: .whitespacesAndNewlines)
+            return make(.delegateToChatGPT(ask), .chatgpt, .assistantRequest, 0.95, content: ask.prompt)
+        }
         if ExecutionRouter.addressesAssistantWithoutRequest(stripped) {
             return make(.clarifyIntent("What should ChatGPT do? For example: “ask GPT to research the basics of quantum physics”."), .user, .assistantWithoutRequest, 1)
         }

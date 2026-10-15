@@ -787,3 +787,14 @@ A click opens `EmailMessage.webURL` (`mail.google.com/mail/?authuser=<account>#a
 
 **Quit.** `AppModel.stopBackgroundWork` sets `stopping` and invalidates the scheduler and mail timers. It cancels a pending reconcile and ends tab watching. macOS keeps the scheduled reminders.
 
+**0.12.1.**
+- `IntentRouter.normalizeAssistantName` runs before routing (speech spellings of ChatGPT and GPT). A
+  request-noun pattern covers "make a query at/, ChatGPT …". `CommandIntent` also carries
+  `authorization` and `handler`.
+- `AskCard.headline` (WrenCore) is the only source of the panel's headline and of the voice outcome
+  for ask cards. It is built from the destination that ran and its real phase.
+- `ChatGPTAutoSend` (pure decisions), `BrowserTabs.focus` and `KeyPresser` (WrenKit, `CGEvent.postToPid`
+  to the frontmost browser only) implement the opt-in **Send it for me** inside `watchConversation`. It
+  presses once, after the page has dropped `q=`, and success is only the `/c/<id>` address.
+- `TranscriptAssessment.checkBeforeSending` holds doubtful spoken ChatGPT requests for review.
+

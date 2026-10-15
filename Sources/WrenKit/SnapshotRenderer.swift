@@ -163,6 +163,20 @@ public enum SnapshotRenderer {
         try render(CaptureView(state: web, submit: { _ in }, cancel: {}).padding(20).background(Color(white: 0.85)),
                    size: CGSize(width: 600, height: 280), appearance: .aqua, to: dir.appendingPathComponent("capture-chatgpt-web-light.png"))
 
+        // A spoken question answered by local AI: the headline names local AI and the answer is shown.
+        let local = CaptureState()
+        local.text = "What is gradient descent?"
+        local.voicePhase = .completed("Local AI answered")
+        var localCard = AskCard(request: AIRequest(prompt: "What is gradient descent?", original: local.text, target: nil), destination: .local)
+        localCard.localAvailable = true
+        localCard.phase = .answered(text: "Gradient descent is an optimization algorithm that minimizes a function by repeatedly moving in the direction of steepest descent, the negative of the gradient. In machine learning it adjusts a model's parameters step by step to reduce the loss.",
+                                    source: "Local model qwen2.5:3b, on this Mac", recordID: UUID())
+        local.ask = localCard
+        for (appearance, tag) in [(NSAppearance.Name.aqua, "light"), (.darkAqua, "dark")] {
+            try render(CaptureView(state: local, submit: { _ in }, cancel: {}).padding(20).background(Color(white: tag == "dark" ? 0.15 : 0.85)),
+                       size: CGSize(width: 600, height: 340), appearance: appearance, to: dir.appendingPathComponent("capture-local-answer-\(tag).png"))
+        }
+
         // Voice: each push-to-talk state, with sample text.
         func voiceState(_ phase: VoiceSession.Phase, _ text: String, _ name: String, height: CGFloat = 200, setup: (CaptureState) -> Void = { _ in }) throws {
             let st = CaptureState()

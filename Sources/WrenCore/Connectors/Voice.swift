@@ -82,6 +82,16 @@ public enum TranscriptAssessment: Equatable, Sendable {
     case empty
 
     public static let lowConfidence = 0.35
+    /// Below this, a spoken request that would leave the Mac (sent to ChatGPT) is shown for checking
+    /// first. Seen live: 0.78 for "make a query at ChatGPT? What is the gradient descent machine learning?".
+    public static let externalConfidence = 0.85
+
+    /// Words to show before a spoken request goes to ChatGPT, when the recogniser wasn't sure of them.
+    /// The destination stays ChatGPT: Return sends exactly what's in the field. nil: run it.
+    public static func checkBeforeSending(destination: CommandDestination, confidence: Double?) -> String? {
+        guard destination == .chatgpt, let c = confidence, c < externalConfidence else { return nil }
+        return "This goes to ChatGPT. Check the words I heard, fix any, then press Return."
+    }
 
     public static func assess(_ t: FinalTranscript) -> TranscriptAssessment {
         let text = t.text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -170,6 +180,8 @@ public final class VoiceSession {
     public var maxHold: TimeInterval = 60
     var endpointer: CommandEndpointer?
     var startedAt: Date?
+    /// The recogniser's confidence in the last final transcript (nil when it didn't report one).
+    public private(set) var lastConfidence: Double?
     /// When the microphone actually started recording this command (nil when it isn't recording).
     public var listeningSince: Date? { phase.isCapturingPhase ? startedAt : nil }
     /// Bumped by every start, cancel and shutdown so a late permission answer or a late final
@@ -262,6 +274,7 @@ public final class VoiceSession {
     }
 
     func transcribed(_ t: FinalTranscript) {
+        lastConfidence = t.confidence
         let assessment = TranscriptAssessment.assess(t)
         let text = t.text.trimmingCharacters(in: .whitespacesAndNewlines)
         liveText = ""

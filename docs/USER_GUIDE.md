@@ -49,12 +49,16 @@ Wren reads what you asked it to do first, then what that request is about. "Remi
 | "remind me…", "can you make a reminder to…", "don't let me forget to…" | Creates a reminder |
 | "I need to / have to / must …", "make a task to…", "the essay is due Friday" | Creates a task, with the deadline you said (or none) |
 | "move…", "snooze…", "mark … as done", "remind me a day before the deadline" | Changes that item, after showing you the change |
-| "ask GPT…", "tell ChatGPT to…", "search in GPT for…" | Sends it to ChatGPT, in the mode you chose. It never asks "local or ChatGPT?" |
+| "ask GPT…", "tell ChatGPT to…", "search in GPT for…", "make a query at ChatGPT…", "hey ChatGPT, …" | Sends it to ChatGPT, in the mode you chose. It never asks "local or ChatGPT?" and never answers with the local AI. Speech spellings like "chat G P T" count |
 | A question that names no assistant | Answers from your items ("what should I work on today?") or with the local AI ("what is gradient descent?") |
 | "anything urgent in my inbox?", "what meetings do I have tomorrow?" | Asks your connected Gmail or calendar; if it isn't connected, says so instead of guessing |
 | Something unclear | Asks one short question |
 
 To see how Wren reads a sentence without running it, a developer can use `swift run wren-tools route "…"`.
+
+The panel's headline always names who did the work: "Local AI answered", "ChatGPT answered, in Wren", or, for the ChatGPT website, what Wren really knows ("Prompt loaded, submission unverified", "Submitted to ChatGPT"). If speech recognition wasn't sure of a request that would go to ChatGPT, Wren leaves the words in the field for you to check and press Return.
+
+**Send it for me** (Connectors › ChatGPT, off by default): Wren presses Enter in the ChatGPT tab it opened, so the question is sent in your own ChatGPT account. It says "Submitted to ChatGPT", with the conversation link, only when ChatGPT starts the conversation. It needs **Detect when I send it** and Accessibility permission for Wren (System Settings › Privacy & Security › Accessibility).
 
 ### Reminders
 
@@ -290,6 +294,9 @@ Details: [ARCHITECTURE.md](../ARCHITECTURE.md) §18.
 |---|---|---|
 | Notifications | Reminders, briefing, check-in, with actions | The first time a capture gets a reminder, or via **Allow…** in the menu |
 | Login item | Open Wren at login | Only when you turn it on in Settings › Startup; macOS shows it in System Settings › General › Login Items |
+| Microphone and Speech Recognition | Push-to-talk, transcribed on this Mac | The first time you hold ⌥ Space |
+| Automation (control your browser) | Optional: see the address of the ChatGPT tab Wren opened, to know when your question was sent | When you turn on Detect conversation in Connectors › ChatGPT |
+| Accessibility | Optional: **Send it for me** presses Enter in that ChatGPT tab, and nowhere else | When you turn on Send it for me; you switch Wren on in System Settings › Privacy & Security › Accessibility |
 
 The global shortcut needs no Accessibility or Input Monitoring permission. Wren registers exactly one key combination through the standard macOS hotkey API and never sees any other keystroke. The microphone is used only while you record a voice command (see Voice). Wren needs no file access.
 

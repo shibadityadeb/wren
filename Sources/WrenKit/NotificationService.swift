@@ -156,10 +156,11 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Wre
         let content = UNMutableNotificationContent()
         let q = String(r.task.prefix(90)) + (r.task.count > 90 ? "…" : "")
         switch r.status {
-        case .completed: content.title = "GPT has finished"; content.body = DelegationText.notificationLine(r)
-        case .partial: content.title = "GPT stopped early: \(q)"; content.body = "Part of the answer was kept. View result or retry."
-        case .cancelled: content.title = "GPT request cancelled: \(q)"; content.body = "View request."
-        default: content.title = "GPT request failed: \(q)"; content.body = (r.error.map { String($0.prefix(140)) } ?? "View details.") + (r.canRetry ? " You can retry it." : "")
+        // Only requests run with ChatGPT inside Wren get here; the title says where the answer is.
+        case .completed: content.title = "ChatGPT finished (in Wren)"; content.body = DelegationText.notificationLine(r)
+        case .partial: content.title = "ChatGPT stopped early (in Wren): \(q)"; content.body = "Part of the answer was kept. View result or retry."
+        case .cancelled: content.title = "ChatGPT request cancelled: \(q)"; content.body = "View request."
+        default: content.title = "ChatGPT request failed: \(q)"; content.body = (r.error.map { String($0.prefix(140)) } ?? "View details.") + (r.canRetry ? " You can retry it." : "")
         }
         content.sound = sound
         content.categoryIdentifier = Category.delegation.rawValue
@@ -254,7 +255,16 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Wre
     // MARK: Delegate
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        [.banner, .sound, .list]
+        // Proof of delivery for the log: the kind only (reminder, day-before, mail…), never the text.
+        Logger(subsystem: "com.shibadityadeb.wren", category: "notifications")
+            .notice("notification shown: \(Self.kind(of: notification.request), privacy: .public)")
+        return [.banner, .sound, .list]
+    }
+
+    nonisolated static func kind(of r: UNNotificationRequest) -> String {
+        if r.identifier.hasPrefix(ReminderScheduler.prefix) { return r.identifier.contains(".before.") ? "deadline heads-up (scheduled)" : "reminder (scheduled)" }
+        if let k = r.content.userInfo["kind"] as? String { return k }
+        return r.content.userInfo["commitmentID"] != nil ? "reminder (delivered by Wren)" : "other"
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
@@ -266,6 +276,8 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Wre
         let kind = info["kind"] as? String
         let actionID = response.actionIdentifier
         let text = (response as? UNTextInputNotificationResponse)?.userText
+        Logger(subsystem: "com.shibadityadeb.wren", category: "notifications")
+            .notice("notification opened: \(Self.kind(of: response.notification.request), privacy: .public) action=\(actionID == UNNotificationDefaultActionIdentifier ? "click" : actionID, privacy: .public)")
         await MainActor.run {
             let r: Response?
             if let delegationID, actionID == Action.viewResult.rawValue || actionID == UNNotificationDefaultActionIdentifier {
