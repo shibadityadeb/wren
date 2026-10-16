@@ -420,7 +420,8 @@ These need the maintainer or the user. They aren't code defects:
 0. **B-1, 16 Oct: Google refuses Wren's client secret.** A direct token refresh returns
    `401 invalid_client: The provided client secret is invalid`. The same secret is built into the
    installed 0.12.1, so Gmail and Google Calendar fail in every build until a valid secret from
-   Wren's desktop OAuth client is in `config/providers.env` and Wren is rebuilt.
+   Wren's desktop OAuth client is in `config/providers.env` and Wren is rebuilt. **Resolved the same day:** a new secret was issued, the refresh returned 200, and the rebuilt app
+   synced and sent the inbox review (MANUAL_TESTS P-11a).
 
 1. **ChatGPT website submission.** OpenAI provides no supported way for an app to send a message
    into your ChatGPT conversation or to read its answer. Wren fills in the question; you press Enter.
