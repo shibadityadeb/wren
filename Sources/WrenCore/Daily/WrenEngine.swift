@@ -149,15 +149,17 @@ public final class WrenEngine {
             let checkIn = CheckIn.build(from: items, now: now, calendar: cal, insights: fresh)
             let empty = e == .briefing ? briefing.isEmpty : checkIn.isEmpty
             if empty && !s.sendEmptySummaries { set(.skippedEmpty); return .skippedEmpty }
-            // Record first (at-most-once), then deliver.
-            set(.sent)
-            guard canDeliver, let notifier else { set(.undelivered); return .undelivered }
+            // Recorded before delivery so a restart never sends it twice; recorded as undelivered until
+            // macOS accepts it, so a quit or crash in between doesn't leave it looking delivered.
+            set(.undelivered)
+            guard canDeliver, let notifier else { return .undelivered }
             let ok: Bool
             switch e {
             case .briefing: ok = await notifier.deliverBriefing(briefing)
             case .checkIn: ok = await notifier.deliverCheckIn(checkIn)
             }
-            if !ok { set(.undelivered); return .undelivered }
+            if !ok { return .undelivered }
+            set(.sent)
             // Each observation is raised once per unchanged situation.
             try? store.markSurfaced(e == .briefing ? briefing.surfacedInsights : checkIn.decisions, now: now)
             return .sent

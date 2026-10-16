@@ -226,11 +226,83 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Wre
             // Wall-clock components only, so it follows daylight-saving and time-zone changes.
             trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: true)
         }
-        try await center.add(UNNotificationRequest(identifier: r.id, content: content, trigger: trigger))
+        do {
+            try await center.add(UNNotificationRequest(identifier: r.id, content: content, trigger: trigger))
+            Self.lifecycle("schedule", id: r.id, fire: trigger.nextTriggerDate(), result: "accepted", auth: status)
+        } catch {
+            let e = error as NSError
+            Self.lifecycle("schedule", id: r.id, fire: trigger.nextTriggerDate(), result: "refused \(e.domain) \(e.code)", auth: status)
+            throw error
+        }
     }
 
     func cancel(ids: [String]) {
         center.removePendingNotificationRequests(withIdentifiers: ids)
+        for id in ids { Self.lifecycle("cancel", id: id, fire: nil, result: "removed", auth: status) }
+    }
+
+    /// One line per notification lifecycle step: operation, identifier, local fire time, result and
+    /// permission. Identifiers hold only Wren's item ids and times, never titles or message text.
+    nonisolated static func lifecycle(_ op: String, id: String, fire: Date?, result: String, auth: UNAuthorizationStatus) {
+        let when = fire.map { $0.formatted(.iso8601.year().month().day().time(includingFractionalSeconds: false).timeZone(separator: .omitted)) } ?? "-"
+        let local = fire.map { $0.formatted(date: .abbreviated, time: .standard) } ?? "-"
+        Logger(subsystem: "com.shibadityadeb.wren", category: "notifications")
+            .notice("lifecycle op=\(op, privacy: .public) id=\(id, privacy: .public) fire=\(when, privacy: .public) local=\(local, privacy: .public) result=\(result, privacy: .public) auth=\(authName(auth), privacy: .public)")
+    }
+
+    nonisolated static func authName(_ s: UNAuthorizationStatus) -> String {
+        switch s {
+        case .authorized: "authorized"
+        case .denied: "denied"
+        case .provisional: "provisional"
+        case .notDetermined: "notDetermined"
+        case .ephemeral: "ephemeral"
+        @unknown default: "unknown"
+        }
+    }
+
+    // MARK: Diagnostics
+
+    /// What macOS says about Wren's notifications right now.
+    func health() async -> NotificationHealth {
+        let s = await center.notificationSettings()
+        status = s.authorizationStatus
+        let pending = await center.pendingNotificationRequests()
+        let delivered = await center.deliveredNotifications()
+        let prefix = ReminderScheduler.prefix
+        return NotificationHealth(status: s.authorizationStatus, alertStyle: s.alertStyle, notificationCenter: s.notificationCenterSetting,
+                                  sound: s.soundSetting, pendingReminders: pending.filter { $0.identifier.hasPrefix(prefix) }.count,
+                                  deliveredInNotificationCenter: delivered.count, bundleID: Bundle.main.bundleIdentifier ?? "-",
+                                  appPath: Bundle.main.bundlePath, checkedAt: Date())
+    }
+
+    /// "Send test notification": a real request macOS fires on its own after `seconds`, then a check
+    /// that it's pending. Whether it was shown is checked later with `wasDelivered`.
+    func scheduleTest(after seconds: TimeInterval) async -> (id: String, accepted: Bool, pending: Bool, error: String?) {
+        let id = "wren.test.\(Int(Date().timeIntervalSince1970))"
+        let content = UNMutableNotificationContent()
+        content.title = "Wren test notification"
+        content.body = "If you can read this, macOS is showing Wren's notifications."
+        content.sound = sound
+        content.userInfo = ["kind": "test"]
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: max(1, seconds), repeats: false)
+        let fire = Date().addingTimeInterval(max(1, seconds))
+        do {
+            try await center.add(UNNotificationRequest(identifier: id, content: content, trigger: trigger))
+            let pending = await center.pendingNotificationRequests().contains { $0.identifier == id }
+            Self.lifecycle("test", id: id, fire: fire, result: pending ? "accepted, pending" : "accepted, not pending", auth: status)
+            return (id, true, pending, nil)
+        } catch {
+            let e = error as NSError
+            Self.lifecycle("test", id: id, fire: fire, result: "refused \(e.domain) \(e.code)", auth: status)
+            return (id, false, false, "\(e.localizedDescription) (\(e.domain) \(e.code))")
+        }
+    }
+
+    /// True when macOS reports the notification as delivered (it's in Notification Center). That proves
+    /// delivery, not that a banner was on screen: Focus and Do Not Disturb deliver silently.
+    func wasDelivered(_ id: String) async -> Bool {
+        await center.deliveredNotifications().contains { $0.request.identifier == id }
     }
 
     /// Debug and diagnostics: pending reminder requests with their next fire dates.
@@ -246,8 +318,13 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Wre
     }
 
     private func add(_ id: String, _ content: UNMutableNotificationContent) async -> Bool {
-        do { try await center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil)); return true } catch {
-            log.error("add failed: \(error.localizedDescription, privacy: .public)")
+        do {
+            try await center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
+            Self.lifecycle("deliver", id: id, fire: Date(), result: "accepted", auth: status)
+            return true
+        } catch {
+            let e = error as NSError
+            Self.lifecycle("deliver", id: id, fire: Date(), result: "refused \(e.domain) \(e.code)", auth: status)
             return false
         }
     }
@@ -257,12 +334,13 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Wre
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
         // Proof of delivery for the log: the kind only (reminder, day-before, mail…), never the text.
         Logger(subsystem: "com.shibadityadeb.wren", category: "notifications")
-            .notice("notification shown: \(Self.kind(of: notification.request), privacy: .public)")
+            .notice("notification shown: \(Self.kind(of: notification.request), privacy: .public) id=\(notification.request.identifier, privacy: .public) (Wren was in front)")
         return [.banner, .sound, .list]
     }
 
     nonisolated static func kind(of r: UNNotificationRequest) -> String {
         if r.identifier.hasPrefix(ReminderScheduler.prefix) { return r.identifier.contains(".before.") ? "deadline heads-up (scheduled)" : "reminder (scheduled)" }
+        if r.identifier.hasPrefix("wren.test.") { return "test" }
         if let k = r.content.userInfo["kind"] as? String { return k }
         return r.content.userInfo["commitmentID"] != nil ? "reminder (delivered by Wren)" : "other"
     }
@@ -277,7 +355,7 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Wre
         let actionID = response.actionIdentifier
         let text = (response as? UNTextInputNotificationResponse)?.userText
         Logger(subsystem: "com.shibadityadeb.wren", category: "notifications")
-            .notice("notification opened: \(Self.kind(of: response.notification.request), privacy: .public) action=\(actionID == UNNotificationDefaultActionIdentifier ? "click" : actionID, privacy: .public)")
+            .notice("notification opened: \(Self.kind(of: response.notification.request), privacy: .public) id=\(response.notification.request.identifier, privacy: .public) action=\(actionID == UNNotificationDefaultActionIdentifier ? "click" : actionID, privacy: .public)")
         await MainActor.run {
             let r: Response?
             if let delegationID, actionID == Action.viewResult.rawValue || actionID == UNNotificationDefaultActionIdentifier {
@@ -291,7 +369,7 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Wre
                 case Action.openMail.rawValue: onResponse?(.mail(.open(messageID)))
                 // A click on the alert opens that conversation in Gmail (the "N more" summary opens Wren's Inbox).
                 case Action.openInGmail.rawValue, UNNotificationDefaultActionIdentifier:
-                    onResponse?(.mail(messageID.hasPrefix("summary-") ? .open(messageID) : .openInGmail(messageID)))
+                    onResponse?(.mail(messageID.hasPrefix("summary-") || messageID.hasPrefix("review-") ? .open(messageID) : .openInGmail(messageID)))
                 default: break
                 }
                 return
@@ -313,6 +391,40 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Wre
             default: r = nil
             }
             if let r { onResponse?(r) }
+        }
+    }
+}
+
+/// macOS's view of Wren's notifications, for Settings › Notifications.
+struct NotificationHealth: Equatable {
+    var status: UNAuthorizationStatus
+    var alertStyle: UNAlertStyle
+    var notificationCenter: UNNotificationSetting
+    var sound: UNNotificationSetting
+    var pendingReminders: Int
+    var deliveredInNotificationCenter: Int
+    var bundleID: String
+    var appPath: String
+    var checkedAt: Date
+
+    var allowed: Bool { status == .authorized || status == .provisional }
+    /// Allowed, but set to "None" in System Settings: notifications go to Notification Center only.
+    var bannersOff: Bool { allowed && alertStyle == .none }
+    var permissionText: String {
+        switch status {
+        case .authorized: "Allowed"
+        case .provisional: "Allowed quietly (provisional)"
+        case .denied: "Turned off in System Settings"
+        case .notDetermined: "Not asked yet"
+        default: "Unknown"
+        }
+    }
+    var styleText: String {
+        switch alertStyle {
+        case .banner: "Banners"
+        case .alert: "Alerts (stay until dismissed)"
+        case .none: "None: only in Notification Center"
+        @unknown default: "Unknown"
         }
     }
 }

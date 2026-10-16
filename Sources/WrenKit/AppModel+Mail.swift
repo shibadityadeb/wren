@@ -36,10 +36,35 @@ extension AppModel {
         nextMailCheck = Date().addingTimeInterval(interval)
     }
 
-    /// One check: sync, alerts, then the digest if one is due. `origin` is the user for "Check now".
+    /// Signed in to Gmail, even if the last check failed: worth checking again.
+    var gmailRecoverable: Bool {
+        if previewGmail != nil { return false }
+        if case .temporarilyUnavailable = hub.gmail.state { return true }
+        return false
+    }
+
+    /// One check: sync, alerts, the inbox review, then the digest if one is due. `origin` is the user for "Check now".
     func checkMail(_ origin: ActionOrigin) async {
-        defer { if gmailUsable { scheduleMailCheck() } else { mailTimer?.invalidate(); nextMailCheck = nil } }
-        guard gmailUsable, let broker, !mailSyncing, !stopping else { return }
+        // A failed check (offline at launch or after sleep, a Google outage) doesn't end monitoring:
+        // Wren keeps trying with a growing delay. Only a sign-out or revoked access stops it.
+        defer {
+            if gmailUsable || gmailRecoverable { scheduleMailCheck() } else { mailTimer?.invalidate(); nextMailCheck = nil }
+        }
+        guard !mailSyncing, !stopping else { return }
+        if !gmailUsable, gmailRecoverable {
+            await hub.gmail.refresh()
+            connectorsChanged()
+            if !gmailUsable {
+                mailBackoff = min(6, max(2, mailBackoff * 2))
+                mailbox.lastError = hub.gmail.state.detail.map { "Couldn't reach Gmail: \($0)" } ?? "Couldn't reach Gmail. Wren will try again."
+                mailbox.lastErrorAt = clock.now
+                mailStatus = mailbox.lastError
+                log.notice("mail check: Gmail still unavailable; retrying in \(Int(Double(self.mailPrefs.pollingMinutes) * self.mailBackoff), privacy: .public) min")
+                return
+            }
+            log.notice("mail check: Gmail reachable again")
+        }
+        guard gmailUsable, let broker else { return }
         if case .system = origin, !backgroundMailAllowed { mailStatus = "Background checking is off."; return }
         mailSyncing = true
         defer { mailSyncing = false }
@@ -53,9 +78,12 @@ extension AppModel {
             mailBackoff = 1
             mailbox = working
             mailStatus = nil
+            log.notice("mail check: \(result.mode.rawValue, privacy: .public) sync ok, \(result.newMessageIDs.count, privacy: .public) new, \(self.mailbox.items.count, privacy: .public) kept")
+            await deliverInboxReviewIfDue()
             await deliverMailAlerts(newIDs: result.newMessageIDs)
             await deliverDigestIfDue()
         } catch {
+            log.notice("mail check failed: \(String(describing: error).prefix(60), privacy: .public)")
             mailbox.lastError = Self.mailProblem(error); mailbox.lastErrorAt = now
             mailStatus = mailbox.lastError
             switch error {
@@ -104,6 +132,30 @@ extension AppModel {
         if !d.individual.isEmpty || !d.summarized.isEmpty {
             log.notice("mail alerts: \(d.individual.count, privacy: .public) individual, \(d.summarized.count, privacy: .public) summarized")
         }
+    }
+
+    // MARK: Inbox review
+
+    /// Once, after the first successful sync (and once for mailboxes Wren already had): one notification
+    /// about unread mail that was already there and needs attention. Recorded and saved before delivery.
+    func deliverInboxReviewIfDue() async {
+        guard InboxReview.isDue(mailbox) else { return }
+        let found = InboxReview.run(&mailbox, now: clock.now)
+        saveMailbox()
+        guard let n = InboxReview.notification(found) else { log.notice("inbox review: nothing needs attention"); return }
+        var ok = false
+        if pause?.isActive(at: clock.now) != true, await notifications.canDeliver() {
+            ok = await notifications.deliverMailAlert(id: "review-\(Int(clock.now.timeIntervalSince1970))", title: n.title, body: n.body,
+                                                      canMarkRead: false, isSummary: true)
+        }
+        mailbox.inboxReview?.notified = ok
+        saveMailbox()
+        log.notice("inbox review: \(found.count, privacy: .public) need attention; notification accepted by macOS: \(ok, privacy: .public)")
+    }
+
+    var inboxReviewItems: [MailItem] {
+        let _ = mailVersion
+        return (mailbox.inboxReview?.messageIDs ?? []).compactMap { mailbox.items[$0] }.filter { $0.message.unread && $0.dismissedAt == nil }
     }
 
     // MARK: Digest

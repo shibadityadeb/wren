@@ -15,7 +15,58 @@ touched. Debug URLs exist only in debug builds. Read results with:
 /usr/bin/log stream --style compact --predicate 'subsystem == "com.shibadityadeb.wren" AND processImagePath CONTAINS "Wren Dev.app"'
 ```
 
-## Last pass: 2026-10-14 night, branch `fix/chatgpt-destination-and-reminders` (0.12.1)
+## Last pass: 2026-10-16, branch `fix/p0-delivery` (0.12.2), installed app
+
+What triggered it: two days of using the installed 0.12.1 without seeing reminders or email alerts.
+This pass ran on **the installed app itself**: a debug build of this branch with the real bundle ID
+(`com.shibadityadeb.wren`) at `/Applications/Wren.app`, so with your notification permission, data and
+Google sign-in. The previous 0.12.1 was backed up to `build/Wren-0.12.1-backup.app`. Debug URLs use
+`wren://debug/…` in that build. Evidence: Wren's log and Notification Center's own log
+(`log stream … process == "NotificationCenter"`).
+
+**Audit of the installed 0.12.1 (logs from 13–16 Oct, read-only):**
+- macOS permission: **Allowed, Banners** (`debug health`). Not the cause.
+- **Do Not Disturb on since 14 Oct 21:26** (`activeModeIdentifier=com.apple.donotdisturb.mode.default`, no later change). Every Wren notification was delivered into Notification Center **muted** ("muted by DND suppression: delay", `isMuted: true`). Still on during this pass.
+- The 10:00 reminder on 15 Oct was posted **twice**: `wren.reminder.22C7….at.…` (macOS) and `reminder-22C7…` (Wren). Defect D-23.
+- Wren started at 09:59 on 15 Oct while offline (`Network error -1009`). Gmail was marked unavailable and never checked again: the mailbox file was last written at 00:28 that day. Defect D-24.
+- Mailbox: 182 messages, 0 alerts ever. 3 unread urgent, 1 time-sensitive and 10 financial, all from before monitoring started (baseline, never alerted). Defects D-25, D-26.
+- Briefings 14–16 Oct: `skippedEmpty`. Correct for the data (no deadlines; Gmail and Calendar unreachable). Digests of 13 and 14 Oct: delivered, muted by Do Not Disturb.
+- **Google now refuses Wren's client secret** (`401 invalid_client: The provided client secret is invalid`, from a direct token refresh). Identical in 0.12.1 and this build. Blocker B-1.
+
+| Kind | Meaning |
+|---|---|
+| Automated | `swift test`: 406 tests, 0 failures, 4 skipped (6 of them new in this pass) |
+| Mock-based | Part of the automated run: `FakeReminderCenter` for macOS notifications, `FakeGmail` for Gmail |
+| Real macOS scheduling | The request is in macOS's pending list (`lifecycle op=schedule … result=accepted`, `debug pending`) |
+| Real delivery | macOS's Notification Center logged and listed it as delivered (`debug delivered`). This does not prove a banner was on screen |
+| Real Gmail | Against the authorized mailbox |
+| Scheduled-time briefing | The briefing at its configured time |
+
+| ID | Test | Kind | Result |
+|---|---|---|---|
+| P-1 | Permission belongs to the installed app | Real | **Passed live**: `permission=Allowed style=Banners bundle=com.shibadityadeb.wren path=/Applications/Wren.app` |
+| P-2 | Send test notification (15 s) | Real delivery | **Passed live**: `accepted, pending`, delivered at 11:34:30 (`delivered=true`). Notification Center: `isMuted: true` (Do Not Disturb), so no banner |
+| P-3 | Reminder 2 minutes ahead: saved, pending, Wren fully quit before it's due | Real scheduling + delivery | **Passed live**: saved (`pending`, next 11:36:47 in the database), `expected=1 pending=1`, Wren quit 11:35:04, macOS delivered it at **11:36:47** with Wren not running |
+| P-4 | Relaunch after P-3: no second notification | Real | **Passed live**: `reminders due: 1 recorded as shown`, the delivered list holds only macOS's request, and Wren posted no `reminder-…` copy |
+| P-5 | Reminder 1 minute ahead while Wren runs in the background (Chrome in front) | Real delivery | **Passed live**: delivered once at 11:39:15, recorded, no copy from Wren. This is the D-23 case, which failed in 0.12.1 |
+| P-6 | Task due Sunday 5 PM (2 days ahead) | Real scheduling | **Passed live**: `before` request Saturday 10:00 and `at` request Sunday 17:00, both pending (`expected=2 pending=2`). Delivery on those days not observed |
+| P-7 | Completing that task | Real | **Passed live**: both requests cancelled, `expected=0 pending=0` |
+| P-8 | Click a reminder: opens the task. **Done** completes it and removes it | Real | **Not run**: needs a click from you. Steps M-FIRE |
+| P-9 | Permission turned off: Wren reports the blocker; turned back on: reminders rescheduled | Real | **Not run**: needs you to switch it in System Settings. Covered by tests with the fake center |
+| P-10 | A banner actually on screen | Real | **Blocked**: Do Not Disturb is on. Turn it off, or allow Wren in Focus, then use Send test notification |
+| P-11a | After a new client secret (same day, 12:22): real sync and the inbox review on the installed release build | Real Gmail | **Passed live**: `wren-tools live-check gmail`: full sync 150 messages, incremental 0 new. The installed app: `incremental sync ok, 30 new, 154 kept`, `inbox review: 4 need attention; notification accepted by macOS: true`, shown at 12:22:50. Today's digest was delivered too. None of the 30 new messages met the alert threshold. B-1 is resolved |
+| P-11 | Gmail: urgent mail from another account, Open email, snooze, no duplicate, expired sign-in, window closed, stops on quit | Real Gmail | **Not run** (needs an email from another account and your clicks). Before the new secret: **Blocked (B-1)**: Google refuses the client secret, so no real sync is possible from any build. The code paths are unit-tested (mock-based). New triage rules checked offline against your stored mailbox (counts only): 2 unread messages moved up (a failed payment, a near deadline); the review would list 6 |
+| P-12 | Gmail unreachable at launch: checking resumes | Real | **Not run live** (needs Gmail to work first, B-1). In this build Wren correctly stops polling on `invalid_client` and the Inbox now says why |
+| P-13 | Briefing at its scheduled time; no duplicate after restart | Scheduled-time | **Not run**: today's briefing already ran (`skippedEmpty` at 11:09). To test: set **Briefing at** a few minutes ahead tomorrow morning |
+
+### Steps for you (0.12.2)
+
+1. **Do Not Disturb.** Turn it off in Control Center, or add Wren to the allowed apps in System Settings › Focus › Do Not Disturb. Then Settings › Notifications › **Send test notification**: a banner should appear in 10 seconds.
+2. **Google client secret (B-1).** Google Cloud Console › the project with Wren's desktop OAuth client › Credentials › that client. If its secret was reset, add a new secret. Put it in `config/providers.env` as `WREN_GOOGLE_CLIENT_SECRET`, rebuild (`scripts/build-app.sh release`) and reinstall. Then Inbox › **Check inbox now**: expect the inbox review notification.
+3. **M-FIRE.** `remind me to test Wren in 2 minutes`, wait for it, click it (the item opens), then do it again and choose **Done** (the item is completed and the notification goes).
+4. **Urgent mail.** From another account, send yourself "Your autopay failed". Within 5 minutes: one alert "Important email from …", Why: "says a payment failed or was declined". Click: Gmail opens that conversation.
+
+## Previous pass: 2026-10-14 night, branch `fix/chatgpt-destination-and-reminders` (0.12.1)
 
 What triggered it: in the installed 0.12.0, two spoken "ChatGPT" requests were answered by the local AI,
 and the panel said "GPT finished". The exact words came from the installed app's own records:

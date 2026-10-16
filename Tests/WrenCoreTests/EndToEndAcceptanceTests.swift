@@ -216,6 +216,17 @@ final class EndToEndAcceptanceTests: XCTestCase {
         XCTAssertEqual(s2.requests(for: c, now: h2.clock.now).count, 1)
     }
 
+    /// The brief's example: due Friday 5 PM, default reminder time 10 AM, added Thursday 9 AM (32 hours
+    /// ahead): Thursday 10 AM heads-up and Friday's reminder at the deadline.
+    func testATaskAddedTheMorningBeforeStillGetsItsHeadsUp() async throws {
+        let (h, center, s) = try setup()
+        h.clock.set(at(ist, 2026, 10, 15, 9))
+        let o = try await task(h, s, "I need to finish the report by Friday 5 PM")
+        XCTAssertEqual(o.deadline, at(ist, 2026, 10, 16, 17))
+        XCTAssertEqual(center.onceDates, [at(ist, 2026, 10, 15, 10), at(ist, 2026, 10, 16, 17)], "Thursday 10 AM heads-up, Friday 5 PM reminder")
+        XCTAssertTrue(o.allScheduled)
+    }
+
     func testMovingTheDeadlineMovesTheHeadsUpWithoutDuplicates() async throws {
         let (h, center, s) = try setup()
         let o = try await task(h, s, "I need to submit the assignment by Friday.")

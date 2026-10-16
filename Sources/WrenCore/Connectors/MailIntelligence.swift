@@ -83,6 +83,11 @@ public enum MailTriage {
         let request = has(text, /\b(could you|can you|would you|please (?:confirm|reply|respond|let me know|send|review|sign|approve)|let me know|are you able|need you to|kindly|your (?:input|approval|feedback|confirmation) (?:is )?(?:needed|required)|awaiting your|waiting for your)\b/) || m.subject.hasSuffix("?")
         let professional = has(text, /\b(recruit\w*|interview\w*|hiring|job (?:offer|opportunity|application)|offer letter|your application|candidate|position|role at|opportunity at|talent|headhunt\w*|linkedin)\b/)
         let financial = has(text, /\b(invoice|payment (?:due|failed|declined|received|reminder)|amount due|bill(?:ing)?|statement (?:is )?(?:ready|available)|receipt|refund|charged?|transaction|bank|card ending|overdue balance|subscription (?:renew\w*|expir\w*)|tax)\b/)
+        // Money problems that need the user, said in the message itself (never inferred from the sender alone).
+        let paymentFailed = has(text, /\b((?:payment|autopay|auto-?debit|direct debit|standing instruction|mandate|emi|transaction|transfer)\s+(?:has\s+|was\s+|is\s+)?(?:failed|declined|unsuccessful|bounced|returned|rejected)|failed (?:payment|autopay|transaction|auto-?debit)|insufficient (?:funds|balance))\b/)
+        let fraud = has(text, /\b(unrecogni[sz]ed (?:transaction|charge|payment|activity)|suspicious (?:transaction|charge|payment)|fraud\w*|unauthori[sz]ed (?:transaction|charge|payment|use)|did you (?:make|authori[sz]e|attempt) (?:this|a|the) (?:purchase|transaction|payment))\b/)
+        let restricted = has(text, /\b((?:card|account)\s+(?:has been |is |was |is now )?(?:blocked|locked|restricted|suspended|frozen|deactivated|on hold)|declined (?:at|for|on)|card (?:was )?declined)\b/)
+        let paymentDue = has(text, /\b(minimum (?:amount|payment)(?: due)?|payment due(?: date)?|payment reminder|due date|(?:total )?amount due|bill (?:is )?due|pay (?:by|before)|outstanding (?:balance|amount|dues)|overdue)\b/)
         let meetingChange = has(subject, /\b(rescheduled|moved to|time change|updated invitation|invitation updated|cancel+ed|postponed|new time)\b/)
         var deadline: Date?
         if has(text, /\b(due|deadline|by|before|until|expires?|no later than)\b/), let p = DateParser(calendar: calendar).parse(m.subject + " " + m.snippet, now: m.date) {
@@ -92,6 +97,13 @@ public enum MailTriage {
 
         if security { reasons.append("security notice about your account"); score += 50 }
         if urgentWords && !bulk { reasons.append("says it's urgent"); score += 30 }
+        // Promotions ("pay your bill and win…") don't count as account problems.
+        let moneyProblem = !bulk && (paymentFailed || fraud || restricted)
+        let moneyDue = !bulk && paymentDue
+        if !bulk && paymentFailed { reasons.append("says a payment failed or was declined"); score += 45 }
+        if !bulk && fraud { reasons.append("mentions an unrecognized or suspicious transaction"); score += 45 }
+        if !bulk && restricted { reasons.append("says a card or account is blocked, restricted or declined"); score += 40 }
+        if moneyDue { reasons.append("payment deadline mentioned in this message"); score += 25 }
         if let h = hoursToDeadline {
             if h < -24 { /* long past: not a reason by itself */ }
             else if h <= 24 { reasons.append("deadline within a day (\(DueText.describe(deadline!, hasTime: false, now: now, calendar: calendar)))"); score += 35 }
@@ -101,14 +113,14 @@ public enum MailTriage {
         if meetingChange { reasons.append("a meeting changed"); score += 25 }
         if request && !bulk && !automated { reasons.append("asks you something"); score += 20 }
         if professional && !bulk { reasons.append("work or recruiting"); score += 15 }
-        if financial { reasons.append("bill, payment or account notice"); score += 15 }
+        if financial && !moneyProblem && !moneyDue { reasons.append("bill, payment or account notice"); score += 15 }
         if bulk { score -= 20 }
         if rule == .notImportant { score = min(score, 0); reasons = ["you marked this sender not important"] }
 
         let category: MailCategory
         if rule == .notImportant { category = .informational }
-        else if security || (urgentWords && !bulk) || (hoursToDeadline.map { $0 >= -24 && $0 <= 24 } ?? false && !bulk) { category = .urgent }
-        else if meetingChange || (hoursToDeadline.map { $0 > 24 && $0 <= 72 } ?? false && !bulk) { category = .timeSensitive }
+        else if security || moneyProblem || (urgentWords && !bulk) || (hoursToDeadline.map { $0 >= -24 && $0 <= 24 } ?? false && !bulk) { category = .urgent }
+        else if meetingChange || moneyDue || (hoursToDeadline.map { $0 > 24 && $0 <= 72 } ?? false && !bulk) { category = .timeSensitive }
         else if request && !bulk && !automated { category = .needsResponse }
         else if professional && !bulk { category = .professional }
         else if financial { category = .financial }
@@ -117,8 +129,11 @@ public enum MailTriage {
         if reasons.isEmpty { reasons = [bulk ? "newsletter, promotion or automated update" : "no sign it needs action"] }
 
         let action: String = switch category {
-        case .urgent: security ? "Check your account security" : (deadline.map { "Handle before \(DueText.describe($0, hasTime: false, now: now, calendar: calendar))" } ?? "Look at this today")
-        case .timeSensitive: meetingChange ? "Check the new meeting time" : "Plan for the deadline"
+        case .urgent:
+            security ? "Check your account security"
+                : moneyProblem ? "Check with your bank or card provider (use their app or the number on your card)"
+                : (deadline.map { "Handle before \(DueText.describe($0, hasTime: false, now: now, calendar: calendar))" } ?? "Look at this today")
+        case .timeSensitive: meetingChange ? "Check the new meeting time" : moneyDue ? "Check the amount and pay before the due date" : "Plan for the deadline"
         case .needsResponse: "Reply"
         case .professional: "Review and reply if interested"
         case .financial: "Review the amount or account notice"
@@ -215,6 +230,8 @@ public struct MailboxState: Codable, Equatable, Sendable {
     public var senderRules: [String: SenderRule] = [:]
     public var digests: [DigestRecord] = []
     public var actions: [MailActionRecord] = []
+    /// The one-time review of mail already in the inbox, done after the first successful sync.
+    public var inboxReview: InboxReviewRecord?
     public init() {}
 
     public var inbox: [MailItem] { items.values.sorted { ($0.classification.score, $0.message.date) > ($1.classification.score, $1.message.date) } }
@@ -289,6 +306,11 @@ public enum MailSync {
         // Forget old, settled mail.
         let cutoff = now.addingTimeInterval(-keepDays * 86400)
         for (id, item) in state.items where item.message.date < cutoff { state.items[id] = nil; result.removed += 1 }
+        // Read every kept message again with today's rules and today's date (a deadline gets closer;
+        // a newer Wren reads better). Corrections the user made by hand stay.
+        for (id, item) in state.items where !item.classification.corrected {
+            state.items[id]?.classification = MailTriage.classify(item.message, settings: triage, now: now, calendar: calendar)
+        }
         state.lastSyncAt = now; state.lastError = nil; state.lastErrorAt = nil
         if state.monitoringSince == nil { state.monitoringSince = now }
         return result
@@ -362,6 +384,54 @@ public enum MailSync {
         result.newMessageIDs = add(ms, to: &state, account: state.account, settings: settings, now: now, calendar: calendar, baseline: false)
         state.historyID = h.historyID
         return result
+    }
+}
+
+// MARK: Inbox review
+
+/// What the inbox review found and whether macOS accepted its notification.
+public struct InboxReviewRecord: Codable, Equatable, Sendable {
+    public var at: Date
+    public var messageIDs: [String]
+    /// nil: no notification was needed (nothing found). false: there was one to show and macOS
+    /// didn't accept it (notifications off or paused); the review is still shown in Wren's Inbox.
+    public var notified: Bool?
+}
+
+/// The one-time look at mail that was already in the inbox when Wren connected, so important unread
+/// mail isn't ignored just because it arrived before Wren was watching. Local rules only.
+public enum InboxReview {
+    /// How far back the review (and "needs attention" lists) look.
+    public static let lookBackDays: TimeInterval = 14
+    /// Categories that mean "do something": urgent, time-sensitive (payment deadlines, meeting
+    /// changes) and replies owed. Routine statements, receipts and newsletters aren't listed.
+    public static let attentionCategories: Set<MailCategory> = [.urgent, .timeSensitive, .needsResponse]
+
+    public static func isDue(_ s: MailboxState) -> Bool { s.lastSyncAt != nil && s.inboxReview == nil }
+
+    /// Unread, not dismissed or snoozed, recent, and in an attention category; most pressing first.
+    public static func needsAttention(_ s: MailboxState, now: Date) -> [MailItem] {
+        let since = now.addingTimeInterval(-lookBackDays * 86400)
+        return s.items.values.filter {
+            $0.message.unread && $0.dismissedAt == nil && !$0.isSnoozed(at: now) && $0.message.date > since
+                && attentionCategories.contains($0.classification.category)
+        }.sorted { ($0.classification.category, -$0.classification.score, $1.message.date) < ($1.classification.category, -$1.classification.score, $0.message.date) }
+    }
+
+    /// Records the review (before any notification, so a restart can't repeat it) and returns what to show.
+    public static func run(_ s: inout MailboxState, now: Date) -> [MailItem] {
+        let found = needsAttention(s, now: now)
+        s.inboxReview = InboxReviewRecord(at: now, messageIDs: found.map(\.id), notified: nil)
+        return found
+    }
+
+    /// Sender and subject of the first three; never message bodies.
+    public static func notification(_ items: [MailItem]) -> (title: String, body: String)? {
+        guard !items.isEmpty else { return nil }
+        let title = items.count == 1 ? "Inbox review: 1 email may need attention" : "Inbox review: \(items.count) emails may need attention"
+        var lines = items.prefix(3).map { "\($0.message.senderName.isEmpty ? "Unknown sender" : $0.message.senderName): \($0.message.subject)" }
+        if items.count > 3 { lines.append("and \(items.count - 3) more in Wren's Inbox") }
+        return (title, lines.joined(separator: "\n"))
     }
 }
 
@@ -621,7 +691,9 @@ public enum MailAlertText {
         case .informational: kind = "Email"
         }
         let subject = item.message.subject.trimmingCharacters(in: .whitespacesAndNewlines)
-        let why = c.reasons.first.map { "Why: \($0)" } ?? c.category.label
+        // The most specific reason: "Gmail marked it important" and "you starred it" are only context.
+        let reason = c.reasons.first { $0 != "Gmail marked it important" && $0 != "you starred it" } ?? c.reasons.first
+        let why = reason.map { "Why: \($0)" } ?? c.category.label
         var lines = [subject.isEmpty ? "(no subject)" : "“\(subject)”"]
         if preview, let e = excerpt(item.message.snippet, subject: subject) { lines.append(e) }
         lines.append(why)

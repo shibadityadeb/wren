@@ -31,6 +31,8 @@ struct SettingsView: View {
                             timePicker("Check-in at", minutes: model.daily.checkInMinutes, range: DailySettings.checkInRange) { v in model.updateDaily { $0.checkInMinutes = v } }
                         }
                         Toggle("Send even when there's nothing to report", isOn: Binding(get: { model.daily.sendEmptySummaries }, set: { v in model.updateDaily { $0.sendEmptySummaries = v } }))
+                        Text("Today's briefing: \(Self.dailyStateText(model.todayRun.briefing, at: model.daily.briefingMinutes, enabled: model.daily.briefingEnabled)). Check-in: \(Self.dailyStateText(model.todayRun.checkIn, at: model.daily.checkInMinutes, enabled: model.daily.checkInEnabled)).")
+                            .font(.caption).foregroundStyle(model.todayRun.briefing == .undelivered || model.todayRun.checkIn == .undelivered ? Color.orange : Color.secondary)
                         Text("Each runs at most once a day. If your Mac was asleep, a briefing is sent on wake until the check-in time, and a check-in until 11 PM; after that it's skipped, never sent the next day.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
@@ -171,9 +173,7 @@ struct SettingsView: View {
                             if model.notificationStatus == .notDetermined {
                                 Button("Allow…") { model.requestNotificationPermission() }
                             } else {
-                                Button("Open System Settings") {
-                                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(AppIdentity.bundleID)")!)
-                                }
+                                Button("Open System Settings") { NSWorkspace.shared.open(AppModel.systemNotificationSettingsURL) }
                             }
                         }
                         Toggle("Play notification sounds", isOn: Binding(get: { model.settings.notificationSounds }, set: { model.settings.notificationSounds = $0; model.connectorsChanged() }))
@@ -184,9 +184,9 @@ struct SettingsView: View {
                         Toggle("Also remind me the day before a deadline", isOn: Binding(get: { model.settings.deadlineDayBefore }, set: { model.setDeadlineDayBefore($0) }))
                         Text("For a task with a deadline set at least a day ahead: one heads-up the day before at \(reminderHour):00, then the reminder on the day. A reminder time you choose yourself replaces both. Each is scheduled once and withdrawn when the task is done.")
                             .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                        Text(reminderSyncText).font(.caption).foregroundStyle(model.reminderSync.authorized && model.reminderSync.failed.isEmpty ? Color.secondary : Color.orange)
-                        Text("Reminders are handed to macOS ahead of time, so they arrive even when Wren isn't running. macOS may hide banners during Focus or Do Not Disturb. Briefings and check-ins need Wren running.")
+                        Text("Reminders are handed to macOS ahead of time, so they arrive even when Wren isn't running. Briefings, check-ins and email alerts need Wren running (use Open at login).")
                             .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        NotificationDiagnosticsView(model: model)
                     }
 
                     section("Your data") {
@@ -214,12 +214,18 @@ struct SettingsView: View {
         .onDisappear(perform: stopRecording)
     }
 
-    var reminderSyncText: String {
-        let r = model.reminderSync
-        if !r.authorized { return "Notifications are off, so reminders can only show inside Wren." }
-        if !r.failed.isEmpty { return "macOS didn't accept \(r.failed.count) reminder notification\(r.failed.count == 1 ? "" : "s"). Wren will retry." }
-        let n = model.pending.filter { !$0.scheduledNotificationIDs.isEmpty }.count
-        return n == 0 ? "No reminders scheduled." : "\(n) reminder\(n == 1 ? "" : "s") scheduled with macOS."
+    /// What really happened to today's daily event (from its ledger), or when it will run.
+    static func dailyStateText(_ s: DailyEventState, at minutes: Int, enabled: Bool) -> String {
+        switch s {
+        case .pending: enabled ? "due at \(DailyFooter.time(minutes))" : "off"
+        case .sent: "delivered to macOS"
+        case .skippedEmpty: "skipped, nothing to report"
+        case .missed: "missed (Wren wasn't running)"
+        case .undelivered: "not delivered (notifications off or paused); open it from the menu bar"
+        case .completed: "done"
+        case .dismissed: "dismissed"
+        case .disabled: "off"
+        }
     }
 
     var notificationText: String {
