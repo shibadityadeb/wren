@@ -100,7 +100,7 @@ withEnv({ SUPABASE_URL: "", SUPABASE_ANON_KEY: "" }, () => { const r = res(); st
 withEnv(env, () => { const r = res(); status({}, r); check(r.json().downloads === "ready" && !r.body.includes("abcdefgh"), "status says ready and shows no values"); });
 // Release override.
 check(withEnv({ WREN_RELEASE_TAG: "v9.9.9-preview.2" }, () => release().dmg.endsWith("/v9.9.9-preview.2/Wren-macOS-universal-unsigned.dmg")), "release tag override");
-check(withEnv({ WREN_RELEASE_TAG: "../../evil" }, () => release().tag === "v0.12.1-preview.1"), "a malformed tag is ignored");
+check(withEnv({ WREN_RELEASE_TAG: "../../evil" }, () => release().tag === "v0.12.3-preview.1"), "a malformed tag is ignored");
 
 if (failures.length) { console.error("✗ download functions:\n" + failures.map((f) => "  ✗ " + f).join("\n")); process.exit(1); }
 console.log("✓ download functions: sign-in redirect, token checks, recorded before the link, setting slips, unconfigured and failure cases");
