@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Guide — Wren</title>
+  <meta name="description" content="Set up Wren on your Mac step by step: install, notifications, reminders, voice, Gmail, ChatGPT and local AI.">
+  <meta name="theme-color" content="#f7f3ea">
+  <link rel="canonical" href="{{SITE_URL}}/guide/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Wren">
+  <meta property="og:title" content="Wren setup guide">
+  <meta property="og:description" content="Set up Wren on your Mac step by step: install, notifications, reminders, voice, Gmail, ChatGPT and local AI.">
+  <meta property="og:url" content="{{SITE_URL}}/guide/">
+  <meta property="og:image" content="{{SITE_URL}}/assets/og-image.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/brand/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/brand/favicon-16.png">
+  <link rel="apple-touch-icon" href="/assets/brand/apple-touch-icon.png">
+  <link rel="preload" href="/assets/fonts/fraunces-variable.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/assets/css/site.css">
+  <script>document.documentElement.classList.add("js");setTimeout(function(){if(!window.wrenReady)document.documentElement.classList.remove("js")},3000)</script>
+  <script src="/assets/js/site.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="header">
+  <div class="wrap header__bar">
+    <a class="brand" href="/" aria-label="Wren home"><img src="/assets/brand/wren-icon-128@2x.png" alt="" width="40" height="40"><span>Wren</span></a>
+    <button class="menu-btn" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="Open menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 8h16M4 16h16"/></svg>
+    </button>
+    <nav class="nav" id="site-nav" aria-label="Main">
+      <ul class="nav__links">
+        <li><a href="/#demo">Demo</a></li>
+        <li><a href="/#what-it-does">What it does</a></li>
+        <li><a href="/#connectors">Connectors</a></li>
+        <li><a href="/guide/">Guide</a></li>
+        <li><a href="/shortcuts/">Shortcuts</a></li>
+        <li><a href="/#privacy">Privacy</a></li>
+        <li><a href="/download/">Download</a></li>
+        <li><a href="https://github.com/shibadityadeb/wren" rel="noopener" target="_blank">GitHub <span aria-hidden="true">↗</span><span class="sr-only">(opens in a new tab)</span></a></li>
+      </ul>
+      <a class="btn btn--dark" href="https://github.com/shibadityadeb/wren" rel="noopener" target="_blank">Follow the journey <span class="arrow arrow--out" aria-hidden="true">↗</span><span class="sr-only">(opens GitHub in a new tab)</span></a>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="doc">
+  <p class="eyebrow">Guide</p>
+  <h1>Set up Wren, step by step</h1>
+  <p class="lede">About fifteen minutes from download to your first reminder, email alert and ChatGPT question. Each step says what to do and what you should see.</p>
+
+  <nav class="toc" aria-label="Contents">
+    <ol>
+      <li><a href="#install">Download and open Wren</a></li>
+      <li><a href="#notifications">Allow notifications</a></li>
+      <li><a href="#capture">Your first reminder, typed</a></li>
+      <li><a href="#voice">Talk to Wren</a></li>
+      <li><a href="#tasks">Tasks and deadlines</a></li>
+      <li><a href="#daily">Morning briefing and evening check-in</a></li>
+      <li><a href="#gmail">Connect Gmail and Calendar</a></li>
+      <li><a href="#chatgpt">Ask ChatGPT</a></li>
+      <li><a href="#local-ai">Local AI (optional)</a></li>
+      <li><a href="#login">Keep Wren running</a></li>
+      <li><a href="#trouble">If something doesn't work</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="install">1. Download and open Wren</h2>
+  <ol>
+    <li>On the <a href="/download/">download page</a>, sign in with Google and download the DMG. You can <a href="/#demo">watch the one-minute demo</a> first.</li>
+    <li>Open the DMG and drag <strong>Wren</strong> into <strong>Applications</strong>.</li>
+    <li>Open Wren. macOS says <em>“Wren” Not Opened</em>, because this preview isn't notarized by Apple yet. Click <strong>Done</strong> (not Move to Bin).</li>
+    <li>Open <strong>System Settings › Privacy &amp; Security</strong>, scroll to the message about Wren and click <strong>Open Anyway</strong>. macOS asks once per version.</li>
+  </ol>
+  <p><strong>You should see:</strong> Wren's window, and a small bird in the menu bar at the top of the screen. Closing the window keeps Wren running there.</p>
+
+  <h2 id="notifications">2. Allow notifications</h2>
+  <ol>
+    <li>Open <strong>Settings</strong> (<kbd>⌘</kbd> <kbd>,</kbd>) and find <strong>Notifications</strong>.</li>
+    <li>Click <strong>Send test notification</strong>. The first time, macOS asks to allow Wren's notifications: allow them.</li>
+    <li>Within 10 seconds a notification appears, and Settings says <em>Delivered</em>.</li>
+  </ol>
+  <p><strong>Delivered but no banner?</strong> Do Not Disturb or a Focus is on. macOS still delivers Wren's notifications but puts them straight into Notification Center without a banner or sound. Turn Do Not Disturb off, or add Wren in <strong>System Settings › Focus</strong>. Also check that Wren's alert style isn't <em>None</em> in <strong>System Settings › Notifications › Wren</strong>.</p>
+
+  <h2 id="capture">3. Your first reminder, typed</h2>
+  <ol>
+    <li>In any app, press <kbd>⌥</kbd> <kbd>⇧</kbd> <kbd>Space</kbd>. Wren's capture panel opens.</li>
+    <li>Type <code>remind me to stretch in 2 minutes</code> and press <kbd>Return</kbd>.</li>
+    <li>Wren answers <em>Reminder created</em>, with the time. Two minutes later the notification arrives, even if you quit Wren.</li>
+    <li>In the notification, choose <strong>Done</strong>, or <strong>Remind me in 1 hour</strong>.</li>
+  </ol>
+
+  <h2 id="voice">4. Talk to Wren</h2>
+  <ol>
+    <li>Press and <strong>hold</strong> <kbd>⌥</kbd> <kbd>Space</kbd>. The first time, macOS asks for Microphone and Speech Recognition: allow both, then hold the keys again.</li>
+    <li>While holding, say <code>remind me to call Sam tomorrow at 10 AM</code>, then let go.</li>
+    <li>Wren transcribes on your Mac, shows the sentence, and runs it: <em>Reminder created: Call Sam</em>.</li>
+  </ol>
+  <p class="small">Wren only listens while you hold the keys (or after you click Voice). Nothing listens in the background. If speech isn't available, turn on Dictation once in System Settings › Keyboard.</p>
+
+  <h2 id="tasks">5. Tasks and deadlines</h2>
+  <ul>
+    <li><code>I need to finish the report by Friday</code> makes a task with a deadline. You get a heads-up the day before, at your default reminder time (10:00), and a reminder on the day.</li>
+    <li><code>remind me to call Sam tomorrow at 10 AM</code> is a reminder at that time, not a deadline.</li>
+    <li><code>mark the report as done</code>, <code>move that reminder to Sunday</code>: Wren shows what it will change and <kbd>Return</kbd> confirms.</li>
+    <li>Change the default reminder time and the day-before heads-up in <strong>Settings › Notifications</strong>.</li>
+  </ul>
+
+  <h2 id="daily">6. Morning briefing and evening check-in</h2>
+  <p>At 11:00 Wren sends a short briefing: what's overdue, due today and tomorrow, and anything important. At 19:00 it asks what you finished. Change both times in <strong>Settings › Daily rhythm</strong>, which also shows what happened to today's. Wren has to be running for these (step 10).</p>
+
+  <h2 id="gmail">7. Connect Gmail and Calendar</h2>
+  <ol>
+    <li>Open <strong>Connectors</strong> (<kbd>⌘</kbd> <kbd>7</kbd>) › <strong>Gmail</strong> › <strong>Connect Google</strong>.</li>
+    <li>Sign in on Google's page and tick Gmail (read-only) and Calendar if you want them.</li>
+    <li>Back in Wren, Gmail shows <em>Connected</em> with your address. Wren then checks your inbox once and sends an <strong>Inbox review</strong>: the unread mail from the last 14 days that looks like it needs you.</li>
+    <li>While Wren runs, it checks every 5 minutes. Important new mail, such as a failed payment, a payment deadline, a security alert or a direct question, gets one notification. Click it to open that email in Gmail.</li>
+  </ol>
+  <p><strong>“Access blocked” from Google?</strong> While Wren's Google sign-in is in testing, only accounts on its test list can connect. Ask the developer to add your Gmail address. Google also asks testers to reconnect every 7 days.</p>
+  <p class="small">Email is sorted on your Mac with rules. Its content is never sent to ChatGPT or any other AI service.</p>
+
+  <h2 id="chatgpt">8. Ask ChatGPT</h2>
+  <p>There are two ways, chosen in <strong>Connectors › ChatGPT</strong> under <em>“Ask GPT …” goes to</em>:</p>
+  <ul>
+    <li><strong>Ask in ChatGPT (website)</strong>, the default. Works with any ChatGPT account, including free, and needs <strong>no connection</strong>. Say or type <code>ask ChatGPT what gradient descent is</code>: chatgpt.com opens in your browser with your question, ready to send.</li>
+    <li><strong>Run with ChatGPT inside Wren</strong>. Needs a ChatGPT <strong>Plus or Pro</strong> plan. Click <strong>Continue with ChatGPT</strong>, sign in on OpenAI's page in your browser, and approve Wren, <em>including use of your ChatGPT plan</em>. The answer then appears in Wren.</li>
+  </ul>
+  <p><strong>Can't connect?</strong></p>
+  <ul>
+    <li><em>“can't share its plan with apps”</em>: the account has no Plus or Pro plan (or it's a workspace that doesn't allow it). Use the website mode instead.</li>
+    <li><em>“plan usage not authorized”</em>: you didn't approve plan usage on OpenAI's page. Click <strong>Allow plan usage…</strong>.</li>
+    <li>The button just comes back: read the <em>Last attempt</em> line under it, which gives OpenAI's reason. Make sure the browser that opens is the one where you're signed in to ChatGPT, and finish the sign-in within 5 minutes.</li>
+  </ul>
+
+  <h2 id="local-ai">9. Local AI (optional)</h2>
+  <p>Questions that don't name ChatGPT, such as <code>what is a vector database?</code>, can be answered on your Mac. Install <a href="https://ollama.com/download" rel="noopener">Ollama</a>, then open <strong>Local AI</strong> (<kbd>⌘</kbd> <kbd>8</kbd>) and click <strong>Set up and test</strong>. Without it, Wren asks who should answer.</p>
+
+  <h2 id="login">10. Keep Wren running</h2>
+  <p>Reminders arrive even after you quit Wren, because macOS holds them. The briefing, check-in and email alerts need Wren running. Turn on <strong>Settings › Open Wren when I log in</strong> and keep it in the menu bar. <kbd>⌘</kbd> <kbd>Q</kbd> quits completely.</p>
+
+  <h2 id="trouble">If something doesn't work</h2>
+  <ul>
+    <li><strong>No notifications:</strong> Settings › Notifications shows the permission, how many reminders macOS holds, and where it's failing. See <a href="#notifications">step 2</a>.</li>
+    <li><strong>The shortcut does nothing:</strong> another app may use the same keys. Wren says so in Settings, and you can pick another combination.</li>
+    <li><strong>Gmail says “temporarily unavailable”:</strong> Wren keeps retrying by itself. Inbox › <strong>Check inbox now</strong> tries at once.</li>
+    <li>All shortcuts and things you can say are on the <a href="/shortcuts/">Shortcuts page</a>.</li>
+  </ul>
+</main>
+
+<footer class="footer">
+  <div class="wrap">
+    <div class="footer__bottom" style="margin-top:0;border-top:0;padding-top:0">
+      <a class="brand" href="/" aria-label="Wren home"><img src="/assets/brand/wren-icon-128@2x.png" alt="" width="32" height="32"><span>Wren</span></a>
+      <span><a href="/">Home</a> · <a href="/download/">Download</a> · <a href="/guide/">Guide</a> · <a href="/shortcuts/">Shortcuts</a> · <a href="/privacy/">Privacy Policy</a> · <a href="https://github.com/shibadityadeb/wren" rel="noopener" target="_blank">GitHub ↗</a></span>
+      <span>© 2026 Shibaditya Deb</span>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

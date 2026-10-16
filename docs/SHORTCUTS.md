@@ -1,6 +1,6 @@
 # Wren shortcuts and commands
 
-A one-page cheat sheet. Everything here works with Wren running, including with its window closed (it lives in the menu bar). The details are in the [user guide](USER_GUIDE.md).
+A one-page cheat sheet, also at [wrenai.vercel.app/shortcuts](https://wrenai.vercel.app/shortcuts/) and in the app (⌘/). Everything here works with Wren running, including with its window closed (it lives in the menu bar). The details are in the [user guide](USER_GUIDE.md).
 
 ## Anywhere on your Mac
 
@@ -31,7 +31,9 @@ Clicking away keeps what you typed as a draft.
 | **⌘,** | Settings |
 | **⌘W** | Close the window (Wren keeps running in the menu bar) |
 | **⌘Q** | Quit Wren (stops any recording and email checks; scheduled reminders still arrive) |
-| **⌘?** | Help |
+| **⌘/** | Keyboard shortcuts (Help › Keyboard Shortcuts, also Settings › Keyboard shortcuts…) |
+| **⌘?** | Help: the step-by-step guide on the website |
+| **⌘1 … ⌘9** | Go to Overview, Items, Inbox, Goals, Review, Delegate, Connectors, Local AI, Settings |
 | Right-click the menu-bar bird | Open Wren, New Capture, Voice Command, Settings, Quit |
 
 ## Things to say or type

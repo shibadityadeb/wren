@@ -80,6 +80,9 @@ public final class ChatGPTConnector: BaseConnector, Connector {
     /// Grants or revokes one Wren permission (set by the app to the policy store).
     public var grant: (Permission, Bool) -> Void = { _, _ in }
     public private(set) var disconnectNote: String?
+    /// Why the last "Continue with ChatGPT" didn't finish, shown under the button. A first sign-in has
+    /// no saved account to hang the reason on, so without this the button just came back.
+    public private(set) var lastConnectError: String?
     public private(set) var usageLimitSeenAt: Date?
     private var refreshing: Task<ChatGPTConnection, Error>?
 
@@ -127,6 +130,7 @@ public final class ChatGPTConnector: BaseConnector, Connector {
         let previous = connection
         account = .connecting
         disconnectNote = nil
+        lastConnectError = nil
         let stateToken = Self.random(), nonce = Self.random(), pkce = PKCE.make()
         let receiver = LoopbackReceiver(path: SIWC.callbackPath, expectedState: stateToken)
         do {
@@ -180,6 +184,7 @@ public final class ChatGPTConnector: BaseConnector, Connector {
             }
         }()
         _ = failed(e)
+        lastConnectError = e.errorDescription
         if e == .clientRejected { try? store.delete(Self.registrationKey) }
         guard let c = connection ?? previous else { account = .notConnected; grant(.externalAI, false); return }
         if c != connection { try? store.writeJSON(Self.connectionKey, c) }

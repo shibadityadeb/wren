@@ -138,8 +138,10 @@ public enum ChatGPTError: Error, Equatable, LocalizedError {
         case 403?: return .planNotAuthorized
         case 429?: return .temporarilyUnavailable("ChatGPT is receiving too many requests. Wait a moment and try again.")
         case let s? where s >= 500: return .temporarilyUnavailable("ChatGPT is temporarily unavailable. Try again shortly.")
-        case let s? where s == 400 || s == 422: return .unsupportedRequest("ChatGPT couldn't accept this request.")
-        default: return .invalidResponse(status.map { "HTTP \($0)" } ?? "no status")
+        case let s? where s == 400 || s == 422: return .unsupportedRequest("ChatGPT couldn't accept this request\(code.map { " (\($0))" } ?? "").")
+        // An error OpenAI named but Wren doesn't know (for example from its sign-in page): keep the code,
+        // so the person can see and report it.
+        default: return .invalidResponse(code.map { "OpenAI error \($0)" } ?? status.map { "HTTP \($0)" } ?? "no status")
         }
     }
 

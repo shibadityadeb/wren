@@ -298,6 +298,11 @@ struct ConnectorDetailView: View {
                     .disabled(c.account == .connecting).buttonStyle(.borderedProminent).tint(WrenTheme.accent)
                 Text("Opens OpenAI's sign-in page in your browser. Approve Wren there, including use of your ChatGPT plan. No API key, no setup.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                if c.account == .notConnected, let e = c.lastConnectError {
+                    Text("Last attempt: \(e)").font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                }
+                Text("Needs a ChatGPT Plus or Pro plan. Don't have one? You don't need to connect: “ask ChatGPT …” opens chatgpt.com in your browser with your request (below: “Ask GPT …” goes to › Ask in ChatGPT (website)).")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             case .accountOnly:
                 HStack {
                     Button("Allow plan usage…") { model.connectChatGPT(reconsent: true) }.buttonStyle(.borderedProminent).tint(WrenTheme.accent)

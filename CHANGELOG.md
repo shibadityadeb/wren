@@ -2,6 +2,15 @@
 
 Versions follow [semantic versioning](https://semver.org). The `VERSION` file is the source of truth; release tags are `v<VERSION>` (stable) or `v<VERSION>-preview.N` (prerelease).
 
+## [0.12.3] (unreleased)
+
+Easier to find your way around, and a ChatGPT connection that says why it failed.
+
+- **Keyboard shortcuts in the app.** Help › Keyboard Shortcuts (⌘/) and Settings › Keyboard shortcuts… list every shortcut, with your own capture and push-to-talk keys. New **Go** menu: ⌘1–⌘9 open Overview, Items, Inbox, Goals, Review, Delegate, Connectors, Local AI and Settings.
+- **ChatGPT connection errors are shown.** A first "Continue with ChatGPT" that failed (for example an account without Plus or Pro, or a sign-in OpenAI refused) went back to the button with no reason. The reason now stays under the button, including OpenAI's own error code when Wren doesn't recognise it. The page also explains that asking ChatGPT in the browser (the default) needs no connection and works with any account.
+- Help opens the new step-by-step guide, and "Shortcuts and Commands" opens the shortcuts page on the website.
+- **Website:** a one-minute demo video on the home and download pages (compressed to 13 MB), a step-by-step **Guide** and a **Shortcuts** page, both linked from the menu and footer.
+
 ## [0.12.2] (unreleased)
 
 Reminders and email alerts you can trust, and a way to see why one didn't show.

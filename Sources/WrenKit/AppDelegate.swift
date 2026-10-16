@@ -828,11 +828,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
     }
 
     @objc func openShortcutsAction() {
-        NSWorkspace.shared.open(URL(string: "https://github.com/shibadityadeb/wren/blob/main/docs/SHORTCUTS.md")!)
+        NSWorkspace.shared.open(URL(string: "https://wrenai.vercel.app/shortcuts/")!)
+    }
+
+    /// Help › Keyboard Shortcuts (⌘/): the page in Settings.
+    @objc func showShortcutsAction() { popover.performClose(nil); model.route = .shortcuts; mainWindow.show() }
+
+    /// Go › ⌘1…⌘9: that section of Wren's window.
+    @objc func goToSectionAction(_ sender: NSMenuItem) {
+        let all = MainWindowView.Section.allCases
+        guard all.indices.contains(sender.tag) else { return }
+        popover.performClose(nil)
+        model.route = all[sender.tag].route
+        mainWindow.show()
     }
 
     @objc func openHelpAction() {
-        NSWorkspace.shared.open(URL(string: "https://github.com/shibadityadeb/wren#readme")!)
+        NSWorkspace.shared.open(URL(string: "https://wrenai.vercel.app/guide/")!)
     }
 
     func applicationWillTerminate(_ notification: Notification) {

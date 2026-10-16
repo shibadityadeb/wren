@@ -23,6 +23,7 @@ struct RouteView: View {
         case .briefing: BriefingView(model: model)
         case .checkIn: CheckInView(model: model)
         case .activity: ActivityView(model: model)
+        case .shortcuts: ShortcutsView(model: model)
         case .aiSetup: AISetupView(model: model)
         case .connectors: ConnectorsView(model: model)
         case let .connector(id): ConnectorDetailView(model: model, id: id)
