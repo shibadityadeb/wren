@@ -19,7 +19,9 @@ function res() {
   r.json = () => JSON.parse(r.body || "{}");
   return r;
 }
-const env = { SUPABASE_URL: "https://abcdefgh.supabase.co", SUPABASE_ANON_KEY: "anon-key-for-tests-0123456789" };
+// Fake Supabase API keys shaped like the real ones (JWTs whose payload names the role).
+const jwt = (role) => ["e30", Buffer.from(JSON.stringify({ iss: "supabase", ref: "abcdefgh", role })).toString("base64url"), "c2lnbmF0dXJl"].join(".");
+const env = { SUPABASE_URL: "https://abcdefgh.supabase.co", SUPABASE_ANON_KEY: jwt("anon") };
 // Sets environment variables for one test block (sync or async) and puts the old values back after it.
 function restore(saved, e) { for (const k of Object.keys(e)) if (!(k in saved)) delete process.env[k]; Object.assign(process.env, saved); }
 function withEnv(e, f) {
@@ -70,12 +72,35 @@ await withEnv(env, async () => {
 });
 // Not configured: the page says so; nothing is called.
 await withEnv({ SUPABASE_URL: "", SUPABASE_ANON_KEY: "" }, async () => {
-  let r = res(); signin({ headers: { host: "wren-test.vercel.app" } }, r); check(r.headers.location === "/download/?setup=missing", "unconfigured sign-in explains itself");
+  let r = res(); signin({ headers: { host: "wren-test.vercel.app" } }, r); check(r.headers.location === "/download/?setup=missing&why=url-missing", "unconfigured sign-in explains itself");
   r = res(); await download({ method: "POST", body: { access_token: "good-token-0123456789abcdef" } }, r); check(r.statusCode === 503, "unconfigured download: 503");
 });
+// Slips in the settings: harmless ones are forgiven, dangerous ones refused with a reason.
+const { config } = require(join(api, "_lib.js"));
+const cfg = (url, key = jwt("anon")) => withEnv({ SUPABASE_URL: url, SUPABASE_ANON_KEY: key }, () => config());
+for (const u of ['"https://abcdefgh.supabase.co"', " https://abcdefgh.supabase.co/ ", "https://abcdefgh.supabase.co/rest/v1", "https://ABCDEFGH.supabase.co/auth/v1/"]) {
+  check(cfg(u).ok && cfg(u).url === "https://abcdefgh.supabase.co", `forgiven URL: ${u}`);
+}
+check(cfg("postgres://postgres:pw@db.abcdefgh.supabase.co:5432/postgres").problem === "url-database", "a database connection string is refused");
+check(cfg("http://abcdefgh.supabase.co").problem === "url-invalid", "plain http is refused");
+check(cfg("https://example.com").problem === "url-invalid", "another site is refused");
+check(cfg("https://abcdefgh.supabase.co", "").problem === "key-missing", "a missing key is reported");
+check(cfg("https://abcdefgh.supabase.co", jwt("service_role")).problem === "key-secret", "the service_role key is refused");
+check(cfg("https://abcdefgh.supabase.co", "sb_secret_abcdefghijklmnop").problem === "key-secret", "a secret key is refused");
+check(cfg("https://abcdefgh.supabase.co", "sb_publishable_abcdefghijklmnop").ok, "a publishable key is accepted");
+check(cfg("https://abcdefgh.supabase.co", `'${jwt("anon")}'`).ok, "a quoted anon key is accepted");
+check(cfg("https://abcdefgh.supabase.co", "not-a-key-but-long-enough-0123").problem === "key-invalid", "something else is reported");
+await withEnv({ SUPABASE_URL: "postgres://x@db.abcdefgh.supabase.co/postgres", SUPABASE_ANON_KEY: jwt("anon") }, async () => {
+  const r = res(); signin({ headers: { host: "wren-test.vercel.app" } }, r);
+  check(r.headers.location === "/download/?setup=missing&why=url-database", "sign-in names the problem");
+  check(!r.headers.location.includes("postgres"), "never a value");
+});
+const status = require(join(api, "status.js"));
+withEnv({ SUPABASE_URL: "", SUPABASE_ANON_KEY: "" }, () => { const r = res(); status({}, r); check(r.json().downloads === "not set up" && r.json().problem === "url-missing", "status reports the problem"); });
+withEnv(env, () => { const r = res(); status({}, r); check(r.json().downloads === "ready" && !r.body.includes("abcdefgh"), "status says ready and shows no values"); });
 // Release override.
 check(withEnv({ WREN_RELEASE_TAG: "v9.9.9-preview.2" }, () => release().dmg.endsWith("/v9.9.9-preview.2/Wren-macOS-universal-unsigned.dmg")), "release tag override");
 check(withEnv({ WREN_RELEASE_TAG: "../../evil" }, () => release().tag === "v0.12.1-preview.1"), "a malformed tag is ignored");
 
 if (failures.length) { console.error("✗ download functions:\n" + failures.map((f) => "  ✗ " + f).join("\n")); process.exit(1); }
-console.log("✓ download functions: sign-in redirect, token checks, recorded before the link, unconfigured and failure cases");
+console.log("✓ download functions: sign-in redirect, token checks, recorded before the link, setting slips, unconfigured and failure cases");
