@@ -120,6 +120,24 @@ final class ReminderSchedulerTests: XCTestCase {
         XCTAssertEqual(again.remindersDelivered, 0)
     }
 
+    /// The app reconciles before every tick. Seen live on 15 Oct: macOS showed the 10:00 reminder,
+    /// the reconcile that ran next forgot it had been scheduled, and Wren showed it a second time.
+    func testReconcileAfterMacOSShowedAReminderDoesNotCauseASecondNotification() async throws {
+        let (h, center, s) = try setup()
+        let (_, id) = try await create(h, "Remind me to call Sam tomorrow at 10 AM")
+        await s.reconcile()
+        let c = try XCTUnwrap(try h.store.item(id: id))
+        h.clock.set(at(ist, 2026, 10, 12, 10).addingTimeInterval(1)); center.pending = [:]   // fired: no longer pending
+        let r = await s.reconcile()
+        XCTAssertEqual(r.scheduled, 0, "nothing in the past is scheduled again")
+        XCTAssertEqual(c.scheduledNotificationIDs.count, 1, "the record that macOS had it survives the reconcile")
+        let tick = await h.engine.tick()
+        XCTAssertEqual(tick.remindersDelivered, 1)
+        XCTAssertTrue(h.notifier.reminders.isEmpty, "Wren doesn't show it a second time")
+        await s.reconcile()
+        XCTAssertTrue(c.scheduledNotificationIDs.isEmpty, "once recorded, the fired request is forgotten")
+    }
+
     func testRescheduleSnoozeCompleteAndDeleteLeaveNoStaleRequests() async throws {
         let (h, center, s) = try setup()
         let (_, id) = try await create(h, "Remind me to call Sam tomorrow at 10 AM")

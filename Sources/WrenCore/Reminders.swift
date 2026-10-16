@@ -33,7 +33,9 @@ public struct ReminderPolicy: Sendable, Equatable {
         guard c.reminderFromDeadline || c.nextReminderAt == nil else { return nil }
         guard let day = calendar.date(byAdding: .day, value: -advance.days, to: calendar.startOfDay(for: deadline)) else { return nil }
         let at = calendar.time(minutesAfterMidnight: advance.hour * 60, on: day)
-        guard at > now, at < deadline, c.createdAt < day else { return nil }
+        // "At least a day ahead" is measured to the deadline itself (its day's start when it has no
+        // time), so a task added Thursday 9 AM for Friday 5 PM still gets Thursday's heads-up.
+        guard at > now, at < deadline, deadline.timeIntervalSince(c.createdAt) >= 86400 else { return nil }
         return at
     }
 

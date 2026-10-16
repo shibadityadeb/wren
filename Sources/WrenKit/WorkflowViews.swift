@@ -280,12 +280,13 @@ struct InboxView: View {
                     Text("Inbox").font(.title2.weight(.semibold))
                     Spacer()
                     if model.mailSyncing { ProgressView().controlSize(.small) }
-                    Button("Check now") { Task { await model.checkMail(.user(.popover)) } }.disabled(!model.gmailUsable || model.mailSyncing)
+                    Button("Check inbox now") { Task { await model.checkMail(.user(.popover)) } }.disabled(!(model.gmailUsable || model.gmailRecoverable) || model.mailSyncing)
                     Button { showSettings.toggle() } label: { Image(systemName: "gearshape") }.help("Mail settings")
                 }
                 status
                 if showSettings { MailSettingsView(model: model) }
                 if model.gmailUsable {
+                    InboxReviewCard(model: model)
                     if let d = model.latestDigest { DigestCard(model: model, digest: d) }
                     let all = model.mailbox.inbox.filter { $0.message.unread && $0.dismissedAt == nil }
                     let important = all.filter { $0.classification.category.isImportant }
@@ -311,16 +312,25 @@ struct InboxView: View {
     }
 
     @ViewBuilder var status: some View {
-        if !model.gmailUsable {
-            Notice(text: "Gmail isn't connected. Connect Google to get the email digest and alerts for urgent mail.", systemImage: "envelope",
+        if !model.gmailUsable && model.gmailRecoverable {
+            VStack(alignment: .leading, spacing: 3) {
+                Notice(text: (model.mailStatus ?? model.mailbox.lastError ?? "Couldn't reach Gmail.") + " Wren keeps trying"
+                       + (model.nextMailCheck.map { "; next try \($0.formatted(date: .omitted, time: .shortened))." } ?? "."),
+                       systemImage: "wifi.exclamationmark", action: ("Try now", { Task { await model.checkMail(.user(.popover)) } }))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                MailMonitorStatus(model: model)
+            }
+        } else if !model.gmailUsable {
+            let state = model.hub.gmail.state
+            let signedOut = state == .available || state == .disconnected
+            Notice(text: signedOut ? "Gmail isn't connected. Connect Google to get the email digest and alerts for urgent mail."
+                                   : "Gmail: \(state.label). \(state.detail ?? "") Mail isn't being checked\(model.backgroundMailAllowed ? ", although background checking is on" : "").",
+                   systemImage: signedOut ? "envelope" : "exclamationmark.triangle",
                    action: ("Connectors", { model.route = .connector(.gmail) })).clipShape(RoundedRectangle(cornerRadius: 6))
         } else {
             VStack(alignment: .leading, spacing: 3) {
                 let m = model.mailbox
-                Text([m.account, m.lastSyncAt.map { "checked \(DueText.describe($0, hasTime: true, now: model.clock.now, calendar: model.clock.calendar))" },
-                      model.backgroundMailAllowed ? "checking every \(model.mailPrefs.pollingMinutes) min while Wren runs" : nil]
-                        .compactMap { $0 }.joined(separator: " · "))
-                    .font(.caption).foregroundStyle(.secondary)
+                MailMonitorStatus(model: model)
                 if let s = model.mailStatus ?? m.lastError { Text(s).font(.caption).foregroundStyle(.orange) }
                 if !model.backgroundMailAllowed {
                     Notice(text: "Background checking is off, so there are no new-mail alerts or automatic digests. Wren only checks when you press Check now.",
@@ -329,6 +339,48 @@ struct InboxView: View {
                 Text("Triage runs on this Mac with rules. Email content is never sent to ChatGPT or any other AI service.")
                     .font(.caption2).foregroundStyle(.tertiary)
             }
+        }
+    }
+}
+
+/// Account, last successful check, next check and whether monitoring is on: the truth, in one line each.
+struct MailMonitorStatus: View {
+    var model: AppModel
+    var body: some View {
+        let m = model.mailbox
+        let cal = model.clock.calendar, now = model.clock.now
+        VStack(alignment: .leading, spacing: 2) {
+            Text([m.account, m.lastSyncAt.map { "last successful check \(DueText.describe($0, hasTime: true, now: now, calendar: cal))" } ?? "not checked yet"]
+                    .compactMap { $0 }.joined(separator: " · "))
+            if model.backgroundMailAllowed {
+                Text("Checking every \(model.mailPrefs.pollingMinutes) min while Wren runs" + (model.nextMailCheck.map { "; next check \($0.formatted(date: .omitted, time: .shortened))" } ?? "; no check scheduled")
+                     + ". Checks stop when you quit Wren.")
+            }
+            if let e = m.lastErrorAt, let last = m.lastSyncAt, e > last { Text("The most recent check failed.").foregroundStyle(.orange) }
+        }
+        .font(.caption).foregroundStyle(.secondary)
+    }
+}
+
+/// The one-time review of mail that was already in the inbox when Wren connected.
+struct InboxReviewCard: View {
+    var model: AppModel
+    var body: some View {
+        if let r = model.mailbox.inboxReview {
+            let items = model.inboxReviewItems
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Inbox review, \(r.at.formatted(date: .abbreviated, time: .shortened))").font(.callout.weight(.semibold))
+                if r.messageIDs.isEmpty {
+                    Text("Nothing already in your inbox needed attention.").font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text("\(r.messageIDs.count) unread email\(r.messageIDs.count == 1 ? "" : "s") from the last \(Int(InboxReview.lookBackDays)) days looked like \(r.messageIDs.count == 1 ? "it needs" : "they need") attention"
+                         + (items.count < r.messageIDs.count ? "; \(items.count) still unread." : "."))
+                        .font(.caption).foregroundStyle(.secondary)
+                    if r.notified == false { Text("Its notification couldn't be shown (notifications are off or paused).").font(.caption).foregroundStyle(.orange) }
+                    ForEach(items.prefix(5)) { MailRow(model: model, item: $0) }
+                }
+            }
+            .padding(10).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
         }
     }
 }

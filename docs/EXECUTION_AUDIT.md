@@ -313,6 +313,80 @@ or in the installed app's log. The tests named under **Tests** fail without the 
   reported confidence below 0.85 in the field for checking. The destination stays ChatGPT.
 - **Tests.** `VoiceDestinationReviewTests`.
 
+## 3b. Delivery audit in 0.12.2: reminders, deadline alerts, Gmail and briefings
+
+Done on 16 October 2026 on the installed 0.12.1, after two days without visible reminders or email
+alerts. Evidence: Wren's own log, Notification Center's log, Wren's database and mailbox file (read
+from copies, counts and times only), then live runs listed in [MANUAL_TESTS.md](MANUAL_TESTS.md)
+(P-1 to P-13).
+
+| Stage | Reminders | Email alerts | Briefing |
+|---|---|---|---|
+| Saved | Yes | n/a | Ledger per day |
+| Permission | Allowed, Banners | Same | Same |
+| Scheduled / produced | Accepted by macOS | **No checks after an offline launch (D-24)**; mail already there never alerted (D-25) | `skippedEmpty`: nothing to report |
+| Delivered | Yes, **twice** when Wren was running (D-23) | Digests delivered | n/a |
+| Seen | **No: Do Not Disturb muted all of them** | Same | n/a |
+
+### D-23. A reminder that fired while Wren was running was shown twice
+Seen on 15 Oct at 10:00 in Notification Center's log: `wren.reminder.22C7….at.…` from macOS and
+`reminder-22C7…` from Wren. The app reconciles with macOS before each tick. A request that had just
+fired is no longer pending, so the reconcile dropped it from the item's `scheduledNotificationIDs`.
+The engine then decided macOS hadn't scheduled it and delivered its own copy. The test only ticked
+without reconciling, so it missed this. **Fix:** a fired request for the item's current reminder time
+is kept until the engine records it (`ReminderScheduler.isFiredCurrentOccurrence`). New test:
+`testReconcileAfterMacOSShowedAReminderDoesNotCauseASecondNotification`. Live: P-4, P-5.
+
+### D-24. One failed mail check stopped mail checking until the user intervened
+`checkMail` rescheduled itself only while Gmail was usable. Wren started offline (`-1009`), the
+connector became "temporarily unavailable", and the timer was cancelled. Waking the Mac called the
+same function, which returned at once. Nothing refreshed the connector. **Fix:** while Gmail is only
+temporarily unavailable, each check refreshes it first and keeps polling with a growing delay (up to
+6× the interval). The Inbox says it's retrying and when, and **Check inbox now** stays enabled. Only a
+sign-out, revoked access or a build problem stops checking, and the Inbox now names that state
+instead of "Gmail isn't connected".
+
+### D-25. Important mail already in the inbox was never surfaced
+The first sync marks everything as baseline, and alerts consider only newly arrived mail. Unread
+urgent mail from before Wren connected only appeared in the digest. **Fix:** the **inbox review**
+(`InboxReview`). Once, after the first successful sync, Wren lists unread mail from the last 14 days
+that is urgent, time-sensitive or needs a reply. It sends one notification about it, also shown at the
+top of the Inbox. It's recorded before delivery, so a restart doesn't repeat it. Mailboxes saved by
+older versions get it once.
+
+### D-26. Failed payments and payment deadlines were below the alert threshold
+"Autopay failed" or "minimum amount due" only matched the generic financial rule, and the default
+alert level covers urgent and time-sensitive mail. **Fix:** explicit rules, never applied to
+promotions:
+- failed or declined payments, autopay, insufficient funds; unrecognized or suspicious transactions;
+  blocked, restricted or declined cards are **urgent**
+- payment deadlines are **time-sensitive**, with the reason "payment deadline mentioned in this
+  message"
+- statements, receipts and transaction alerts stay **financial** (no alert)
+
+Stored mail is re-read with the current rules on each sync (manual corrections stay). Alerts show the
+most specific reason.
+
+### D-27. Do Not Disturb hid everything, and Wren couldn't say so
+Wren had no way to see what macOS did with its notifications. **Fix:** Settings › Notifications reads
+macOS's settings (permission, alert style) and pending list. It shows reminders expected vs. pending,
+the next one, the day-before setting, the last scheduling error, the failing stage and which app
+bundle the permission belongs to. **Send test notification** schedules a real request and checks
+macOS's delivered list. The panel says plainly that "delivered" isn't "seen" during Focus. Every
+scheduling step, delivery, display and click is logged (`lifecycle op=…`), with identifiers and times
+only. macOS gives apps no supported way to read the Focus state, so Wren explains it instead of
+guessing.
+
+### D-28. A task added the morning before got no day-before heads-up
+The rule required the task to be created before the heads-up's day, so "Friday 5 PM", added Thursday
+at 9 AM, had none. **Fix:** the deadline must be at least 24 hours after the task was created. New
+test: `testATaskAddedTheMorningBeforeStillGetsItsHeadsUp`.
+
+### D-29. A briefing could look delivered when it wasn't
+The day's ledger said `sent` before delivery was tried. **Fix:** it says `undelivered` until macOS
+accepts the notification, then `sent`. A restart still never sends it twice. Settings shows today's
+real state.
+
 ## 4. Checked and unchanged
 
 These were traced and found to work, with tests and earlier live evidence:
@@ -337,10 +411,16 @@ These were traced and found to work, with tests and earlier live evidence:
 | Live, Wren Dev | Wren Dev built from this branch, driven by `wren-dev://debug/command`, with the log recorded | See MANUAL_TESTS.md, E2E-1 to E2E-12 |
 | Live, real account | `wren-tools live-check gmail` (read-only), and the Gmail thread link opened in Chrome | Passed: M-GMAIL-LINK and E2E-13 |
 | Not run live | Notification delivery while quit, with permission granted. A new urgent email arriving (Test 7). The briefing at its scheduled time (Test 8). Voice with a person | Each needs you at the Mac or a new email in the inbox. Steps are in MANUAL_TESTS.md |
+| 0.12.2, installed app | Real scheduling and delivery on `/Applications/Wren.app` with real permission: P-1 to P-7 | Passed live: delivered while quit, while running in the background, no duplicates, day-before scheduling, withdrawal on completion. Not run: click-through and Done (P-8), switching permission (P-9). Blocked: a visible banner while Do Not Disturb is on (P-10), and all live Gmail tests (B-1) |
 
 ## 6. Genuine blockers
 
 These need the maintainer or the user. They aren't code defects:
+
+0. **B-1, 16 Oct: Google refuses Wren's client secret.** A direct token refresh returns
+   `401 invalid_client: The provided client secret is invalid`. The same secret is built into the
+   installed 0.12.1, so Gmail and Google Calendar fail in every build until a valid secret from
+   Wren's desktop OAuth client is in `config/providers.env` and Wren is rebuilt.
 
 1. **ChatGPT website submission.** OpenAI provides no supported way for an app to send a message
    into your ChatGPT conversation or to read its answer. Wren fills in the question; you press Enter.

@@ -510,3 +510,75 @@ extension MailIntelligenceTests {
         XCTAssertTrue(MailAlertPolicy.decide(&s, candidates: [], level: .important, quiet: off, now: now.addingTimeInterval(3700), calendar: cal).individual.isEmpty)
     }
 }
+
+// MARK: Money that needs the user, and mail that was already there
+
+extension MailIntelligenceTests {
+    func testFinancialProblemsAreUrgentAndRoutineNoticesAreNot() {
+        let bank = "HDFC Bank <alerts@hdfcbank.net>"
+        let failed = classify(mail("f1", from: bank, subject: "Autopay failed for your credit card", snippet: "Your autopay of Rs 12,400 was declined due to insufficient balance."))
+        XCTAssertEqual(failed.category, .urgent)
+        XCTAssertTrue(failed.reasons.contains("says a payment failed or was declined"), "\(failed.reasons)")
+        let fraud = classify(mail("f2", from: bank, subject: "Did you make this transaction?", snippet: "We noticed an unrecognized transaction on your card ending 4412."))
+        XCTAssertEqual(fraud.category, .urgent)
+        XCTAssertTrue(fraud.reasons.contains("mentions an unrecognized or suspicious transaction"))
+        XCTAssertEqual(classify(mail("f3", from: bank, subject: "Your card has been blocked", snippet: "For your security your card is temporarily blocked.")).category, .urgent)
+        let due = classify(mail("f4", from: bank, subject: "Credit card statement", snippet: "Minimum amount due Rs 2,000. Payment due date 30 Oct 2026."))
+        XCTAssertEqual(due.category, .timeSensitive, "a payment deadline is time-sensitive; nothing says it's late")
+        XCTAssertTrue(due.reasons.contains("payment deadline mentioned in this message"), "\(due.reasons)")
+        XCTAssertEqual(due.suggestedAction, "Check the amount and pay before the due date")
+        XCTAssertEqual(MailAlertText.make(MailItem(message: mail("f4", from: bank, subject: "Credit card statement"), classification: due, firstSeenAt: now, baseline: false)).body
+            .components(separatedBy: "\n").last, "Why: payment deadline mentioned in this message")
+
+        // Routine money mail stays routine: not every financial email is urgent.
+        XCTAssertEqual(classify(mail("r1", from: bank, subject: "Your statement is ready", snippet: "View your statement online.")).category, .financial)
+        XCTAssertEqual(classify(mail("r2", from: bank, subject: "Transaction alert", snippet: "Rs 450 spent at Cafe on your card ending 4412.")).category, .financial)
+        XCTAssertEqual(classify(mail("r3", from: "Shop <receipts@shop.com>", subject: "Your receipt", snippet: "Payment received, thanks!")).category, .financial)
+        XCTAssertEqual(classify(mail("r4", from: "Bank <offers@bank.com>", subject: "Pay your bill and win", snippet: "Pay by Friday for cashback. Fraud protection included.",
+                                     labels: ["INBOX", "UNREAD", "CATEGORY_PROMOTIONS"], bulk: true)).category, .financial, "promotions never become account problems")
+    }
+
+    func testInboxReviewSurfacesImportantUnreadMailThatWasAlreadyThereOnce() async throws {
+        let g = FakeGmail()
+        g.put(mail("due", from: "Card <alerts@card.com>", subject: "Payment due", snippet: "Minimum payment due 20 Oct.", hoursAgo: 48))
+        g.put(mail("ask", subject: "Quick question", snippet: "Could you send the deck?", hoursAgo: 30))
+        g.put(mail("read", from: "Card <alerts@card.com>", subject: "Autopay failed", snippet: "Your autopay failed.", hoursAgo: 5, labels: ["INBOX"]))
+        g.put(mail("stmt", from: "Bank <alerts@bank.com>", subject: "Your statement is ready", hoursAgo: 3))
+        g.put(mail("news", from: "News <news@paper.com>", subject: "Weekly digest", hoursAgo: 2, bulk: true))
+        g.put(mail("old", from: "Card <alerts@card.com>", subject: "Autopay failed", snippet: "Your autopay failed.", hoursAgo: 24 * 20))
+        var s = MailboxState()
+        XCTAssertFalse(InboxReview.isDue(s), "nothing to review before the first sync")
+        _ = try await MailSync.sync(&s, api: g, settings: .init(), now: now, calendar: cal)
+        XCTAssertTrue(InboxReview.isDue(s))
+        let found = InboxReview.run(&s, now: now)
+        XCTAssertEqual(Set(found.map(\.id)), ["due", "ask"], "unread, recent and needing action; not read, routine, newsletters or older than the look-back")
+        XCTAssertEqual(found.first?.id, "due", "most pressing first")
+        XCTAssertFalse(InboxReview.isDue(s), "recorded before any notification: a restart doesn't repeat it")
+        let n = try XCTUnwrap(InboxReview.notification(found))
+        XCTAssertEqual(n.title, "Inbox review: 2 emails may need attention")
+        XCTAssertTrue(n.body.contains("Payment due"))
+        XCTAssertNil(InboxReview.notification([]), "nothing found: no notification")
+        // A later sync doesn't make the review due again.
+        _ = try await MailSync.sync(&s, api: g, settings: .init(), now: now.addingTimeInterval(300), calendar: cal)
+        XCTAssertFalse(InboxReview.isDue(s))
+    }
+
+    func testStoredMailIsReadAgainWithTheCurrentRulesOnEachSync() async throws {
+        let g = FakeGmail()
+        g.put(mail("f", from: "Card <alerts@card.com>", subject: "Autopay failed", snippet: "Your autopay failed."))
+        var s = MailboxState()
+        _ = try await MailSync.sync(&s, api: g, settings: .init(), now: now, calendar: cal)
+        s.items["f"]?.classification.category = .financial          // as an older Wren classified it
+        s.items["x"] = s.items["f"]; s.items["x"]?.message.id = "x"; s.items["x"]?.classification.corrected = true
+        _ = try await MailSync.sync(&s, api: g, settings: .init(), now: now.addingTimeInterval(60), calendar: cal)
+        XCTAssertEqual(s.items["f"]?.classification.category, .urgent)
+        XCTAssertEqual(s.items["x"]?.classification.category, .financial, "a correction made by hand stays")
+    }
+
+    func testMailboxFilesFromBeforeTheInboxReviewStillLoad() throws {
+        let s = state(with: [mail("u", subject: "Hello")])
+        let data = try JSONEncoder().encode(s)
+        XCTAssertFalse(String(decoding: data, as: UTF8.self).contains("inboxReview"))
+        XCTAssertNil(try JSONDecoder().decode(MailboxState.self, from: data).inboxReview)
+    }
+}

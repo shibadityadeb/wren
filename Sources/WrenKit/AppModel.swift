@@ -85,6 +85,10 @@ final class AppModel {
     @ObservationIgnored var downloadTask: Task<Void, Never>?
     var selectedModel: String?
     var notificationStatus: UNAuthorizationStatus = .notDetermined
+    /// macOS's settings for Wren's notifications and what it holds (Settings › Notifications).
+    var notificationHealth: NotificationHealth?
+    /// The "Send test notification" button's progress.
+    var testNotification: TestNotificationState = .idle
     var hotKeyError: String?
     var hotKeyDisplay: String
     var hotKeyEnabled: Bool
@@ -273,7 +277,10 @@ final class AppModel {
         let r = await reminders.reconcile()
         reminderSync = r
         notificationStatus = notifications.status
-        if !r.failed.isEmpty { log.error("reminder scheduling failed for \(r.failed.count, privacy: .public) request(s)") }
+        if !r.failed.isEmpty { log.error("reminder scheduling failed for \(r.failed.count, privacy: .public) request(s): \(r.lastError ?? "-", privacy: .public)") }
+        if r.scheduled > 0 || r.cancelled > 0 || !r.failed.isEmpty || r.pending < r.expected {
+            log.notice("reconcile: auth=\(NotificationService.authName(self.notificationStatus), privacy: .public) expected=\(r.expected, privacy: .public) pending=\(r.pending, privacy: .public) scheduled=\(r.scheduled, privacy: .public) cancelled=\(r.cancelled, privacy: .public) failed=\(r.failed.count, privacy: .public)")
+        }
         return r
     }
 

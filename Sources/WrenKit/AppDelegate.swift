@@ -1063,6 +1063,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
                     appLog.notice("debug pending \(id, privacy: .public) next=\(next?.description ?? "-", privacy: .public)")
                 }
             }
+        case "/test-notification":
+            // Debug only: the same path as Settings › Notifications › Send test notification.
+            let s = Double(q.first(where: { $0.name == "s" })?.value ?? "10") ?? 10
+            model.sendTestNotification(after: s)
+        case "/notification-health":
+            Task {
+                await model.refreshNotificationHealth()
+                let h = model.notificationHealth, r = model.reminderSync
+                appLog.notice("debug health permission=\(h?.permissionText ?? "-", privacy: .public) style=\(h?.styleText ?? "-", privacy: .public) bundle=\(h?.bundleID ?? "-", privacy: .public) path=\(h?.appPath ?? "-", privacy: .public) delivered=\(h?.deliveredInNotificationCenter ?? -1, privacy: .public)")
+                appLog.notice("debug health expected=\(r.expected, privacy: .public) pending=\(r.pending, privacy: .public) next=\(r.nextFire?.description ?? "-", privacy: .public) failed=\(r.failed.count, privacy: .public) dayBefore=\(self.model.deadlineAdvance != nil, privacy: .public) diagnosis=\(self.model.notificationDiagnosis.stage, privacy: .public) test=\(String(describing: self.model.testNotification), privacy: .public)")
+            }
+        case "/mail-check":
+            Task { await model.checkMail(.user(.popover)); appLog.notice("debug mail check done") }
+        case "/mail-state":
+            let m = model.mailbox
+            appLog.notice("debug mail usable=\(self.model.gmailUsable, privacy: .public) recoverable=\(self.model.gmailRecoverable, privacy: .public) background=\(self.model.backgroundMailAllowed, privacy: .public) lastSync=\(m.lastSyncAt?.description ?? "-", privacy: .public) next=\(self.model.nextMailCheck?.description ?? "-", privacy: .public) error=\(m.lastError ?? "-", privacy: .public) items=\(m.items.count, privacy: .public) review=\(m.inboxReview.map { "\($0.messageIDs.count) notified=\(String(describing: $0.notified))" } ?? "-", privacy: .public) alerted=\(m.items.values.filter { $0.alertedAt != nil }.count, privacy: .public)")
         case "/window-state":
             appLog.notice("debug window visible=\(self.mainWindow.isVisible, privacy: .public) active=\(NSApp.isActive, privacy: .public) route=\(String(describing: self.model.route), privacy: .public)")
         case "/insights":

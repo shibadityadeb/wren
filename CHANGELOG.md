@@ -2,6 +2,27 @@
 
 Versions follow [semantic versioning](https://semver.org). The `VERSION` file is the source of truth; release tags are `v<VERSION>` (stable) or `v<VERSION>-preview.N` (prerelease).
 
+## [0.12.2] (unreleased)
+
+Reminders and email alerts you can trust, and a way to see why one didn't show.
+
+Found by auditing the installed 0.12.1 after two days without visible reminders or email alerts:
+- **Do Not Disturb was on** from 14 Oct 21:26. macOS delivered every Wren notification into Notification Center muted ("muted by DND suppression"), with no banner or sound. Wren couldn't tell you.
+- **Reminders were shown twice** when they fired while Wren was running: macOS showed the scheduled one, then Wren forgot it had been scheduled and showed its own copy.
+- **Mail checking stopped for good** after one failed check: Wren started offline on 15 Oct and never checked Gmail again that day.
+- **Important mail already in the inbox was never surfaced,** and failed payments or payment deadlines only counted as "financial", below the alert threshold. 182 messages, 0 alerts.
+
+Changes:
+- **No more duplicate reminders.** The record that macOS showed a reminder survives the check Wren runs before recording it.
+- **Settings › Notifications shows the truth:** permission and alert style from macOS, reminders expected vs. pending in macOS, the next one, the day-before setting, the last scheduling error, which stage is failing (saving, permission, scheduling, check against macOS, delivery) and which copy of Wren the permission belongs to. **Send test notification** schedules a real one and checks it was delivered. There are links to Notification and Focus settings.
+- **Every scheduling step is logged** (operation, identifier, local fire time, result, permission), and so is every notification shown or clicked. No titles or message text.
+- **Day-before heads-up** also applies to a task added the morning before (Thursday 9 AM for Friday 5 PM gets Thursday 10 AM), since the deadline is more than a day away.
+- **Mail checking keeps going** after a failed check, with a growing delay, and the Inbox says it's retrying and when. **Check inbox now** works then too. A sign-in problem shows its real reason instead of "Gmail isn't connected".
+- **Inbox review:** once, after the first successful check, one notification about unread mail already in the inbox (last 14 days) that needs attention, also shown at the top of the Inbox.
+- **Money that needs you is urgent:** failed or declined payments and autopay, unrecognized transactions, blocked or restricted cards. Payment deadlines are time-sensitive, with the reason "payment deadline mentioned in this message". Statements, receipts and transaction alerts stay routine. Stored mail is re-read with the current rules on every check.
+- Alerts give the most specific reason ("payment deadline mentioned…", not "Gmail marked it important").
+- **Briefing:** recorded as undelivered until macOS accepts it, so a quit in between can't leave it looking delivered. Settings shows what happened to today's briefing and check-in.
+
 ## [0.12.1] (unreleased)
 
 ChatGPT means ChatGPT, and the panel says who really answered.

@@ -41,6 +41,15 @@ public struct ReconcileReport: Equatable, Sendable {
     public var unchanged = 0
     public var failed: [String] = []
     public var paused = false
+    /// Requests Wren's stored reminders call for right now.
+    public var expected = 0
+    /// Of those, how many macOS reported as pending after this reconcile.
+    public var pending = 0
+    /// The earliest one-off fire time among the pending requests.
+    public var nextFire: Date?
+    /// The last error macOS returned when scheduling (code and description), if any.
+    public var lastError: String?
+    public var checkedAt: Date?
     public init() {}
 }
 
@@ -141,16 +150,42 @@ public final class ReminderScheduler {
         var live = pending.intersection(desiredIDs)
         report.unchanged = live.count
         for r in desired.values.flatMap({ $0 }) where !pending.contains(r.id) {
-            do { try await center.schedule(r); live.insert(r.id); report.scheduled += 1 } catch { report.failed.append(r.id) }
+            do { try await center.schedule(r); live.insert(r.id); report.scheduled += 1 } catch {
+                report.failed.append(r.id)
+                let e = error as NSError
+                report.lastError = "\(e.domain) \(e.code): \(e.localizedDescription)"
+            }
         }
-        // Remember what is actually scheduled, per item. Only saves when something changed.
+        // What macOS really holds afterwards (an accepted add isn't proof it stayed pending).
+        let after = await center.pendingReminderIDs()
+        report.expected = desiredIDs.count
+        report.pending = desiredIDs.intersection(after).count
+        report.nextFire = desired.values.flatMap { $0 }.filter { after.contains($0.id) }
+            .compactMap { if case let .at(d) = $0.trigger { d } else { nil } }.min()
+        report.checkedAt = now
+        // Remember what is actually scheduled, per item. Only saves when something changed. A request
+        // macOS has just shown for the item's current reminder time is kept until the engine records
+        // it, so Wren doesn't show the same reminder again.
         var changed = false
         for c in items {
-            let ids = (desired[c.id] ?? []).map(\.id).filter(live.contains).sorted()
+            var ids = (desired[c.id] ?? []).map(\.id).filter(live.contains)
+            ids += c.scheduledNotificationIDs.filter { !pending.contains($0) && !ids.contains($0) && isFiredCurrentOccurrence(c, $0, now: now) }
+            ids.sort()
             if c.scheduledNotificationIDs != ids { c.scheduledNotificationIDs = ids; changed = true }
         }
         if changed { try? store.saveQuietly() }
         return report
+    }
+
+    /// `id` was macOS's request for the item's current reminder time, and that time has passed.
+    func isFiredCurrentOccurrence(_ c: Commitment, _ id: String, now: Date) -> Bool {
+        guard c.status == .pending, let next = c.nextReminderAt, next <= now else { return false }
+        if id == Self.onceID(c, next) { return true }
+        if let rule = c.recurrence, rule.matches(next, calendar: clock.calendar) {
+            let comps = DateComponents(hour: rule.hour, minute: rule.minute, weekday: rule.isDaily ? nil : clock.calendar.component(.weekday, from: next))
+            return id == Self.repeatingID(c, comps)
+        }
+        return false
     }
 
     /// True when macOS holds a request for the item's current reminder time, so it has shown (or will
