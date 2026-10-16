@@ -289,6 +289,16 @@ final class ChatGPTConnectorTests: XCTestCase {
         XCTAssertEqual(Set(RouteStub.hosts), ["auth.openai.com", "api.openai.com"], "no other hosts contacted")
     }
 
+    /// A first sign-in that OpenAI refuses keeps its reason on screen (there's no saved account to show it on).
+    func testAFailedFirstSignInSaysWhy() async {
+        let c = make()
+        _ = await signIn(c) { q in "error=unsupported_country_region_territory&state=\(q["state"]!)" }
+        XCTAssertEqual(c.account, .notConnected)
+        XCTAssertEqual(c.lastConnectError, "ChatGPT returned something unexpected (OpenAI error unsupported_country_region_territory). Try again.")
+        _ = await signIn(c) { q in "error=access_denied&state=\(q["state"]!)" }
+        XCTAssertEqual(c.lastConnectError, ChatGPTError.signInCancelled.errorDescription)
+    }
+
     func testPlanUsageNotGranted() async {
         let c = make()
         _ = await signIn(c) { q in

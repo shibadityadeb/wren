@@ -45,6 +45,15 @@ enum AppMenu {
         edit.addItem(item("Select All", #selector(NSText.selectAll(_:)), "a"))
         add(edit, to: main)
 
+        // ⌘1…⌘9: the sections of Wren's window, in sidebar order.
+        let go = NSMenu(title: "Go")
+        for (i, s) in MainWindowView.Section.allCases.enumerated() where i < 9 {
+            let it = item(s.rawValue, #selector(AppDelegate.goToSectionAction(_:)), "\(i + 1)", target)
+            it.tag = i
+            go.addItem(it)
+        }
+        add(go, to: main)
+
         let window = NSMenu(title: "Window")
         window.addItem(item("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"))
         window.addItem(item("Zoom", #selector(NSWindow.performZoom(_:)), ""))
@@ -55,7 +64,8 @@ enum AppMenu {
 
         let help = NSMenu(title: "Help")
         help.addItem(item("Wren Help", #selector(AppDelegate.openHelpAction), "?", target))
-        help.addItem(item("Shortcuts and Commands", #selector(AppDelegate.openShortcutsAction), "", target))
+        help.addItem(item("Keyboard Shortcuts", #selector(AppDelegate.showShortcutsAction), "/", target))
+        help.addItem(item("Shortcuts and Commands (web)", #selector(AppDelegate.openShortcutsAction), "", target))
         NSApp.helpMenu = help
         add(help, to: main)
 

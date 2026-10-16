@@ -50,7 +50,7 @@ struct MainWindowView: View {
             case .delegate, .delegation: .delegate
             case .inbox, .mailMessage: .inbox
             case .connectors, .connector: .connectors
-            case .settings, .activity: .settings
+            case .settings, .activity, .shortcuts: .settings
             }
         }, set: { if let s = $0 { model.route = s.route } })
     }

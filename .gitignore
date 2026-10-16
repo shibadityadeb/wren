@@ -19,3 +19,6 @@ dist/
 
 # Maintainer provider registrations (never commit)
 config/providers.env
+
+# Source recording (161 MB). The site uses the compressed copy in website/assets/media/.
+assets/demo.mp4

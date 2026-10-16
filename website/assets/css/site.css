@@ -564,3 +564,21 @@ kbd { font: 600 13px/1 var(--sans); padding: 6px 8px; border-radius: 6px; backgr
 .download__box p:last-child { margin-bottom: 0; }
 .download__box [hidden] { display: none !important; }
 
+
+/* Demo video */
+.demo { margin: clamp(28px, 4vw, 44px) auto 0; max-width: 1040px; }
+.demo__video { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; background: #11100e; border-radius: 16px; box-shadow: 0 30px 60px -30px rgba(23, 21, 18, 0.45); }
+.demo figcaption { margin-top: 12px; text-align: center; }
+.demo--compact { margin: 8px 0 28px; }
+#demo .eyebrow, #demo h2, #demo .lede { text-align: center; margin-left: auto; margin-right: auto; }
+#demo .eyebrow { display: flex; justify-content: center; }
+
+/* Guide and shortcuts pages */
+.doc kbd { font: 600 13px/1 var(--sans); padding: 4px 7px; border-radius: 6px; background: var(--paper); color: var(--ink); border: 1px solid var(--line-strong); box-shadow: 0 1px 0 var(--line-strong); white-space: nowrap; }
+.doc ol { padding-left: 22px; }
+.table-wrap { overflow-x: auto; margin: 8px 0 16px; }
+.doc table { width: 100%; border-collapse: collapse; font-size: 16.5px; }
+.doc th, .doc td { text-align: left; vertical-align: top; padding: 11px 12px; border-bottom: 1px solid var(--line); }
+.doc th { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.doc td:first-child { white-space: nowrap; width: 34%; }
+@media (max-width: 560px) { .doc td:first-child { white-space: normal; } }

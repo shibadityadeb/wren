@@ -111,6 +111,7 @@ struct SettingsView: View {
                             }
                         }
                         Button("Activity log…") { model.route = .activity }
+                        Button("Keyboard shortcuts…") { model.route = .shortcuts }
                         Text("Wren acts only on your instruction, a rule above, or your confirmation. Model suggestions and text inside emails or pages never count as permission.")
                             .font(.caption).foregroundStyle(.secondary)
                     }

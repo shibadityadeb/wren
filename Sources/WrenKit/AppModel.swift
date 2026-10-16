@@ -14,7 +14,7 @@ enum ModelDownload: Equatable {
 }
 
 enum Route: Equatable { case overview, list, detail(UUID), settings, briefing, checkIn, activity, goals, goal(UUID), review, aiSetup,
-                         connectors, connector(ConnectorID), delegate, delegation(UUID), inbox, mailMessage(String) }
+                         connectors, connector(ConnectorID), delegate, delegation(UUID), inbox, mailMessage(String), shortcuts }
 
 /// A request waiting for the user to approve or cancel, shown as a native alert.
 struct PendingConfirmation: Identifiable {

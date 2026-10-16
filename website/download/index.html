@@ -33,11 +33,12 @@
     </button>
     <nav class="nav" id="site-nav" aria-label="Main">
       <ul class="nav__links">
+        <li><a href="/#demo">Demo</a></li>
         <li><a href="/#what-it-does">What it does</a></li>
         <li><a href="/#connectors">Connectors</a></li>
-        <li><a href="/#why-wren">Why Wren</a></li>
+        <li><a href="/guide/">Guide</a></li>
+        <li><a href="/shortcuts/">Shortcuts</a></li>
         <li><a href="/#privacy">Privacy</a></li>
-        <li><a href="/#about">About</a></li>
         <li><a href="/download/">Download</a></li>
         <li><a href="https://github.com/shibadityadeb/wren" rel="noopener" target="_blank">GitHub <span aria-hidden="true">↗</span><span class="sr-only">(opens in a new tab)</span></a></li>
       </ul>
@@ -50,6 +51,14 @@
   <p class="eyebrow">Download</p>
   <h1>Get the Wren preview</h1>
   <p class="lede">Wren is free during the preview. Sign in with Google to download it, so the developer knows who is trying it and can reach early users about important fixes.</p>
+
+  <figure class="demo demo--compact">
+    <video class="demo__video" controls preload="metadata" playsinline poster="/assets/media/wren-demo-poster.jpg" width="1280" height="720">
+      <source src="/assets/media/wren-demo.mp4" type="video/mp4">
+      <a href="/assets/media/wren-demo.mp4">Download the demo video (MP4, 13 MB)</a>
+    </video>
+    <figcaption class="small">See how Wren looks before you download: a 68-second recording of the preview.</figcaption>
+  </figure>
 
   <section id="get" class="download__box" aria-live="polite">
     <div data-state="start">
@@ -74,7 +83,7 @@
   <h2 id="requirements">Requirements</h2>
   <ul>
     <li>macOS 14 Sonoma or later, on Apple Silicon or Intel.</li>
-    <li>ChatGPT features need a ChatGPT Plus or Pro plan. Local AI is optional and uses <a href="https://ollama.com/download" rel="noopener">Ollama</a>.</li>
+    <li>Asking ChatGPT works with any ChatGPT account, in your browser. Running ChatGPT inside Wren needs a Plus or Pro plan (<a href="/guide/#chatgpt">details</a>). Local AI is optional and uses <a href="https://ollama.com/download" rel="noopener">Ollama</a>.</li>
   </ul>
 
   <h2 id="install">Install</h2>
@@ -84,6 +93,7 @@
     <li>Go to <strong>System Settings › Privacy &amp; Security</strong>, find the message about Wren and click <strong>Open Anyway</strong>.</li>
     <li>Optional: check the download with <code>shasum -a 256 -c Wren-macOS-universal-unsigned.dmg.sha256</code> in the folder that holds both files.</li>
   </ol>
+  <p>Next: the <a href="/guide/">step-by-step guide</a> walks through notifications, your first reminder, Gmail and ChatGPT. Every shortcut is on the <a href="/shortcuts/">Shortcuts page</a>.</p>
   <p class="small">Wren is a preview built by one developer. Your data stays on your Mac; the <a href="/privacy/">Privacy Policy</a> explains exactly what leaves it and when.</p>
 </main>
 
@@ -91,7 +101,7 @@
   <div class="wrap">
     <div class="footer__bottom" style="margin-top:0;border-top:0;padding-top:0">
       <a class="brand" href="/" aria-label="Wren home"><img src="/assets/brand/wren-icon-128@2x.png" alt="" width="32" height="32"><span>Wren</span></a>
-      <span><a href="/">Home</a> · <a href="/download/">Download</a> · <a href="/privacy/">Privacy Policy</a> · <a href="https://github.com/shibadityadeb/wren" rel="noopener" target="_blank">GitHub ↗</a></span>
+      <span><a href="/">Home</a> · <a href="/download/">Download</a> · <a href="/guide/">Guide</a> · <a href="/shortcuts/">Shortcuts</a> · <a href="/privacy/">Privacy Policy</a> · <a href="https://github.com/shibadityadeb/wren" rel="noopener" target="_blank">GitHub ↗</a></span>
       <span>© 2026 Shibaditya Deb</span>
     </div>
   </div>
