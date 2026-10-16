@@ -258,7 +258,7 @@ extension AppModel {
                 if useApp, let app = ConnectorHub.chatGPTAppURL {
                     NSWorkspace.shared.openApplication(at: app, configuration: .init())
                 } else {
-                    guard NSWorkspace.shared.open(url) else { throw ConnectorError.badResponse("macOS couldn't open the browser") }
+                    guard openChatGPTPage(url) else { throw ConnectorError.badResponse("macOS couldn't open the browser") }
                 }
             }
             record.prompt = prompt
@@ -303,7 +303,7 @@ extension AppModel {
     /// again) when no conversation is linked.
     func reopenInChatGPT(_ id: UUID) async -> String? {
         guard let r = asks?.record(id) else { return "That request no longer exists." }
-        if let url = r.conversationURL { NSWorkspace.shared.open(url); return nil }
+        if let url = r.conversationURL { openChatGPTPage(url); return nil }
         // Not sent yet: open ChatGPT with the question again (same record, no new request).
         let launch = ChatGPTWeb.launch(r.prompt ?? r.task, prefill: settings.chatgptPrefill && settings.chatgptDestination != "app" && r.webState?.awaitsSending != false)
         return await openInChatGPT(prompt: r.prompt ?? r.task, url: launch.url, record: r, channel: .popover, copy: launch.method == .clipboard)
