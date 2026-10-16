@@ -129,6 +129,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Already published (for example built and uploaded by the maintainer): keep it. Never replace
+          # an installer people may have downloaded and checked against its SHA-256.
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "::notice::Release $GITHUB_REF_NAME already exists; kept as is (its assets weren't replaced)."
+            exit 0
+          fi
           FLAGS=()
           [[ "${{ steps.channel.outputs.prerelease }}" == 1 ]] && FLAGS+=(--prerelease)
           TITLE="Wren ${GITHUB_REF_NAME#v}"

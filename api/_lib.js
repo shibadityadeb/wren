@@ -7,7 +7,7 @@
 //   WREN_RELEASE_TAG    optional: the GitHub release to hand out (default below).
 
 // The release the download page hands out. Update when a new release is published, or set WREN_RELEASE_TAG.
-const DEFAULT_TAG = "v0.12.1-preview.1";
+const DEFAULT_TAG = "v0.12.3-preview.1";
 const REPO = "https://github.com/shibadityadeb/wren";
 const ASSET = "Wren-macOS-universal-unsigned.dmg";
 

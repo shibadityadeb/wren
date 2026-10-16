@@ -339,6 +339,7 @@ struct ConnectorDetailView: View {
                  ? "The ChatGPT website (default): Wren opens ChatGPT in your browser with your request, and you send it there. It becomes a normal ChatGPT conversation you can continue and find in your history. OpenAI offers no supported way for an app to create that conversation or read its answer, so Wren shows it as awaiting your submission and never as done. Link the conversation to return to it in one click."
                  : "Connected ChatGPT in Wren: Wren sends the request through your plan (Sign in with ChatGPT above) and shows the real answer and completion here. The request and answer are stored in Wren; they aren't a ChatGPT conversation and don't appear in ChatGPT's history.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            ChatGPTProfilePicker(model: model)
             Toggle("Let Wren open ChatGPT in my browser with my request", isOn: Binding(get: { c.handoffEnabled }, set: { c.handoffEnabled = $0; model.connectorsChanged() }))
                 .font(.callout)
             if c.handoffEnabled {
@@ -608,6 +609,30 @@ struct GoogleAccountCard: View {
             Text(on ? "Granted" : "Not granted").font(.caption).foregroundStyle(.secondary)
             Spacer()
             if !on { Button("Add…") { model.connectGoogle(scopes: [scope]) }.controlSize(.small) }
+        }
+    }
+}
+
+/// "Open ChatGPT in": which browser profile, so requests reach the ChatGPT account you want
+/// (personal rather than school or work). Shown only when the default browser has several profiles.
+struct ChatGPTProfilePicker: View {
+    var model: AppModel
+    var body: some View {
+        let profiles = ChatGPTBrowser.profiles
+        if !profiles.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Picker("Open ChatGPT in", selection: Binding(get: { model.settings.chatgptBrowserProfile ?? "" },
+                                                             set: { model.settings.chatgptBrowserProfile = $0.isEmpty ? nil : $0; model.connectorsChanged() })) {
+                    Text("Whichever \(BrowserTabs.defaultBrowserName) profile is in front").tag("")
+                    ForEach(profiles) { Text($0.label).tag($0.directory) }
+                }
+                .frame(maxWidth: 460)
+                Text("\(BrowserTabs.defaultBrowserName) profiles each have their own ChatGPT sign-in. Choose the one signed in to the ChatGPT account you want, for example your personal one rather than a school or work profile. Asking ChatGPT, opening a linked conversation and “Continue with ChatGPT” all use it.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                if let p = model.settings.chatgptBrowserProfile, !profiles.contains(where: { $0.directory == p }) {
+                    Text("The chosen profile no longer exists in \(BrowserTabs.defaultBrowserName); ChatGPT opens in the profile in front.").font(.caption).foregroundStyle(.orange)
+                }
+            }
         }
     }
 }
