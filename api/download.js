@@ -6,7 +6,7 @@ const { release, config, send } = require("./_lib.js");
 module.exports = async (req, res) => {
   if (req.method !== "POST") return send(res, 405, { error: "Use POST." });
   const c = config();
-  if (!c.ok) return send(res, 503, { error: "Downloads aren't set up yet. Please try again later." });
+  if (!c.ok) return send(res, 503, { error: "Downloads aren't set up yet. Please try again later.", setup: c.problem });
 
   let body = req.body;
   if (typeof body === "string") { try { body = JSON.parse(body); } catch { body = {}; } }

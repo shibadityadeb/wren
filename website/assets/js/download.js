@@ -18,7 +18,17 @@
   var problem = hash.get("error_description") || query.get("error_description");
   if (token || problem || query.get("setup")) history.replaceState(null, "", location.pathname);
 
-  if (query.get("setup") === "missing") return fail("Downloads aren't set up on this site yet. Please check back soon.");
+  // Which setting is wrong (a code from /api/signin/, never a value), so the site owner can fix it.
+  var why = {
+    "url-missing": "SUPABASE_URL isn't set for this deployment.",
+    "url-database": "SUPABASE_URL is a database connection string. Use the Project URL, https://<project-ref>.supabase.co, and change the database password if that string was shared.",
+    "url-invalid": "SUPABASE_URL isn't a Supabase project URL (https://<project-ref>.supabase.co).",
+    "key-missing": "SUPABASE_ANON_KEY isn't set for this deployment.",
+    "key-secret": "SUPABASE_ANON_KEY holds a secret (service_role) key. Use the anon or publishable key, and rotate the secret one.",
+    "key-invalid": "SUPABASE_ANON_KEY isn't a Supabase anon or publishable key.",
+    "host": "This address couldn't be read from the request."
+  }[query.get("why")];
+  if (query.get("setup") === "missing") return fail("Downloads aren't set up on this site yet. Please check back soon." + (why ? " (Site setup: " + why + " Redeploy after changing it.)" : ""));
   if (problem) return fail("Google sign-in didn't finish: " + problem.replace(/\+/g, " ").slice(0, 160));
   if (!token) return show("start");
 

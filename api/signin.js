@@ -8,7 +8,7 @@ module.exports = (req, res) => {
   res.setHeader("Cache-Control", "no-store");
   if (!c.ok || !origin) {
     res.statusCode = 302;
-    res.setHeader("Location", "/download/?setup=missing");
+    res.setHeader("Location", "/download/?setup=missing&why=" + encodeURIComponent(c.problem || "host"));
     return res.end();
   }
   const back = `${origin}/download/`;

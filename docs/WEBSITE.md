@@ -128,3 +128,17 @@ Supabase Storage bucket with short-lived signed links.
 6. The download list is in **Supabase › Table Editor › download_requests**. Only the project owner can read it.
 
 Until steps 1–5 are done, the page says "Downloads aren't set up on this site yet" and hands out nothing.
+It also names the setting that's wrong (never its value), for example "SUPABASE_URL is a database
+connection string". To check a deployment without signing in, open `/api/status/`:
+`{"downloads":"ready"}` or `{"downloads":"not set up","problem":"url-missing"}`.
+
+| `problem` | Meaning |
+|---|---|
+| `url-missing`, `key-missing` | Not set for this environment (Production and Preview are separate), or set after the last build: redeploy |
+| `url-database` | `SUPABASE_URL` is the `postgres://…` connection string. Use the Project URL, and change the database password if the string was shared |
+| `url-invalid` | Not `https://<project-ref>.supabase.co`. Quotes, spaces and a trailing `/rest/v1` are fine |
+| `key-secret` | The `service_role` or `sb_secret_…` key. Use the anon or `sb_publishable_…` key, and rotate the secret one |
+| `key-invalid` | Not a Supabase anon or publishable key |
+
+Production deployments always build (`website/tools/vercel-ignore.sh`), so a redeploy after changing a
+variable takes effect. Previews of commits that don't touch the site are skipped.
