@@ -159,15 +159,15 @@ extension AppModel {
         switch f.action {
         case .open:
             if let url = parent.conversationURL {
-                NSWorkspace.shared.open(url)
+                openChatGPTPage(url)
                 return answer("Opened the ChatGPT conversation", "\(title), at its linked conversation.")
             }
             switch parent.destination {
             case .chatgptHandoff:
-                NSWorkspace.shared.open(ChatGPTWeb.home)
+                openChatGPTPage(ChatGPTWeb.home)
                 return answer("Opened ChatGPT", "\(title) has no conversation link in Wren, so Wren can't open that exact chat. Find it in ChatGPT's history, then paste its link on the request in Wren.")
             case .chatgptPlan where f.namesChatGPT:
-                NSWorkspace.shared.open(ChatGPTWeb.home)
+                openChatGPTPage(ChatGPTWeb.home)
                 return answer("Opened ChatGPT", "\(title) ran in Wren with connected ChatGPT, so there's no ChatGPT conversation to open; its result is in Wren. To take it to the website, say “continue that research in ChatGPT”.")
             case .localModel where f.namesChatGPT:
                 // Named GPT: take the earlier request to the ChatGPT website (a new conversation there).
