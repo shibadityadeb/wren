@@ -207,7 +207,7 @@ struct DelegationDetailView: View {
             }
             if r.destination != .chatgptHandoff {
                 // Honest: opens the ChatGPT website, not this request (an in-Wren request has no conversation).
-                Button("Open ChatGPT website") { NSWorkspace.shared.open(ChatGPTWeb.home) }
+                Button("Open ChatGPT website") { model.openChatGPTPage(ChatGPTWeb.home) }
                     .help("Opens ChatGPT. This request ran in Wren, so it isn't in your ChatGPT history.")
             }
         }

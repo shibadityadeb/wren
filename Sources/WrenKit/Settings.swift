@@ -138,6 +138,13 @@ final class WrenSettings {
     }
     /// Watch only the ChatGPT tab Wren opened (its address, via the browser's AppleScript) to know
     /// when the question was really sent and save the real conversation link. Opt-in.
+    /// The browser profile ChatGPT opens in ("Default", "Profile 1"…), so it's the ChatGPT account
+    /// the user chose rather than whichever profile was last in front. nil: the browser decides.
+    var chatgptBrowserProfile: String? {
+        get { d.string(forKey: "chatgptBrowserProfile") }
+        set { d.set(newValue, forKey: "chatgptBrowserProfile") }
+    }
+
     var chatgptDetectConversation: Bool {
         get { d.bool(forKey: "chatgptDetectConversation") }
         set { d.set(newValue, forKey: "chatgptDetectConversation") }
@@ -178,7 +185,7 @@ final class WrenSettings {
     /// Every preference key Wren writes. "Reset preferences" removes exactly these.
     static let allKeys = ["hotKeyEnabled", "hotKey", "ollamaModel", "useModel", "dateOnlyReminderHour", "captureDraft",
                           "dailySettings", "launchAtLogin", "insightSettings", "notificationPause", "lastAutomaticBackup",
-                          "voiceEnabled", "voiceHotKey", "pushToTalkEnabled", "pushToTalkHotKey", "voiceCheckBeforeRunning", "wakeWordEnabled", "macCalendarEnabled", "chatgptEnabled", "chatgptDestination", "chatgptModel", "openaiModel", "gmailCacheEnabled", "importantSenders", "mailPreferences", "voiceReviewFirst", "notificationSounds", "chatgptWebEnabled", "chatgptMode", "chatgptPrefill", "chatgptPrefillCheck", "chatgptPrefillLink", "chatgptDetectConversation", "deadlineDayBefore", "chatgptSendForMe"]
+                          "voiceEnabled", "voiceHotKey", "pushToTalkEnabled", "pushToTalkHotKey", "voiceCheckBeforeRunning", "wakeWordEnabled", "macCalendarEnabled", "chatgptEnabled", "chatgptDestination", "chatgptModel", "openaiModel", "gmailCacheEnabled", "importantSenders", "mailPreferences", "voiceReviewFirst", "notificationSounds", "chatgptWebEnabled", "chatgptMode", "chatgptPrefill", "chatgptPrefillCheck", "chatgptPrefillLink", "chatgptDetectConversation", "deadlineDayBefore", "chatgptSendForMe", "chatgptBrowserProfile"]
 
     func resetAll() { Self.allKeys.forEach(d.removeObject(forKey:)) }
 
